@@ -410,6 +410,13 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         return this.defaultMQPushConsumerImpl.getConsumerStatsManager();
     }
 
+    /**
+     * 消费不成功，进行重发消息
+     *
+     * @param msg
+     * @param context
+     * @return
+     */
     public boolean sendMessageBack(final MessageExt msg, final ConsumeConcurrentlyContext context) {
 
         // 1、注意这里：默认为0，其实一直都是0，其它地方没有修改。这表示RocketMQ延迟消息的 延迟级别
@@ -513,6 +520,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             ConsumeConcurrentlyStatus status = null;
 
             // todo 当消息为重试消息，设置 Topic 为原始 Topic
+            // todo 疑问：重试消息主题都变了，消费者怎么拉取？因为消费者在订阅 Topic 时，还会自动订阅对应的重试主题，因此可以拉取到
             defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
 
             // Hook

@@ -108,7 +108,7 @@ public class NamesrvStartup {
         MixAll.properties2Object(ServerUtil.commandLine2Properties(commandLine), namesrvConfig);
 
         // 集成开发环境，手动指定 rocketmq 目录，启动当中需要读取该目录下的配置文件
-        namesrvConfig.setRocketmqHome("/Users/huanglibao/rocketmq/distribution");
+        namesrvConfig.setRocketmqHome("/Users/huanglibao/study/rocketmq/distribution");
 
         if (null == namesrvConfig.getRocketmqHome()) {
             System.out.printf("Please set the %s variable in your environment to match the location of the RocketMQ installation%n", MixAll.ROCKETMQ_HOME_ENV);

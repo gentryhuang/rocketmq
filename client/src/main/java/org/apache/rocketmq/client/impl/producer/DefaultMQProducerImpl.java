@@ -102,7 +102,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     private final Random random = new Random();
     private final DefaultMQProducer defaultMQProducer;
 
-    // Topic 发布信息 - 由路由信息转换而得到的
+    /**
+     * Producer 本地缓存的 Topic 信息表 - 由路由信息转换而得到的 （todo 注意：起始的时候是全部的队列）
+     *
+     * 根据Topic路由设置该字段的情况如下：
+     * @see MQClientInstance#updateTopicRouteInfoFromNameServer(java.lang.String, boolean, org.apache.rocketmq.client.producer.DefaultMQProducer)
+     */
     private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable = new ConcurrentHashMap<String, TopicPublishInfo>();
 
     private final ArrayList<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
@@ -213,7 +218,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             null);
                 }
 
-                // 存储 topic 发布信息，此时 topic 为 TBW102
+                // 存储 topic 发布信息，此时 topic 为 TBW102。 todo 这个是生产者启动就会缓存一份
+                // todo 只缓存了 TBW102（这里只有key（topic），实际也无详细信息，还是要从NameSrv获取
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
                 if (startFactory) {
@@ -815,13 +821,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      */
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
         // 从本地缓存中尝试获取 Topic 路由信息
+        // Producer启动后，会添加默认的topic：TBW102，但具体的信息还是没有，需要从NameSrv获取
         TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
 
         // 本地缓存没有命中，则尝试从 NameServer 获取一次
         if (null == topicPublishInfo || !topicPublishInfo.ok()) {
             this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
 
-            // 从 namesrv 更新 topic 路由信息
+            // 未获取到，从NameSrv获取该topic的信息
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
 
             // 再次获取 Topic 路由信息
@@ -832,7 +839,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
 
-            // 如果未找到路由信息，则再次尝试使用默认的 topic 去找路由配置信息
+            // 如果未找到路由信息，则再次尝试使用默认的 topic 去找路由配置信息。然后将默认的路由信息作为 topic 的路由信息。
+            // 即 向NameSrv获取TBW102的信息，当成是TopicTest的信息
             // 使用 {@link DefaultMQProducer#createTopicKey} 对应的 Topic发布信息。用于 Topic发布信息不存在 && Broker支持自动创建Topic
         } else {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);

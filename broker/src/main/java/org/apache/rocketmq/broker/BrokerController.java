@@ -150,6 +150,8 @@ public class BrokerController {
 
     private RemotingServer remotingServer;
     private RemotingServer fastRemotingServer;
+
+    // Topic 配置管理对象
     private TopicConfigManager topicConfigManager;
     private ExecutorService sendMessageExecutor;
     private ExecutorService pullMessageExecutor;
@@ -174,6 +176,15 @@ public class BrokerController {
     private Future<?> slaveSyncFuture;
     private Map<Class, AccessValidator> accessValidatorMap = new HashMap<Class, AccessValidator>();
 
+
+    /**
+     * 构造非常重要
+     *
+     * @param brokerConfig
+     * @param nettyServerConfig
+     * @param nettyClientConfig
+     * @param messageStoreConfig
+     */
     public BrokerController(
             final BrokerConfig brokerConfig,
             final NettyServerConfig nettyServerConfig,
@@ -185,6 +196,11 @@ public class BrokerController {
         this.nettyClientConfig = nettyClientConfig;
         this.messageStoreConfig = messageStoreConfig;
         this.consumerOffsetManager = new ConsumerOffsetManager(this);
+
+        /**
+         * 创建 Topic 配置管理对象
+         * 1 在初始化时，会设置 {#link org.apache.rocketmq.broker.topic.TopicConfigManager#topicConfigTable} 属性，如 TBW102 到对应的 TopicConfig 映射
+         */
         this.topicConfigManager = new TopicConfigManager(this);
         this.pullMessageProcessor = new PullMessageProcessor(this);
         this.pullRequestHoldService = new PullRequestHoldService(this);
@@ -248,7 +264,6 @@ public class BrokerController {
 
         // todo 对 offset 进行加载，然后将文件内容更新到 org.apache.rocketmq.broker.offset.ConsumerOffsetManager.offsetTable 缓存中
         result = result && this.consumerOffsetManager.load();
-
         result = result && this.subscriptionGroupManager.load();
         result = result && this.consumerFilterManager.load();
 
@@ -869,7 +884,7 @@ public class BrokerController {
     }
 
     /**
-     * 启动
+     * 启动 Broker
      *
      * @throws Exception
      */
@@ -913,6 +928,9 @@ public class BrokerController {
             this.registerBrokerAll(true, false, true);
         }
 
+
+        // Broker 定期向 NameSrv 上报
+        // 即 Broker在启动时向Nameserver注册存储在该服务器上的路由信息，并每隔30s向Nameserver发送心跳包，并更新路由信息。
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -954,12 +972,25 @@ public class BrokerController {
         doRegisterBrokerAll(true, false, topicConfigSerializeWrapper);
     }
 
+    /**
+     * 上报到 NameSrv
+     *
+     * @param checkOrderConfig
+     * @param oneway
+     * @param forceRegister    是否强制上报
+     */
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
+        // 构建 Topic 的包装信息
+        // 上报的内容包括 TopicConfigSerializeWrapper，它的结构其实跟${user.home}\store\config\topics.json是一样的
+        // todo 即将 Broker 缓存中的 org.apache.rocketmq.broker.topic.TopicConfigManager.topicConfigTable 上报到 NameSvr
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
         if (!PermName.isWriteable(this.getBrokerConfig().getBrokerPermission())
                 || !PermName.isReadable(this.getBrokerConfig().getBrokerPermission())) {
+
             ConcurrentHashMap<String, TopicConfig> topicConfigTable = new ConcurrentHashMap<String, TopicConfig>();
+
+            // 遍历 Topic 配置表，加入到 topicConfigTable ，用于作为上报到 NameSrv 的数据
             for (TopicConfig topicConfig : topicConfigWrapper.getTopicConfigTable().values()) {
                 TopicConfig tmp =
                         new TopicConfig(topicConfig.getTopicName(), topicConfig.getReadQueueNums(), topicConfig.getWriteQueueNums(),
@@ -974,12 +1005,16 @@ public class BrokerController {
                 this.brokerConfig.getBrokerName(),
                 this.brokerConfig.getBrokerId(),
                 this.brokerConfig.getRegisterBrokerTimeoutMills())) {
+
+            // 当前 Broker 上报 Topic 信息（包括 TBW102）到 NameSrv
             doRegisterBrokerAll(checkOrderConfig, oneway, topicConfigWrapper);
         }
     }
 
     private void doRegisterBrokerAll(boolean checkOrderConfig, boolean oneway,
                                      TopicConfigSerializeWrapper topicConfigWrapper) {
+
+        // 上报 Broker 到 NamerServ
         List<RegisterBrokerResult> registerBrokerResultList = this.brokerOuterAPI.registerBrokerAll(
                 this.brokerConfig.getBrokerClusterName(),
                 this.getBrokerAddr(),

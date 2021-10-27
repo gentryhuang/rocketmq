@@ -481,7 +481,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     public boolean sendMessageBack(final MessageExt msg) {
         try {
             // max reconsume times exceeded then send to dead letter queue.
-            // 创建消息，注意 Topic
+            // 创建消息，注意 Topic，重试Topic
             Message newMsg = new Message(MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup()), msg.getBody());
             String originMsgId = MessageAccessor.getOriginMessageId(msg);
             MessageAccessor.setOriginMessageId(newMsg, UtilAll.isBlank(originMsgId) ? msg.getMsgId() : originMsgId);
@@ -602,7 +602,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         // 获取指定大小的消息
                         List<MessageExt> msgs = this.processQueue.takeMessages(consumeBatchSize);
 
-                        // 处理消息的 Topic
+                        // 处理消息的 Topic，还原 Topic
                         defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
 
                         // 有消息

@@ -114,7 +114,7 @@ public class MQClientInstance {
     private final MQAdminImpl mQAdminImpl;
 
     /**
-     * Topic 路由信息
+     * Topic 路由信息（原始的，从 NameSrv 拉取到的）
      */
     private final ConcurrentMap<String/* Topic */, TopicRouteData> topicRouteTable = new ConcurrentHashMap<String, TopicRouteData>();
 
@@ -262,6 +262,7 @@ public class MQClientInstance {
                     }
 
                     // 根据当前队列的写队列数，创建对应个数的 MessageQueue
+                    // todo 新版支持 16 个
                     for (int i = 0; i < qd.getWriteQueueNums(); i++) {
                         // 1 对应所属的 Topic
                         // 2 对应所属的 Broker
@@ -271,7 +272,7 @@ public class MQClientInstance {
                     }
                 }
             }
-
+            // 非有序消息
             info.setOrderTopic(false);
         }
 
@@ -279,15 +280,24 @@ public class MQClientInstance {
     }
 
     /**
+     * Topic 路由信息转为订阅信息
+     *
      * @param topic
      * @param route
      * @return
      */
     public static Set<MessageQueue> topicRouteData2TopicSubscribeInfo(final String topic, final TopicRouteData route) {
         Set<MessageQueue> mqList = new HashSet<MessageQueue>();
+
+        // 获取 topic 的队列信息
         List<QueueData> qds = route.getQueueDatas();
+
+        // 遍历队列集合
         for (QueueData qd : qds) {
+
+            // 是否具有读权限
             if (PermName.isReadable(qd.getPerm())) {
+                // 有多少个读队列，就创建多少个 MessageQueue
                 for (int i = 0; i < qd.getReadQueueNums(); i++) {
                     MessageQueue mq = new MessageQueue(topic, qd.getBrokerName(), i);
                     mqList.add(mq);
@@ -318,7 +328,7 @@ public class MQClientInstance {
                     // Start request-response channel
                     this.mQClientAPIImpl.start();
 
-                    // 开启各种定时任务
+                    // todo 开启各种定时任务
                     // Start various schedule tasks
                     this.startScheduledTask();
 
@@ -428,6 +438,12 @@ public class MQClientInstance {
         return clientId;
     }
 
+    /**
+     * 从 NameSrv 更新 Topic 路由信息，具体如下：
+     * 1 如果是消费方，则获取订阅的数据，取出订阅的 Topic
+     * 2 如果是生产者，则获取 Topic 发布信息，取出对应的 Topic
+     * 3 根据 Topic 从 NameSrv 拉取 Topic 路由信息
+     */
     public void updateTopicRouteInfoFromNameServer() {
         Set<String> topicList = new HashSet<String>();
 
@@ -732,9 +748,12 @@ public class MQClientInstance {
     /**
      * 尝试从 NameServer 获取配置信息并更新到本地：
      * 1 根据 Topic 从 NameServer 获取 Topic 路由信息
-     * 2
-     * <p>
-     * todo 重要
+     * todo 特别说明：
+     * 1 在 Broker 启动时和运行期间会定期向每个 NameSrv 上报自身信息以及 Topic 信息
+     * 2 其中在 Broker 启动时会初始化一些固定的 Topic 信息，如 TBW102 ，然后向 NameSrv 上报，具体参考：
+     * org.apache.rocketmq.broker.BrokerController#start()
+     * 3 因此该方法获取 TBW102 的路由信息一定可以获取到，因为Broker启动时默认创建的，Broker启动时会向NameSrv注册。
+     * 4 生产者发送消息时指定的 Topic 在首次发送消息的时候，从 NameSrv 是拉取不到的，因为它根据就没有上报过 NameSrv
      *
      * @param topic
      * @param isDefault
@@ -749,12 +768,13 @@ public class MQClientInstance {
                 try {
                     TopicRouteData topicRouteData;
 
+                    // todo 将入参的topic转换为默认的TBW102，获取TBW102的信息
                     // 获取默认 topic 的配置信息，通过与 NameServer 的长连接 Channel 发送 RequestCode.GET_ROUTEINFO_BY_TOPIC 命令获取配置信息
-                    // TBW102
                     if (isDefault && defaultMQProducer != null) {
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                                 1000 * 3);
 
+                        // 获取成功，修正读写队列数
                         if (topicRouteData != null) {
                             // 获取队列信息
                             for (QueueData data : topicRouteData.getQueueDatas()) {
@@ -790,11 +810,13 @@ public class MQClientInstance {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
 
-                            // 1 todo Update Pub info 更新消息生产者的缓存（消费队列信息）
+                            // 1 todo Update Pub info 将topic的route信息转换为publish信息。实际是用了TBW102的route信息，给 我们指定的 Topic 用
+                            // todo 即我们指定的 Topic 继承了 TBW102 的路由信息。因此我们指定的 Topic 的信息就有了
                             {
                                 // topic 路由信息转换成 topic 发布信息
                                 // todo 注意这里创建的是具有写权限的队列
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
+                                // 标记下，表示 Topic 路由信息
                                 publishInfo.setHaveTopicRouterInfo(true);
 
                                 // 遍历生产者信息，并尝试更新 topic 发布信息
@@ -804,7 +826,7 @@ public class MQClientInstance {
                                     MQProducerInner impl = entry.getValue();
                                     if (impl != null) {
 
-                                        // todo 更新生产者实例缓存的 Topic 发布信息。 注意其中是写 队列
+                                        // todo 更新生产者实例缓存的 Topic 发布信息到本地。 注意其中是写 队列
                                         impl.updateTopicPublishInfo(topic, publishInfo);
                                     }
                                 }

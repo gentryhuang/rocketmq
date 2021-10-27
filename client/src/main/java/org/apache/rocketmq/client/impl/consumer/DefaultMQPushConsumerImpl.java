@@ -106,6 +106,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
      */
     private final DefaultMQPushConsumer defaultMQPushConsumer;
     /**
+     * 每个 Consumer 的对象都持有一个 RebalanceImpl 实例，每个RebalanceImpl实例也只服务于一个Consumer。Consumer负载均衡相关的操作全部都委托给RebalanceImpl对象
      * 均衡消息队列服务，负载分配当前 Consumer 可消费的消息队列( MessageQueue )。当有新的 Consumer 的加入或移除，都会重新分配消息队列。
      */
     private final RebalanceImpl rebalanceImpl = new RebalancePushImpl(this);
@@ -654,17 +655,25 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         } catch (Exception e) {
             log.error("sendMessageBack Exception, " + this.defaultMQPushConsumer.getConsumerGroup(), e);
 
+            // 基于原来消息 msg 构建新的消息，设置新的主题，即重试主题
             Message newMsg = new Message(MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup()), msg.getBody());
 
+            // 原有消息 id
             String originMsgId = MessageAccessor.getOriginMessageId(msg);
             MessageAccessor.setOriginMessageId(newMsg, UtilAll.isBlank(originMsgId) ? msg.getMsgId() : originMsgId);
 
             newMsg.setFlag(msg.getFlag());
             MessageAccessor.setProperties(newMsg, msg.getProperties());
+
+            // 保留原有的 Topic 到 RETRY_TOPIC 属性中
             MessageAccessor.putProperty(newMsg, MessageConst.PROPERTY_RETRY_TOPIC, msg.getTopic());
+            // 设置重试次数到 RECONSUME_TIME 属性中
             MessageAccessor.setReconsumeTime(newMsg, String.valueOf(msg.getReconsumeTimes() + 1));
+            // 设置系统允许最大的重试次数
             MessageAccessor.setMaxReconsumeTimes(newMsg, String.valueOf(getMaxReconsumeTimes()));
             MessageAccessor.clearProperty(newMsg, MessageConst.PROPERTY_TRANSACTION_PREPARED);
+
+            // 设置延迟级别，基于重试次数
             newMsg.setDelayTimeLevel(3 + msg.getReconsumeTimes());
 
             this.mQClientFactory.getDefaultMQProducer().send(newMsg);
@@ -729,7 +738,11 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 // 检查配置
                 this.checkConfig();
 
-                // copy 订阅配置
+
+                /**
+                 * 1 构建 Topic 订阅信息——SubscriptionData，并添加至 RebalanceImpl 的订阅信息中
+                 * todo 2 并基于消费者所在的组创建重试主题的订阅数据
+                 */
                 this.copySubscription();
 
                 // 如果是集群消费，设置 instanceName 为一个字符串化的数字，如 10072
@@ -740,6 +753,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 // 获取 MQClient 对象，clientId 为 ip@instanceName ，如 192。168。0。1@10072
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQPushConsumer, this.rpcHook);
+
+
+                /* ------ 丰富 rebalanceImpl 对象的属性，完成后就具备了负载均衡的能力 */
 
                 // 为负载均衡器设置消费组名，用来为指定组下的消费者分配队列
                 this.rebalanceImpl.setConsumerGroup(this.defaultMQPushConsumer.getConsumerGroup());
@@ -785,7 +801,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 // todo
                 // 加载 offset
-                // 集群模式下，不需要加载。实际读取消费进度时，从 Broker 获取。在 rebalance 完成对messageQueue的分配之后会对messageQueue对应的消费位置offset进行更新。
+                // 集群模式下，不需要加载。实际读取消费进度时，从 Broker 获取。
                 this.offsetStore.load();
 
                 // 根据消息监听器类型，创建不同的 消息消费服务
@@ -806,6 +822,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 // 消息消费服务启动
                 this.consumeMessageService.start();
 
+                //  向客户端实例中设置消费者
                 boolean registerOK = mQClientFactory.registerConsumer(this.defaultMQPushConsumer.getConsumerGroup(), this);
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
@@ -831,11 +848,15 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 break;
         }
 
+        // 基于订阅信息，更新路由信息
         this.updateTopicSubscribeInfoWhenSubscriptionChanged();
         this.mQClientFactory.checkClientInBroker();
+
+        /* Consumer启动成功，立即向所有Broker发送心跳 */
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         // todo 唤醒 均衡消息队列任务(RebalanceService)，负责当前 Consumer 可消费的消息队列
+        // todo 即 Consumer上线会立即触发一次负载均衡
         this.mQClientFactory.rebalanceImmediately();
     }
 
@@ -1016,18 +1037,21 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
     }
 
     /**
-     * 复制订阅关系
+     * 根据消费者的订阅关系，构建订阅对象
      * todo 重要：当集群消费时，加入当前消费组重试消息的订阅
      *
      * @throws MQClientException
      */
     private void copySubscription() throws MQClientException {
         try {
+            // 获取消费者的订阅关系
             Map<String, String> sub = this.defaultMQPushConsumer.getSubscription();
             if (sub != null) {
                 for (final Map.Entry<String, String> entry : sub.entrySet()) {
                     final String topic = entry.getKey();
                     final String subString = entry.getValue();
+
+                    // 构建订阅数据，并缓存到消费方的 RebalanceImpl 负载均衡器中
                     SubscriptionData subscriptionData = FilterAPI.buildSubscriptionData(topic, subString);
                     this.rebalanceImpl.getSubscriptionInner().put(topic, subscriptionData);
                 }
@@ -1041,7 +1065,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 case BROADCASTING:
                     break;
                 case CLUSTERING:
+                    // todo 为当前消费者组创建一个重试 Topic
                     final String retryTopic = MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup());
+
+                    // 为重试 Topic 构建订阅数据并缓存起来
                     SubscriptionData subscriptionData = FilterAPI.buildSubscriptionData(retryTopic, SubscriptionData.SUB_ALL);
                     this.rebalanceImpl.getSubscriptionInner().put(retryTopic, subscriptionData);
                     break;
@@ -1240,9 +1267,12 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
     @Override
     public void updateTopicSubscribeInfo(String topic, Set<MessageQueue> info) {
+        // 获取订阅信息
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
         if (subTable != null) {
+            // 是否订阅了传入的 topic
             if (subTable.containsKey(topic)) {
+                // 如果订阅了，则缓存该 Topic 的队列
                 this.rebalanceImpl.topicSubscribeInfoTable.put(topic, info);
             }
         }
@@ -1367,6 +1397,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
      * @param consumerGroup
      */
     public void resetRetryAndNamespace(final List<MessageExt> msgs, String consumerGroup) {
+        // 重试 Topic ，%RETRY% + consumerGroup
         final String groupTopic = MixAll.getRetryTopic(consumerGroup);
         for (MessageExt msg : msgs) {
             // 如果是重试队列，则还原真实的 Topic

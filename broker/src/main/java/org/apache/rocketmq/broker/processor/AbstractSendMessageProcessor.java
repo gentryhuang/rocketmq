@@ -174,6 +174,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
 
     /**
      * 消息校验
+     * todo 发送消息的请求到达 Broker 后，会有一步 msgCheck 的过程
      *
      * @param ctx
      * @param requestHeader
@@ -202,8 +203,11 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
             return response;
         }
 
+        // 检查下发送消息的 Topic 在 Broker 本地有没有
         TopicConfig topicConfig =
                 this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
+
+        // todo 没有，则自动创建topic，实际就是创建一个topicConfig对象，存放到本地map，并同步到NameSrv
         if (null == topicConfig) {
             int topicSysFlag = 0;
             if (requestHeader.isUnitMode()) {
@@ -214,12 +218,14 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
                 }
             }
 
+            // todo 在 Broker 中缓存并上报 Topic
             log.warn("the topic {} not exist, producer: {}", requestHeader.getTopic(), ctx.channel().remoteAddress());
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageMethod(
                     requestHeader.getTopic(),
                     requestHeader.getDefaultTopic(),
                     RemotingHelper.parseChannelRemoteAddr(ctx.channel()),
                     requestHeader.getDefaultTopicQueueNums(), topicSysFlag);
+
 
             if (null == topicConfig) {
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
@@ -230,6 +236,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
                 }
             }
 
+            // todo 如果创建、上报 Topic 失败 ，则校验失败
             if (null == topicConfig) {
                 response.setCode(ResponseCode.TOPIC_NOT_EXIST);
                 response.setRemark("topic[" + requestHeader.getTopic() + "] not exist, apply first please!"

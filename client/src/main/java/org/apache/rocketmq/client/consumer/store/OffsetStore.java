@@ -26,7 +26,7 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
  * 消费进度存储
- * - 用来管理当前 OffsetStore 对应的消费端的每个消费队列的不同消费组的消费进度。
+ * - 用来管理当前 OffsetStore 对应的消费端的每个消费队列的不同消费组的消费进度。对于一个新的消费组，无论是集群模式还是广播模式都不会存储该消费组的消费进度，可以理解为-1。
  * 广播模式下：
  * 同消费组的消费者相互独立，消费进度要单独存储；
  *

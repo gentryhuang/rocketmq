@@ -52,12 +52,18 @@ public abstract class RebalanceImpl {
      */
     protected final ConcurrentMap<MessageQueue, ProcessQueue> processQueueTable = new ConcurrentHashMap<MessageQueue, ProcessQueue>(64);
     /**
-     * 订阅 Topic 下的消息队列，
+     * 订阅 Topic 下的消息队列
+     * 从 NameSrv 更新路由配置到本地，设置该属性的情况如下（todo 注意：起始的时候是全部的队列，主要作为分配队列的数据源）：
+     *
+     * @see MQClientInstance#updateTopicRouteInfoFromNameServer(java.lang.String, boolean, org.apache.rocketmq.client.producer.DefaultMQProducer)
      */
     protected final ConcurrentMap<String/* topic */, Set<MessageQueue>> topicSubscribeInfoTable = new ConcurrentHashMap<String, Set<MessageQueue>>();
 
     /**
      * 订阅数据
+     * todo 注意：每个 Topic 都对应一个重试的 Topic。也就是，消费者在订阅时，会自动自订阅 Topic 对应的重试主题
+     *
+     * @see DefaultMQPushConsumerImpl#copySubscription()
      */
     protected final ConcurrentMap<String /* topic */, SubscriptionData> subscriptionInner = new ConcurrentHashMap<String, SubscriptionData>();
 
@@ -74,6 +80,7 @@ public abstract class RebalanceImpl {
     /**
      * 分配消息队列的策略
      */
+    /* 负载算法的具体实现，究竟如何分配就是由这个总指挥决定的 */
     protected AllocateMessageQueueStrategy allocateMessageQueueStrategy;
 
     /**
@@ -294,12 +301,12 @@ public abstract class RebalanceImpl {
      * @param isOrder 是否顺序消息
      */
     public void doRebalance(final boolean isOrder) {
-        // 获取订阅数据，以 Topic 维度
+        // todo 获取订阅数据，以 Topic 维度。注意每个 Topic 自动对应一个重试主题
         // 分配 Topic 下的队列
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
 
         if (subTable != null) {
-            // 遍历消费者订阅数据
+            // todo 遍历消费者订阅数据，以订阅数据为基准，进行队列的分配
             for (final Map.Entry<String, SubscriptionData> entry : subTable.entrySet()) {
                 // 获取 Topic
                 final String topic = entry.getKey();
@@ -383,6 +390,7 @@ public abstract class RebalanceImpl {
                 if (mqSet != null && cidAll != null) {
                     // 排序 消息队列 和 消费者数组。
                     // todo 因为是在Client进行分配队列，排序后，各Client的顺序才能保持一致。
+                    // 这样一来尽管各个Consumer在负载均衡的时候不进行任何信息交换，但是却可以互不干扰有条不紊的将队列均衡的分配完毕。
                     List<MessageQueue> mqAll = new ArrayList<MessageQueue>();
                     mqAll.addAll(mqSet);
 
@@ -521,6 +529,8 @@ public abstract class RebalanceImpl {
 
         // 2 增加不在 processQueueTable 且 存在 mqSet 中的消息队列
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
+
+        // 为每个 mq 创建一个处理队列 ProcessQueue
         for (MessageQueue mq : mqSet) {
             if (!this.processQueueTable.containsKey(mq)) {
 

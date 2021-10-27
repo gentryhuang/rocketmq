@@ -267,6 +267,18 @@ public class MQClientAPIImpl {
 
     }
 
+    /**
+     * 创建或更新 Topic
+     *
+     * @param addr
+     * @param defaultTopic
+     * @param topicConfig
+     * @param timeoutMillis
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     * @throws MQClientException
+     */
     public void createTopic(final String addr, final String defaultTopic, final TopicConfig topicConfig,
                             final long timeoutMillis)
             throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
@@ -1250,6 +1262,8 @@ public class MQClientAPIImpl {
         RemotingCommand response = this.remotingClient.invokeSync(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr),
                 request, timeoutMillis);
         assert response != null;
+
+        // 解析发送结果
         switch (response.getCode()) {
             case ResponseCode.SUCCESS: {
                 return;
@@ -1511,12 +1525,14 @@ public class MQClientAPIImpl {
         GetRouteInfoRequestHeader requestHeader = new GetRouteInfoRequestHeader();
         requestHeader.setTopic(topic);
 
+        // 请求码 GET_ROUTEINFO_BY_TOPIC
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_ROUTEINFO_BY_TOPIC, requestHeader);
 
         // 同步获取 topic 的路由信息
         RemotingCommand response = this.remotingClient.invokeSync(null, request, timeoutMillis);
         assert response != null;
         switch (response.getCode()) {
+            // Topic 不存在
             case ResponseCode.TOPIC_NOT_EXIST: {
                 if (allowTopicNotExist) {
                     log.warn("get Topic [{}] RouteInfoFromNameServer is not exist value", topic);

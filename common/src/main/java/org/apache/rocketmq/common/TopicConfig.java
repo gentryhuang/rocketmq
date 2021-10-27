@@ -18,15 +18,37 @@ package org.apache.rocketmq.common;
 
 import org.apache.rocketmq.common.constant.PermName;
 
+/**
+ * Topic 配置信息
+ */
 public class TopicConfig {
     private static final String SEPARATOR = " ";
+    /**
+     * 默认的读队列个数
+     */
     public static int defaultReadQueueNums = 16;
+    /**
+     * 默认的写队列个数
+     */
     public static int defaultWriteQueueNums = 16;
+    /**
+     * Topic 名称
+     */
     private String topicName;
+
+    /**
+     * 分别初始化读写队列数
+     */
     private int readQueueNums = defaultReadQueueNums;
     private int writeQueueNums = defaultWriteQueueNums;
+
+    // 权限
     private int perm = PermName.PERM_READ | PermName.PERM_WRITE;
+    /**
+     * Topic 过滤
+     */
     private TopicFilterType topicFilterType = TopicFilterType.SINGLE_TAG;
+
     private int topicSysFlag = 0;
     private boolean order = false;
 
@@ -174,8 +196,8 @@ public class TopicConfig {
     @Override
     public String toString() {
         return "TopicConfig [topicName=" + topicName + ", readQueueNums=" + readQueueNums
-            + ", writeQueueNums=" + writeQueueNums + ", perm=" + PermName.perm2String(perm)
-            + ", topicFilterType=" + topicFilterType + ", topicSysFlag=" + topicSysFlag + ", order="
-            + order + "]";
+                + ", writeQueueNums=" + writeQueueNums + ", perm=" + PermName.perm2String(perm)
+                + ", topicFilterType=" + topicFilterType + ", topicSysFlag=" + topicSysFlag + ", order="
+                + order + "]";
     }
 }

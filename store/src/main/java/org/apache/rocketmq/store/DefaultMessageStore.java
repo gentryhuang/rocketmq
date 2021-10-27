@@ -414,6 +414,7 @@ public class DefaultMessageStore implements MessageStore {
 
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             this.haService.start();
+            // 处理延迟消息
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
 
@@ -424,7 +425,10 @@ public class DefaultMessageStore implements MessageStore {
         this.storeStatsService.start();
 
         this.createTempFile();
+
+        // todo  开启系列定时任务，其中包含用来清理过期文件
         this.addScheduleTask();
+
         this.shutdown = false;
     }
 
@@ -1558,14 +1562,21 @@ public class DefaultMessageStore implements MessageStore {
         log.info(fileName + (result ? " create OK" : " already exists"));
     }
 
+    /**
+     * 添加系列定期任务
+     */
     private void addScheduleTask() {
 
+        /**
+         * 周期性清理文件。默认每 10s 检查一次过期文件
+         */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
                 DefaultMessageStore.this.cleanFilesPeriodically();
             }
         }, 1000 * 60, this.messageStoreConfig.getCleanResourceInterval(), TimeUnit.MILLISECONDS);
+
 
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
@@ -1608,8 +1619,14 @@ public class DefaultMessageStore implements MessageStore {
         }, 1000L, 10000L, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * 过期文件清理
+     */
     private void cleanFilesPeriodically() {
+        // CommitLog 文件清理
         this.cleanCommitLogService.run();
+
+        // ConsumeQueue 文件清理
         this.cleanConsumeQueueService.run();
     }
 
@@ -1633,29 +1650,47 @@ public class DefaultMessageStore implements MessageStore {
         return file.exists();
     }
 
+    /**
+     * load logics queue
+     *
+     * @return
+     */
     private boolean loadConsumeQueue() {
         File dirLogic = new File(StorePathConfigHelper.getStorePathConsumeQueue(this.messageStoreConfig.getStorePathRootDir()));
+        // 获取 Store consumequeue 目录下所有子目录，加载进来
         File[] fileTopicList = dirLogic.listFiles();
+
+
         if (fileTopicList != null) {
 
             for (File fileTopic : fileTopicList) {
+
+                // 文件夹对应的名 - Topic
                 String topic = fileTopic.getName();
 
+                // Topic 文件夹下的文件列表 - queue 文件列表
                 File[] fileQueueIdList = fileTopic.listFiles();
                 if (fileQueueIdList != null) {
+
+                    // 遍历 queue 文件列表
                     for (File fileQueueId : fileQueueIdList) {
                         int queueId;
                         try {
+                            // 获取 queueId
                             queueId = Integer.parseInt(fileQueueId.getName());
                         } catch (NumberFormatException e) {
                             continue;
                         }
+
+                        // 还原
                         ConsumeQueue logic = new ConsumeQueue(
                                 topic,
                                 queueId,
                                 StorePathConfigHelper.getStorePathConsumeQueue(this.messageStoreConfig.getStorePathRootDir()),
                                 this.getMessageStoreConfig().getMappedFileSizeConsumeQueue(),
                                 this);
+
+                        // 加入缓存
                         this.putConsumeQueue(topic, queueId, logic);
                         if (!logic.load()) {
                             return false;
@@ -1918,6 +1953,8 @@ public class DefaultMessageStore implements MessageStore {
 
         public void run() {
             try {
+
+                // 清理过期文件
                 this.deleteExpiredFiles();
 
                 this.redeleteHangedFile();
@@ -1926,16 +1963,33 @@ public class DefaultMessageStore implements MessageStore {
             }
         }
 
+        /**
+         * 清理过期文件：
+         * 默认过期时间为72小时也就是3天，除了我们自动清理，下面几种情况也会自动清理 无论文件是否被消费过都会被清理
+         * 1 默认是凌晨4点，自动清理过期时间的文件
+         * 2 文件过期 磁盘空间占用率超过75%后，无论是否到达清理时间 都会自动清理过期时间
+         * 3 磁盘占用率达到清理阈值 默认85%后，按照设定好的清理规则(默认是时间最早的)清理文件，无论是否过期
+         * 4 磁盘占用率达到90%后，broker拒绝消息写入
+         */
         private void deleteExpiredFiles() {
             int deleteCount = 0;
+            // 文件保存的时长，默认 72 小时
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
+
+            // CommitLog 删除间隔
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            // 清理时间达到，默认为凌晨 4 点
             boolean timeup = this.isTimeToDelete();
+
+            // 磁盘空间占用率，默认为 75%
             boolean spacefull = this.isSpaceToDelete();
+
+            // 手动删除
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
+            // 达到以上条件任何一个
             if (timeup || spacefull || manualDelete) {
 
                 if (manualDelete)
@@ -1950,10 +2004,13 @@ public class DefaultMessageStore implements MessageStore {
                         manualDeleteFileSeveralTimes,
                         cleanAtOnce);
 
+                // 按天为单位
                 fileReservedTime *= 60 * 60 * 1000;
 
+                // 清理 CommitLog 文件
                 deleteCount = DefaultMessageStore.this.commitLog.deleteExpiredFile(fileReservedTime, deletePhysicFilesInterval,
                         destroyMapedFileIntervalForcibly, cleanAtOnce);
+
                 if (deleteCount > 0) {
                 } else if (spacefull) {
                     log.warn("disk space will be full soon, but delete file failed.");

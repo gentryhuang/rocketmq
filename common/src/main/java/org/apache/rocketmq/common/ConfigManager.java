@@ -23,7 +23,16 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
 /**
- * 配置管理
+ * 配置管理对象的父类，提供公共的加载文件到内存和持久化缓存数据到文件的功能：
+ * 1 加载文件内容到缓存中
+ * 2 持久化内存的配置信息到文件
+ * 具体实现类列举：
+ * 1 订阅配置 SubscriptionGroupManager
+ * 2 Topic 配置 TopicConfigManager
+ * 3 延迟消息相关配置 ScheduleMessageService
+ * 4 消费进度管理陪配置 ConsumerOffsetManager
+ * 附加说明：
+ * 这里内存到文件的信息，会有专门的后台线程刷新到文件，
  */
 public abstract class ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.COMMON_LOGGER_NAME);
@@ -99,7 +108,7 @@ public abstract class ConfigManager {
     public abstract void decode(final String jsonString);
 
     /**
-     * 持久化
+     * 持久化内存的配置信息到文件
      */
     public synchronized void persist() {
         String jsonString = this.encode(true);
@@ -116,6 +125,7 @@ public abstract class ConfigManager {
 
     /**
      * 编码存储内容
+     * todo 由具体配置实现类实现该方法。主要是将缓存数据序列化为 JSON 串，为后续写入文件做准备
      *
      * @param prettyFormat 是否格式化
      * @return 内容

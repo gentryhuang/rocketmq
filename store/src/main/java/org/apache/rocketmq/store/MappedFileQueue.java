@@ -147,6 +147,12 @@ public class MappedFileQueue {
         this.deleteExpiredFile(willRemoveFiles);
     }
 
+    /**
+     * 删除过期内存文件
+     * 注意：会有专门的后台线程定时将内存文件刷到磁盘文件
+     *
+     * @param files
+     */
     void deleteExpiredFile(List<MappedFile> files) {
 
         if (!files.isEmpty()) {
@@ -177,6 +183,8 @@ public class MappedFileQueue {
      */
     public boolean load() {
         File dir = new File(this.storePath);
+
+        // 获取 CommitLog 文件列表
         File[] files = dir.listFiles();
         if (files != null) {
             // ascending order
@@ -190,11 +198,14 @@ public class MappedFileQueue {
                 }
 
                 try {
+                    // 还原
                     MappedFile mappedFile = new MappedFile(file.getPath(), mappedFileSize);
 
                     mappedFile.setWrotePosition(this.mappedFileSize);
                     mappedFile.setFlushedPosition(this.mappedFileSize);
                     mappedFile.setCommittedPosition(this.mappedFileSize);
+
+                    // 加入缓存
                     this.mappedFiles.add(mappedFile);
                     log.info("load " + file.getPath() + " OK");
                 } catch (IOException e) {
@@ -405,6 +416,8 @@ public class MappedFileQueue {
         if (null != mfs) {
             for (int i = 0; i < mfsLength; i++) {
                 MappedFile mappedFile = (MappedFile) mfs[i];
+
+                // 取文件的修改时间，计算文件最大存活时间。过期时间默认 72小时
                 long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime;
                 if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) {
                     if (mappedFile.destroy(intervalForcibly)) {
@@ -431,6 +444,7 @@ public class MappedFileQueue {
             }
         }
 
+        // 删除过期文件
         deleteExpiredFile(files);
 
         return deleteCount;

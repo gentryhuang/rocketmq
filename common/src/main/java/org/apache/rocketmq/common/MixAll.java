@@ -104,6 +104,11 @@ public class MixAll {
         return wsAddr;
     }
 
+    /**
+     * 基于消费组拼接重试 Topic
+     * @param consumerGroup
+     * @return
+     */
     public static String getRetryTopic(final String consumerGroup) {
         return RETRY_GROUP_TOPIC_PREFIX + consumerGroup;
     }

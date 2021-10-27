@@ -20,6 +20,13 @@ import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
  * 拉取消息请求
+ * 说明：
+ * - 每个MessageQueue 对应了封装成了一个PullRequest，因为拉取数据是以每个Broker下面的Queue为单位，
+ * - 同时里面还一个ProcessQueue，每个MessageQueue也同样对应一个ProcessQueue，保存了这个MessageQueue消息处理状态的快照；
+ * - 还有nextOffset用来标识读取的位置；
+ *
+
+ *
  */
 public class PullRequest {
     /**

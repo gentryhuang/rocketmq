@@ -27,6 +27,10 @@ import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 
 /**
+ * 必要性说明：
+ * 1 RocketMQ 是通过订阅Topic来消费消息的，但是因为 CommitLog 是不区分topic存储消息的
+ * 2 消费者通过遍历commitlog去消费消息 那么效率就非常低下了，所以设计了 ConsumeQueue ，作为 CommitLog 对应的索引文件
+ * <p>
  * 前置说明：
  * 1 ConsumeQueue : MappedFileQueue : MappedFile = 1 : 1 : N
  * 2 MappedFile : 00000000000000000000等文件
@@ -612,8 +616,17 @@ public class ConsumeQueue {
         }
     }
 
+    /**
+     * 开启下标
+     *
+     * @param startIndex
+     * @return
+     */
     public SelectMappedBufferResult getIndexBuffer(final long startIndex) {
         int mappedFileSize = this.mappedFileSize;
+
+        // 通过 startIndex * 单条消息的大小 计算 offset
+        // todo 因为每个条目的大小是固定的 所以只需要根据index*20则可以定位到具体的offset的值，就可以知道具体条目的数据
         long offset = startIndex * CQ_STORE_UNIT_SIZE;
         if (offset >= this.getMinLogicOffset()) {
 

@@ -183,10 +183,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             return CompletableFuture.completedFuture(response);
         }
 
-        // 1 更新消息的 Topic 为 %RETRY% + group
+        // 1 todo 更新消息的 Topic 为 %RETRY% + group
         String newTopic = MixAll.getRetryTopic(requestHeader.getGroup());
 
-        // 计算 queueId （重试队列，队列数为 1）
+        // 2 todo 计算 queueId （重试队列，队列数为 1）
         int queueIdInt = Math.abs(this.random.nextInt() % 99999999) % subscriptionGroupConfig.getRetryQueueNums();
         int topicSysFlag = 0;
         if (requestHeader.isUnitMode()) {
@@ -218,8 +218,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             return CompletableFuture.completedFuture(response);
         }
 
+        // todo 将原始 Topic 保存到消息的属性中。注意，第一次重试消息 这里为 null
         final String retryTopic = msgExt.getProperty(MessageConst.PROPERTY_RETRY_TOPIC);
         if (null == retryTopic) {
+            // RETRY_TOPIC 属性保存 Topic
             MessageAccessor.putProperty(msgExt, MessageConst.PROPERTY_RETRY_TOPIC, msgExt.getTopic());
         }
         msgExt.setWaitStoreMsgOK(false);
@@ -247,6 +249,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(newTopic,
                     DLQ_NUMS_PER_GROUP,
                     PermName.PERM_WRITE, 0);
+
+            // 加入私信队列后就不管了，返回失败。交给人工补偿
             if (null == topicConfig) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);
                 response.setRemark("topic[" + newTopic + "] not exist");
@@ -274,6 +278,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
         // 复制原来消息，重新生成一个 Msg ，将新消息丢给 BrokerController 中，然后存储到 CommitLog 中进行存储
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
+
+        // 设置重试消息 Topic
         msgInner.setTopic(newTopic);
         msgInner.setBody(msgExt.getBody());
         msgInner.setFlag(msgExt.getFlag());
@@ -281,6 +287,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgExt.getProperties()));
         msgInner.setTagsCode(MessageExtBrokerInner.tagsString2tagsCode(null, msgExt.getTags()));
 
+        // 设置重试队列 ID
         msgInner.setQueueId(queueIdInt);
         msgInner.setSysFlag(msgExt.getSysFlag());
         msgInner.setBornTimestamp(msgExt.getBornTimestamp());
@@ -297,6 +304,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
         // 作为新消息存到CommitLog中
         CompletableFuture<PutMessageResult> putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
+
+
         return putMessageResult.thenApply((r) -> {
             if (r != null) {
                 switch (r.getPutMessageStatus()) {
@@ -313,6 +322,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                     default:
                         break;
                 }
+
+                // 处理失败，系统错误
                 response.setCode(ResponseCode.SYSTEM_ERROR);
                 response.setRemark(r.getPutMessageStatus().name());
                 return response;
@@ -337,7 +348,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                                                 RemotingCommand request,
                                                                 SendMessageContext mqtraceContext,
                                                                 SendMessageRequestHeader requestHeader) {
-        // 初始化响应
+        // 发送消息前的处理
+        // todo 包括 Topic 的创建与上报
         final RemotingCommand response = preSend(ctx, request, requestHeader);
         final SendMessageResponseHeader responseHeader = (SendMessageResponseHeader) response.readCustomHeader();
 
@@ -831,6 +843,15 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         return (this.random.nextInt() % 99999999) % writeQueueNums;
     }
 
+    /**
+     * 消费发送前的准备
+     * todo 主要是消息的校验和 Topic 的创建
+     *
+     * @param ctx
+     * @param request
+     * @param requestHeader
+     * @return
+     */
     private RemotingCommand preSend(ChannelHandlerContext ctx, RemotingCommand request,
                                     SendMessageRequestHeader requestHeader) {
         final RemotingCommand response = RemotingCommand.createResponseCommand(SendMessageResponseHeader.class);
@@ -850,11 +871,12 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         }
 
         response.setCode(-1);
+
+        // todo 消息校验，其中包括 Topic 在 Broker 中的创建与缓存，以及上报到 NameSrv
         super.msgCheck(ctx, requestHeader, response);
         if (response.getCode() != -1) {
             return response;
         }
-
         return response;
     }
 }

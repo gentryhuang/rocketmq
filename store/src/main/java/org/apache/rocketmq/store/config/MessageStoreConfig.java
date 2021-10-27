@@ -28,7 +28,6 @@ public class MessageStoreConfig {
     /**
      * Broker 的存储根目录，默认为 $user.home/store
      */
-    //The root directory in which the log data is kept
     @ImportantField
     private String storePathRootDir = System.getProperty("user.home") + File.separator + "store";
 
@@ -108,9 +107,13 @@ public class MessageStoreConfig {
     private int deleteConsumeQueueFilesInterval = 100;
     private int destroyMapedFileIntervalForcibly = 1000 * 120;
     private int redeleteHangedFileInterval = 1000 * 120;
+
+
+    // 清理时间是凌晨 4 点
     // When to delete,default is at 4 am
     @ImportantField
     private String deleteWhen = "04";
+    // 磁盘空间占用率
     private int diskMaxUsedSpaceRatio = 75;
 
     // 在删除日志文件之前保存该日志文件的小时数(以小时为单位)
