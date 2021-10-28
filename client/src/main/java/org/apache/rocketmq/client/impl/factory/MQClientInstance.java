@@ -97,9 +97,10 @@ public class MQClientInstance {
      * 客户端id，可能是服务端id，也可能是消费端id
      */
     private final String clientId;
+
     private final long bootTimestamp = System.currentTimeMillis();
     /**
-     * 生产者组 到 消息生产者的映射
+     * 生产者组 到 消息生产者的映射，在客户端实例启动时
      */
     private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>();
     /**
@@ -110,11 +111,18 @@ public class MQClientInstance {
 
     private final ConcurrentMap<String/* group */, MQAdminExtInner> adminExtTable = new ConcurrentHashMap<String, MQAdminExtInner>();
     private final NettyClientConfig nettyClientConfig;
+
+    /**
+     * 网络通信客户端封装类
+     */
     private final MQClientAPIImpl mQClientAPIImpl;
     private final MQAdminImpl mQAdminImpl;
 
     /**
      * Topic 路由信息（原始的，从 NameSrv 拉取到的）
+     * todo 说明：客户端实例缓存的是从 NameSvr 拉取的 Topic 路由信息的元数据；而实例对应的生产者或消费者缓存的是 Topic 路由信息的加工版本-Topic发布信息
+     * - TopicRouteData 中的 QueueData 没有 Topic 信息
+     * - MessageQueue 中有 Topic 信息
      */
     private final ConcurrentMap<String/* Topic */, TopicRouteData> topicRouteTable = new ConcurrentHashMap<String, TopicRouteData>();
 
@@ -145,6 +153,7 @@ public class MQClientInstance {
     private final PullMessageService pullMessageService;
     /**
      * 均衡消息队列服务任务
+     * 即：RocketMQ消息队列重新分配是由RebalanceService线程来实现。一个MQClientInstance持有一个RebalanceService实现，并随着MQClientInstance的启动而启动。
      */
     private final RebalanceService rebalanceService;
     /**
@@ -160,13 +169,25 @@ public class MQClientInstance {
         this(clientConfig, instanceIndex, clientId, null);
     }
 
+    /**
+     * 客户端实例封装了 RocketMQ 的网络处理API，是消息生产者、消息消费者与 NameServer、Broker 打交道的网络通道
+     *
+     * @param clientConfig
+     * @param instanceIndex
+     * @param clientId
+     * @param rpcHook
+     */
     public MQClientInstance(ClientConfig clientConfig, int instanceIndex, String clientId, RPCHook rpcHook) {
         this.clientConfig = clientConfig;
         this.instanceIndex = instanceIndex;
+
+        // 封装网络处理API
         this.nettyClientConfig = new NettyClientConfig();
         this.nettyClientConfig.setClientCallbackExecutorThreads(clientConfig.getClientCallbackExecutorThreads());
         this.nettyClientConfig.setUseTLS(clientConfig.isUseTLS());
         this.clientRemotingProcessor = new ClientRemotingProcessor(this);
+
+        // 封装网络处理的客户端
         this.mQClientAPIImpl = new MQClientAPIImpl(this.nettyClientConfig, this.clientRemotingProcessor, rpcHook, clientConfig);
 
         if (this.clientConfig.getNamesrvAddr() != null) {
@@ -185,6 +206,9 @@ public class MQClientInstance {
          */
         this.rebalanceService = new RebalanceService(this);
 
+        /**
+         * 创建生产者组名为 CLIENT_INNER_PRODUCER 的生产者
+         */
         this.defaultMQProducer = new DefaultMQProducer(MixAll.CLIENT_INNER_PRODUCER_GROUP);
         this.defaultMQProducer.resetClientConfig(clientConfig);
 
@@ -198,7 +222,7 @@ public class MQClientInstance {
     }
 
     /**
-     * todo topic 路由信息转换成 topic 发布信息：
+     * todo topic 路由信息转换成 topic 发布信息，也就是将 Topic 元数据信息和 Topic 分布的 Broker 元数据 融合成 Topic 发布信息
      * 1 根据 Topic 的路由：Topic 对应队列信息和 Broker 信息
      * 2 根据 Topic 的路由，创建写队列集合，todo 写消息队列诞生
      *
@@ -234,7 +258,8 @@ public class MQClientInstance {
             List<QueueData> qds = route.getQueueDatas();
             Collections.sort(qds);
 
-            // 遍历队列集合
+            // 1 todo 遍历路由信息的 队列集合，转为 MessageQueue
+            // todo 注意队列数
             for (QueueData qd : qds) {
                 // 当前队列支持写，才有意义
                 if (PermName.isWriteable(qd.getPerm())) {
@@ -242,7 +267,7 @@ public class MQClientInstance {
                     // Broker 信息
                     BrokerData brokerData = null;
 
-                    // 遍历 Broker 集合
+                    // 2 遍历路由信息的 Broker 集合，寻找当前 qd 对应的 BrokerData
                     for (BrokerData bd : route.getBrokerDatas()) {
 
                         // 根据队列所在的 Broker 名称，找到对应 Broker
@@ -252,17 +277,18 @@ public class MQClientInstance {
                         }
                     }
 
-                    // 队列没有对应的 Broker ，说明当前队列无效
+                    // 3 todo 队列没有对应的 Broker ，说明当前队列无效
                     if (null == brokerData) {
                         continue;
                     }
 
+                    // 队列对应的 Broker 非主节点
                     if (!brokerData.getBrokerAddrs().containsKey(MixAll.MASTER_ID)) {
                         continue;
                     }
 
-                    // 根据当前队列的写队列数，创建对应个数的 MessageQueue
-                    // todo 新版支持 16 个
+                    // todo 根据当前队列的写队列数，创建对应个数的 MessageQueue
+                    // todo 新版支持 16 个，具体多少看路由信息中的值
                     for (int i = 0; i < qd.getWriteQueueNums(); i++) {
                         // 1 对应所属的 Topic
                         // 2 对应所属的 Broker
@@ -297,7 +323,7 @@ public class MQClientInstance {
 
             // 是否具有读权限
             if (PermName.isReadable(qd.getPerm())) {
-                // 有多少个读队列，就创建多少个 MessageQueue
+                // todo 有多少个读队列，就创建多少个 读MessageQueue
                 for (int i = 0; i < qd.getReadQueueNums(); i++) {
                     MessageQueue mq = new MessageQueue(topic, qd.getBrokerName(), i);
                     mqList.add(mq);
@@ -332,7 +358,7 @@ public class MQClientInstance {
                     // Start various schedule tasks
                     this.startScheduledTask();
 
-                    // todo 注意，先启动拉取消息线程等待拉取消息任务到来（没有则阻塞），后负载均衡消息队列 //
+                    // todo 注意，先启动 拉取消息线程 ，等待拉取消息任务的到来（没有则阻塞），后负载均衡消息队列 //
 
                     // todo 启动拉取消息任务
                     // Start pull service
@@ -771,14 +797,15 @@ public class MQClientInstance {
                     // todo 将入参的topic转换为默认的TBW102，获取TBW102的信息
                     // 获取默认 topic 的配置信息，通过与 NameServer 的长连接 Channel 发送 RequestCode.GET_ROUTEINFO_BY_TOPIC 命令获取配置信息
                     if (isDefault && defaultMQProducer != null) {
+                        // 默认主题 TBW102 下的队列数 。。。
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                                 1000 * 3);
 
-                        // 获取成功，修正读写队列数
+                        // todo 获取成功，修正读写队列数，以发送者配置的默认队列数为准
                         if (topicRouteData != null) {
                             // 获取队列信息
                             for (QueueData data : topicRouteData.getQueueDatas()) {
-                                // 读写队列最大值，默认 4 个
+                                // 根据生产者默认队列数，即读写队列最大值，默认 4 个 更新队列数目信息
                                 int queueNums = Math.min(defaultMQProducer.getDefaultTopicQueueNums(), data.getReadQueueNums());
                                 data.setReadQueueNums(queueNums);
                                 data.setWriteQueueNums(queueNums);
@@ -791,30 +818,33 @@ public class MQClientInstance {
                     }
 
 
-                    // 拿到最新的 topic 路由信息后，需要与本地缓存中的 topic 发布信息进行比较，如果有变化，则需要同步更新发送者、消费者关于该 topic 的缓存
+                    // 拿到最新的 topic 路由信息后，需要与客户端本地缓存中的 topic 路由进行比较，如果有变化，则需要同步更新发送者、消费者关于该 topic 的缓存
                     if (topicRouteData != null) {
                         TopicRouteData old = this.topicRouteTable.get(topic);
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
+
+
+                        // 相等则再判断当前 JVM 实例下的生产者或消费者中缓存的该 Topic 的发布信息是否改变或可用
                         if (!changed) {
                             changed = this.isNeedUpdateTopicRouteInfo(topic);
                         } else {
                             log.info("the topic[{}] route info changed, old[{}] ,new[{}]", topic, old, topicRouteData);
                         }
 
-                        //------------------------- todo 同步更新生产者、消费者关于该 topic 的缓存（特别读写队列的创建） --------------------------//
+                        //------------------------- todo 同步更新 消息生产者、消息消费者关于该 topic 的缓存（特别读写队列的创建），后续可以直接从缓存查找--------------------------//
                         if (changed) {
 
-                            // 更新发送者的缓存
+                            // 尝试更新当前 JVM 实例中消息生产者的本地关于当前 Topic 的发布信息缓存
                             TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData();
                             for (BrokerData bd : topicRouteData.getBrokerDatas()) {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
 
-                            // 1 todo Update Pub info 将topic的route信息转换为publish信息。实际是用了TBW102的route信息，给 我们指定的 Topic 用
-                            // todo 即我们指定的 Topic 继承了 TBW102 的路由信息。因此我们指定的 Topic 的信息就有了
+                            // 1 todo Update Pub info 将topic的route信息转换为publish信息。如果开始自动创建 Topic 功能，则实际是用了TBW102的route信息，给我们指定的 Topic 用
+                            // todo 即我们指定的 Topic 继承了 TBW102 的路由信息。因此我们指定的 Topic 的发布信息就有了
                             {
                                 // topic 路由信息转换成 topic 发布信息
-                                // todo 注意这里创建的是具有写权限的队列
+                                // todo 注意这里创建的是具有写队列
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
                                 // 标记下，表示 Topic 路由信息
                                 publishInfo.setHaveTopicRouterInfo(true);
@@ -973,6 +1003,13 @@ public class MQClientInstance {
         }
     }
 
+    /**
+     * 比对路由信息是否改变
+     *
+     * @param olddata
+     * @param nowdata
+     * @return 返回不相等的判断结果
+     */
     private boolean topicRouteDataIsChange(TopicRouteData olddata, TopicRouteData nowdata) {
         if (olddata == null || nowdata == null)
             return true;
@@ -988,6 +1025,8 @@ public class MQClientInstance {
 
     /**
      * 是否更新当前实例下缓存的 生产者的 Topic 路由信息，消费者订阅的消息队列
+     * todo 依据：
+     * 根据 topic 获取缓存在 生产者或消费者 内存中的 Topic 的发布信息，看是否存在或可用，以此作为判断条件。
      *
      * @param topic
      * @return

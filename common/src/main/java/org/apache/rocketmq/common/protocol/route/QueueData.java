@@ -22,6 +22,9 @@ package org.apache.rocketmq.common.protocol.route;
 
 /**
  * 队列描述信息
+ * todo 特别说明：
+ * Topic是一个逻辑上的概念，实际上在每个broker上以queue的形式保存，也就是说每个topic在broker上会划分成几个逻辑队列，
+ * 每个逻辑队列保存一部分消息数据，但是保存的消息数据实际上不是真正的消息数据，而是指向commit log的消息索引。
  */
 public class QueueData implements Comparable<QueueData> {
     /**
@@ -117,8 +120,8 @@ public class QueueData implements Comparable<QueueData> {
     @Override
     public String toString() {
         return "QueueData [brokerName=" + brokerName + ", readQueueNums=" + readQueueNums
-            + ", writeQueueNums=" + writeQueueNums + ", perm=" + perm + ", topicSysFlag=" + topicSysFlag
-            + "]";
+                + ", writeQueueNums=" + writeQueueNums + ", perm=" + perm + ", topicSysFlag=" + topicSysFlag
+                + "]";
     }
 
     @Override

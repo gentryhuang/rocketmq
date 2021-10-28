@@ -151,8 +151,12 @@ public class BrokerController {
     private RemotingServer remotingServer;
     private RemotingServer fastRemotingServer;
 
-    // Topic 配置管理对象
+    /**
+     * 持有的 Topic 配置管理对象
+     */
     private TopicConfigManager topicConfigManager;
+
+
     private ExecutorService sendMessageExecutor;
     private ExecutorService pullMessageExecutor;
     private ExecutorService replyMessageExecutor;
@@ -929,7 +933,7 @@ public class BrokerController {
         }
 
 
-        // Broker 定期向 NameSrv 上报
+        // todo Broker 定期向 NameSrv 上报
         // 即 Broker在启动时向Nameserver注册存储在该服务器上的路由信息，并每隔30s向Nameserver发送心跳包，并更新路由信息。
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
@@ -981,7 +985,6 @@ public class BrokerController {
      */
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
         // 构建 Topic 的包装信息
-        // 上报的内容包括 TopicConfigSerializeWrapper，它的结构其实跟${user.home}\store\config\topics.json是一样的
         // todo 即将 Broker 缓存中的 org.apache.rocketmq.broker.topic.TopicConfigManager.topicConfigTable 上报到 NameSvr
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
@@ -990,11 +993,16 @@ public class BrokerController {
 
             ConcurrentHashMap<String, TopicConfig> topicConfigTable = new ConcurrentHashMap<String, TopicConfig>();
 
-            // 遍历 Topic 配置表，加入到 topicConfigTable ，用于作为上报到 NameSrv 的数据
+            // todo 遍历 Topic 配置表，加入到 topicConfigTable ，用于作为上报到 NameSrv 的数据
             for (TopicConfig topicConfig : topicConfigWrapper.getTopicConfigTable().values()) {
+                // 封装 Topic 的属性，TopicName、读写队列数目
                 TopicConfig tmp =
-                        new TopicConfig(topicConfig.getTopicName(), topicConfig.getReadQueueNums(), topicConfig.getWriteQueueNums(),
-                                this.brokerConfig.getBrokerPermission());
+                        new TopicConfig(topicConfig.getTopicName(),
+                                topicConfig.getReadQueueNums(),
+                                topicConfig.getWriteQueueNums(),
+                                this.brokerConfig.getBrokerPermission()
+                        );
+
                 topicConfigTable.put(topicConfig.getTopicName(), tmp);
             }
             topicConfigWrapper.setTopicConfigTable(topicConfigTable);

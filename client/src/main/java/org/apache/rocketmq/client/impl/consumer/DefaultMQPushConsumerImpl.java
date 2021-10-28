@@ -115,6 +115,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
     private final long consumerStartTimestamp = System.currentTimeMillis();
     private final ArrayList<ConsumeMessageHook> consumeMessageHookList = new ArrayList<ConsumeMessageHook>();
     private final RPCHook rpcHook;
+    /**
+     * 刚启动就是次状态
+     */
     private volatile ServiceState serviceState = ServiceState.CREATE_JUST;
     /**
      * 客户端实例
@@ -250,7 +253,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         // 从 拉取请求中获取 消息处理队列，如果消息处理队列已经终止，不进行消息拉取
         final ProcessQueue processQueue = pullRequest.getProcessQueue();
 
-        // 消费处理队列不可用，直接结束流程
+        // 消费处理队列被丢弃，直接结束流程
         if (processQueue.isDropped()) {
             log.info("the pull request[{}] is dropped.", pullRequest.toString());
             return;
@@ -274,15 +277,20 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         if (this.isPause()) {
             log.warn("consumer was paused, execute pull request later. instanceName={}, group={}", this.defaultMQPushConsumer.getInstanceName(), this.defaultMQPushConsumer.getConsumerGroup());
 
-            // Consumer 暂停中，则延迟拉取消息
+            // Consumer 暂停中，则延迟拉取消息，延迟 1s
             this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_SUSPEND);
             return;
         }
 
-        // 消息处理队列持有消息数，todo 这个消息数在哪里设置的？
+        // 消息处理队列持有消息数
+        // todo 该原子类在拉取消息和完成消息消费会变动
         long cachedMessageCount = processQueue.getMsgCount().get();
+        // 计算最大待处理消息大小
         long cachedMessageSizeInMiB = processQueue.getMsgSize().get() / (1024 * 1024);
 
+        /*------------------------ 流控：如果消息消费过慢产生消息堆积会触发消息消费拉取流控 --------------*/
+
+        // 从数量进行流控
         // 如果消息队列持有的消息数超过最大允许值（内存可能要满了），默认1000 条，则延迟拉取消息
         if (cachedMessageCount > this.defaultMQPushConsumer.getPullThresholdForQueue()) {
             this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
@@ -294,6 +302,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             return;
         }
 
+        // 从消息大小进行流控
         // Consumer 为并发消费 并且 消息队列持有消息跨度过大（消息跨度 = 持有消息最后一条和第一条的消息位置差，默认：2000），延迟拉取消息请求
         if (cachedMessageSizeInMiB > this.defaultMQPushConsumer.getPullThresholdSizeForQueue()) {
             this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
@@ -367,6 +376,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
         // 拉取消息回调
         PullCallback pullCallback = new PullCallback() {
+            /**
+             * 拉取消息成功
+             * @param pullResult
+             */
             @Override
             public void onSuccess(PullResult pullResult) {
                 if (pullResult != null) {
@@ -382,7 +395,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                         // 1 找到消息直接将这一批（默认32条）先丢到 ProceeQueue 中，然后直接将该批 submit 到 ConsumeMessageService的线程池，
                         // 在 submitConsumeRequest 会根据 consumeMessageBatchMaxSize 分批提交给消费线程去消费消息，consumeMessageBatchMaxSize 默认为1。
                         case FOUND:
-                            // 设置下次拉取消息队列位置
+
+                            // 设置下次拉取消息的位置
                             long prevRequestOffset = pullRequest.getNextOffset();
                             pullRequest.setNextOffset(pullResult.getNextBeginOffset());
 
@@ -405,8 +419,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                 // todo 提交拉取到的消息到消息处理队列中，消息作为快照
                                 boolean dispatchToConsume = processQueue.putMessage(pullResult.getMsgFoundList());
 
-                                // 提交消费请求到 ConsumeMessageService，任何消费拉取到的消息
-                                // 非顺序 ConsumeMessageConcurrentlyService
+                                // todo 提交消费请求到 ConsumeMessageService，这里可能提交到普通消费服务，也可以提交到有序消费服务
+                                // todo 非顺序消费 ConsumeMessageConcurrentlyService
+                                // todo 顺序消费 ConsumeMessageOrderlyService
                                 DefaultMQPushConsumerImpl.this.consumeMessageService.submitConsumeRequest(
                                         pullResult.getMsgFoundList(),
                                         processQueue,
@@ -487,6 +502,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 }
             }
 
+            /**
+             * 拉取消息异常
+             * @param e
+             */
             @Override
             public void onException(Throwable e) {
                 if (!pullRequest.getMessageQueue().getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
@@ -735,31 +754,29 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 // 并不代表启动失败
                 this.serviceState = ServiceState.START_FAILED;
 
-                // 检查配置
+                //检查消息者是否合法
                 this.checkConfig();
 
 
                 /**
-                 * 1 构建 Topic 订阅信息——SubscriptionData，并添加至 RebalanceImpl 的订阅信息中
-                 * todo 2 并基于消费者所在的组创建重试主题的订阅数据
+                 * 1 构建 Topic 订阅信息(SubscriptionData)，并添加至 RebalanceImpl 的订阅信息中
+                 * 2 基于消费者所在的组创建重试主题的订阅数据
                  */
                 this.copySubscription();
 
                 // 如果是集群消费，设置 instanceName 为一个字符串化的数字，如 10072
-                // 可以自行设置
                 if (this.defaultMQPushConsumer.getMessageModel() == MessageModel.CLUSTERING) {
                     this.defaultMQPushConsumer.changeInstanceNameToPID();
                 }
 
-                // 获取 MQClient 对象，clientId 为 ip@instanceName ，如 192。168。0。1@10072
+                // 创建 MQClient 对象，clientId 为 ip@instanceName ，如 192.168.0.1@10072
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQPushConsumer, this.rpcHook);
 
 
-                /* ------ 丰富 rebalanceImpl 对象的属性，完成后就具备了负载均衡的能力 */
+                /** ------ 丰富 rebalanceImpl 对象的属性，完成后就具备了负载均衡的能力 */
 
                 // 为负载均衡器设置消费组名，用来为指定组下的消费者分配队列
                 this.rebalanceImpl.setConsumerGroup(this.defaultMQPushConsumer.getConsumerGroup());
-
 
                 // 消费模型，默认集群消费
                 // 默认是集群模式，每条消息被同一组的消费者中的一个消费。还可以设置广播模式，每条消息被同一个组的所有消费者都消费一次。
@@ -767,6 +784,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 // todo 设置 分配消息队列的策略
                 this.rebalanceImpl.setAllocateMessageQueueStrategy(this.defaultMQPushConsumer.getAllocateMessageQueueStrategy());
+                // 设置消费方客户端
                 this.rebalanceImpl.setmQClientFactory(this.mQClientFactory);
 
                 // 拉取消息 API 的封装
@@ -804,15 +822,15 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 // 集群模式下，不需要加载。实际读取消费进度时，从 Broker 获取。
                 this.offsetStore.load();
 
-                // 根据消息监听器类型，创建不同的 消息消费服务
+                // todo 根据消息监听器类型，创建不同的消息消费服务
 
-                // 有序消费服务
+                // 1 有序消费服务
                 if (this.getMessageListenerInner() instanceof MessageListenerOrderly) {
                     this.consumeOrderly = true;
                     this.consumeMessageService =
                             new ConsumeMessageOrderlyService(this, (MessageListenerOrderly) this.getMessageListenerInner());
 
-                    // 普通消费服务
+                    // 2 普通消费服务
                 } else if (this.getMessageListenerInner() instanceof MessageListenerConcurrently) {
                     this.consumeOrderly = false;
                     this.consumeMessageService =
@@ -832,8 +850,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                             null);
                 }
 
-                // todo 客户端实例启动，非常重要
+                // todo 消费者客户端实例启动，非常重要
                 mQClientFactory.start();
+
                 log.info("the consumer [{}] start OK.", this.defaultMQPushConsumer.getConsumerGroup());
                 this.serviceState = ServiceState.RUNNING;
                 break;
@@ -848,11 +867,11 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 break;
         }
 
-        // 基于订阅信息，更新路由信息
+        // todo 基于订阅信息，更新路由信息
         this.updateTopicSubscribeInfoWhenSubscriptionChanged();
         this.mQClientFactory.checkClientInBroker();
 
-        /* Consumer启动成功，立即向所有Broker发送心跳 */
+        /** Consumer启动成功，立即向所有Broker发送心跳 */
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         // todo 唤醒 均衡消息队列任务(RebalanceService)，负责当前 Consumer 可消费的消息队列
@@ -929,6 +948,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         }
 
         // 是否顺序消费
+        // 根据消息监听器确定
         boolean orderly = this.defaultMQPushConsumer.getMessageListener() instanceof MessageListenerOrderly;
 
         // 是否集群消息
@@ -1065,7 +1085,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                 case BROADCASTING:
                     break;
                 case CLUSTERING:
-                    // todo 为当前消费者组创建一个重试 Topic
+                    // todo 为当前消费者组自动创建一个重试 Topic
                     final String retryTopic = MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup());
 
                     // 为重试 Topic 构建订阅数据并缓存起来
@@ -1084,6 +1104,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         return messageListenerInner;
     }
 
+    /**
+     * 基于订阅信息更新当前 JVM 实例中的客户端（生产者或消费者）的 路由信息
+     */
     private void updateTopicSubscribeInfoWhenSubscriptionChanged() {
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
         if (subTable != null) {

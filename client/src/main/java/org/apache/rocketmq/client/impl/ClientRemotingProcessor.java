@@ -58,17 +58,39 @@ import org.apache.rocketmq.remoting.netty.AsyncNettyRequestProcessor;
 import org.apache.rocketmq.remoting.netty.NettyRequestProcessor;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
+/**
+ * 远程通信客户端
+ */
 public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implements NettyRequestProcessor {
     private final InternalLogger log = ClientLogger.getLog();
+
+    /**
+     * 客户端
+     */
     private final MQClientInstance mqClientFactory;
 
+    /**
+     * 创建远程通信客户端
+     *
+     * @param mqClientFactory 客户端
+     */
     public ClientRemotingProcessor(final MQClientInstance mqClientFactory) {
         this.mqClientFactory = mqClientFactory;
     }
 
+    /**
+     * 处理请求
+     *
+     * @param ctx
+     * @param request
+     * @return
+     * @throws RemotingCommandException
+     */
     @Override
     public RemotingCommand processRequest(ChannelHandlerContext ctx,
                                           RemotingCommand request) throws RemotingCommandException {
+
+        // 根据请求码处理不同的网络请求
         switch (request.getCode()) {
             // 回查
             case RequestCode.CHECK_TRANSACTION_STATE:

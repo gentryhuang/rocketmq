@@ -58,12 +58,12 @@ public class NamesrvController {
         "NSScheduledThread"));
 
     /**
-     * 读取或变更 NameServer 的配置属性，加载 NamesrvConfig 中配置的配置文件到内存
+     * todo 读取或变更 NameServer 的配置属性，加载 NamesrvConfig 中配置的配置文件到内存
      */
     private final KVConfigManager kvConfigManager;
 
     /**
-     * NameServer 数据的载体，记录 Broker 、Topic 等信息
+     * todo NameServer 数据的载体，记录 Broker 、Topic 等信息
      */
     private final RouteInfoManager routeInfoManager;
 

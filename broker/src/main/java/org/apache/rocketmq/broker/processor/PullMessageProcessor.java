@@ -71,6 +71,9 @@ import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
+/**
+ * 拉取消息处理
+ */
 public class PullMessageProcessor extends AsyncNettyRequestProcessor implements NettyRequestProcessor {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private final BrokerController brokerController;
@@ -105,6 +108,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         RemotingCommand response = RemotingCommand.createResponseCommand(PullMessageResponseHeader.class);
         final PullMessageResponseHeader responseHeader = (PullMessageResponseHeader) response.readCustomHeader();
+
+        // 解码拉取消息请求
         final PullMessageRequestHeader requestHeader =
                 (PullMessageRequestHeader) request.decodeCommandCustomHeader(PullMessageRequestHeader.class);
 
@@ -264,12 +269,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     this.brokerController.getConsumerFilterManager());
         }
 
-        // 获取消息
+        // todo 调用 MessageStore 获取消息的方法，拉取消息
         final GetMessageResult getMessageResult =
                 this.brokerController.getMessageStore().getMessage(requestHeader.getConsumerGroup(), requestHeader.getTopic(),
                         requestHeader.getQueueId(), requestHeader.getQueueOffset(), requestHeader.getMaxMsgNums(), messageFilter);
 
 
+        // 根据拉取结果填充 response
         if (getMessageResult != null) {
             response.setRemark(getMessageResult.getStatus().name());
             responseHeader.setNextBeginOffset(getMessageResult.getNextBeginOffset());
@@ -282,6 +288,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
             }
 
+            // 主从同步相关
             switch (this.brokerController.getMessageStoreConfig().getBrokerRole()) {
                 case ASYNC_MASTER:
                 case SYNC_MASTER:
@@ -307,19 +314,22 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
             }
 
-            // 根据查询到的消息状态设置 响应状态
+            // 根据查询到的消息状态设置响应状态
             switch (getMessageResult.getStatus()) {
+                // 成功
                 case FOUND:
                     response.setCode(ResponseCode.SUCCESS);
                     break;
+                // 消息存放在下一个 commitLog 中
                 case MESSAGE_WAS_REMOVING:
-                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY);
+                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY); // 消息重试
                     break;
+                // 未找到队列
                 case NO_MATCHED_LOGIC_QUEUE:
+                    // 队列中未包含消息
                 case NO_MESSAGE_IN_QUEUE:
                     if (0 != requestHeader.getQueueOffset()) {
                         response.setCode(ResponseCode.PULL_OFFSET_MOVED);
-
                         // XXX: warn and notify me
                         log.info("the broker store no queue data, fix the request offset {} to {}, Topic: {} QueueId: {} Consumer Group: {}",
                                 requestHeader.getQueueOffset(),
@@ -332,21 +342,26 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                         response.setCode(ResponseCode.PULL_NOT_FOUND);
                     }
                     break;
+                // 未找到消息
                 case NO_MATCHED_MESSAGE:
                     response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY);
                     break;
+                // 消息物理偏移量为空
                 case OFFSET_FOUND_NULL:
                     response.setCode(ResponseCode.PULL_NOT_FOUND);
                     break;
+                //offset越界
                 case OFFSET_OVERFLOW_BADLY:
                     response.setCode(ResponseCode.PULL_OFFSET_MOVED);
                     // XXX: warn and notify me
                     log.info("the request offset: {} over flow badly, broker max offset: {}, consumer: {}",
                             requestHeader.getQueueOffset(), getMessageResult.getMaxOffset(), channel.remoteAddress());
                     break;
+                //offset在队列中未找到
                 case OFFSET_OVERFLOW_ONE:
                     response.setCode(ResponseCode.PULL_NOT_FOUND);
                     break;
+                //offset未在队列中
                 case OFFSET_TOO_SMALL:
                     response.setCode(ResponseCode.PULL_OFFSET_MOVED);
                     log.info("the request offset too small. group={}, topic={}, requestOffset={}, brokerMinOffset={}, clientIp={}",
@@ -358,6 +373,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     break;
             }
 
+            // hook
             if (this.hasConsumeMessageHook()) {
                 ConsumeMessageContext context = new ConsumeMessageContext();
                 context.setConsumerGroup(requestHeader.getConsumerGroup());
@@ -365,8 +381,6 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 context.setQueueId(requestHeader.getQueueId());
 
                 String owner = request.getExtFields().get(BrokerStatsManager.COMMERCIAL_OWNER);
-
-
                 switch (response.getCode()) {
                     case ResponseCode.SUCCESS:
                         int commercialBaseCount = brokerController.getBrokerConfig().getCommercialBaseCount();
@@ -402,6 +416,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 this.executeConsumeMessageHookBefore(context);
             }
 
+
+            // 根据映射的响应码处理
             switch (response.getCode()) {
 
                 // 拉取到消息
@@ -446,11 +462,22 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     }
                     break;
 
+                /**
+                 * 消息拉取长轮询机制分析：
+                 * 1 RocketMQ未真正实现消息推模式，而是消费者主动向消息服务器拉取消息，RocketMQ推模式是循环向消息服务端发起消息拉取请求
+                 * 2 消息未到达消费队列时，如果不启用长轮询机制，则会在服务端等待shortPollingTimeMills时间后（挂起）再去判断消息是否已经到达指定消息队列，
+                 *   如果消息仍未到达则提示拉取消息客户端PULL—NOT—FOUND（消息不存在）；
+                 * 3 如果开启长轮询模式，RocketMQ一方面会每隔5s轮询检查一次消息是否可达，同时一有消息达到后立马通知挂起线程再次验证消息是否是自己感兴趣的消息，
+                 *   如果是则从CommitLog文件中提取消息返回给消息拉取客户端，否则直到挂起超时
+                 */
                 // 消息未查询到 && broker 允许刮起请求 && 请求允许挂起，则执行挂起请求
+                // 当没有拉取到消息时，通过长轮询方式继续拉取消息
                 case ResponseCode.PULL_NOT_FOUND:
 
                     if (brokerAllowSuspend && hasSuspendFlag) {
                         long pollingTimeMills = suspendTimeoutMillisLong;
+
+                        // 是否开启长轮询
                         if (!this.brokerController.getBrokerConfig().isLongPollingEnable()) {
                             pollingTimeMills = this.brokerController.getBrokerConfig().getShortPollingTimeMills();
                         }
@@ -458,10 +485,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                         String topic = requestHeader.getTopic();
                         long offset = requestHeader.getQueueOffset();
                         int queueId = requestHeader.getQueueId();
+
+                        // 创建拉取请求 - 长轮询包下的
+                        // 用于保存当前拉取消息的请求，后续使用定期线程扫描该请求，判断是否有消息到达
                         PullRequest pullRequest = new PullRequest(request, channel, pollingTimeMills,
                                 this.brokerController.getMessageStore().now(), offset, subscriptionData, messageFilter);
 
-                        // 添加到挂起请求队列，等待后续重新拉取
+                        // todo 添加到挂起请求队列，等待后续重新拉取
                         this.brokerController.getPullRequestHoldService().suspendPullRequest(topic, queueId, pullRequest);
                         response = null;
                         break;
@@ -499,17 +529,20 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 default:
                     assert false;
             }
+
+            // 拉取结果为空
         } else {
             response.setCode(ResponseCode.SYSTEM_ERROR);
             response.setRemark("store getMessage return null");
         }
 
-        // 请求要求持久化进度 && broker 非主，进行持久化
+        // 如果CommitLog标记可用,并且当前Broker为主节点,则更新消息消费进度
         boolean storeOffsetEnable = brokerAllowSuspend;
         storeOffsetEnable = storeOffsetEnable && hasCommitOffsetFlag;
         storeOffsetEnable = storeOffsetEnable
                 && this.brokerController.getMessageStoreConfig().getBrokerRole() != BrokerRole.SLAVE;
         if (storeOffsetEnable) {
+            // 提交消费进度
             this.brokerController.getConsumerOffsetManager().commitOffset(RemotingHelper.parseChannelRemoteAddr(channel),
                     requestHeader.getConsumerGroup(), requestHeader.getTopic(), requestHeader.getQueueId(), requestHeader.getCommitOffset());
         }

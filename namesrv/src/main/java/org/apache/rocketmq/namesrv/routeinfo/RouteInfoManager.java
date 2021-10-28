@@ -50,6 +50,15 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
 /**
  * NameServer 数据的载体，记录 Broker 、Topic 等信息
  * 即：主要的两个功能，Broker 管理和路由信息管理
+ * <p>
+ * todo 特别说明：
+ * 1 RocketMQ 中的路由消息是持久化在 Broker 中的，NameSrv 中的路由信息来自 Broker 的心跳包，是存储在内存中的
+ * 2 RocketMQ 中的路由消息是基本的 Topic 和其队列配置信息，而 NameSrv 中的路由信息是 Broker 和 Topic 即队列的集合，
+ * 毕竟上报信息是某个 Broker 的
+ * 3 客户端（包括发送端和消费端）缓存的路由发布信息格式 <Topic,List<MessageQueue>>，每个 MessageQueue 包含队列的基本信息，如下：
+ * - topic
+ * - brokerName
+ * - queueId
  */
 public class RouteInfoManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
@@ -263,6 +272,11 @@ public class RouteInfoManager {
 
     /**
      * 保存或更新主题-队列关系
+     * todo 特别说明：
+     * 1 组装 Broker 和 Topic 配置，最终得到的就是 topicQueueTable 表
+     * 2 根据哪个 Broker 发来的请求和上报的 Topic 配置信息，封装 Topic 的路由信息，包括两部分内容：
+     * - Broker 元数据
+     * - Topic 的队列元数据 （这里的方法）
      *
      * @param brokerName  Topic 队列所属的 Broker 的名
      * @param topicConfig Topic 配置
@@ -271,9 +285,15 @@ public class RouteInfoManager {
 
         // 创建队列数据
         QueueData queueData = new QueueData();
+        // Topic 队列分散在哪个 Broker 上
         queueData.setBrokerName(brokerName);
+
+        // todo  写队列数用于生产者客户端在从 NameSrv 拉取 Topic 路由信息时，转成 写MessageQueue
         queueData.setWriteQueueNums(topicConfig.getWriteQueueNums());
+        // todo 读队列数用于消费者转成 读MessageQueue
         queueData.setReadQueueNums(topicConfig.getReadQueueNums());
+
+        // 队列权限
         queueData.setPerm(topicConfig.getPerm());
         queueData.setTopicSysFlag(topicConfig.getTopicSysFlag());
 

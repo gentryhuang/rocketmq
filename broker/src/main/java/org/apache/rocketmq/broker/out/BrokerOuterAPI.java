@@ -119,7 +119,7 @@ public class BrokerOuterAPI {
      * @param brokerName         Broker 名称
      * @param brokerId
      * @param haServerAddr
-     * @param topicConfigWrapper
+     * @param topicConfigWrapper Topic 队列配置信息
      * @param filterServerList
      * @param oneway
      * @param timeoutMills
@@ -144,7 +144,7 @@ public class BrokerOuterAPI {
         List<String> nameServerAddressList = this.remotingClient.getNameServerAddressList();
         if (nameServerAddressList != null && nameServerAddressList.size() > 0) {
 
-            // 创建上报请求对象
+            // 创建上报请求对象，用于封装 Broker 信息和 Topic 信息
             final RegisterBrokerRequestHeader requestHeader = new RegisterBrokerRequestHeader();
             // 设置 Broker 信息
             requestHeader.setBrokerAddr(brokerAddr);
@@ -171,6 +171,8 @@ public class BrokerOuterAPI {
                         try {
 
                             RegisterBrokerResult result = registerBroker(namesrvAddr, oneway, timeoutMills, requestHeader, body);
+
+                            // 加入上报结果集中
                             if (result != null) {
                                 registerBrokerResultList.add(result);
                             }

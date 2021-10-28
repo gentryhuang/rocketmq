@@ -21,17 +21,35 @@ import org.apache.rocketmq.store.MessageArrivingListener;
 
 import java.util.Map;
 
+/**
+ * 消息到达监听器
+ */
 public class NotifyMessageArrivingListener implements MessageArrivingListener {
+    /**
+     * 拉取消息请求挂起服务
+     */
     private final PullRequestHoldService pullRequestHoldService;
 
     public NotifyMessageArrivingListener(final PullRequestHoldService pullRequestHoldService) {
         this.pullRequestHoldService = pullRequestHoldService;
     }
 
+    /**
+     * 消息到达后，通知拉取消息请求挂起服务，消息到达了，可以重试去拉取消息
+     *
+     * @param topic
+     * @param queueId
+     * @param logicOffset
+     * @param tagsCode
+     * @param msgStoreTime
+     * @param filterBitMap
+     * @param properties
+     */
     @Override
     public void arriving(String topic, int queueId, long logicOffset, long tagsCode,
-        long msgStoreTime, byte[] filterBitMap, Map<String, String> properties) {
+                         long msgStoreTime, byte[] filterBitMap, Map<String, String> properties) {
+        // 通知消息到达
         this.pullRequestHoldService.notifyMessageArriving(topic, queueId, logicOffset, tagsCode,
-            msgStoreTime, filterBitMap, properties);
+                msgStoreTime, filterBitMap, properties);
     }
 }

@@ -19,7 +19,9 @@ package org.apache.rocketmq.common;
 import org.apache.rocketmq.common.constant.PermName;
 
 /**
- * Topic 配置信息
+ * Topic 配置信息。
+ * todo 特别说明：
+ * 在新版的 RocketMQ 中读写队列各有 16 个
  */
 public class TopicConfig {
     private static final String SEPARATOR = " ";

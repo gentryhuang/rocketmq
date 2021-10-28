@@ -240,6 +240,8 @@ public class DefaultMessageStore implements MessageStore {
         } else {
             this.haService = null;
         }
+
+        // 创建重放消息服务
         this.reputMessageService = new ReputMessageService();
 
         this.scheduleMessageService = new ScheduleMessageService(this);
@@ -395,6 +397,8 @@ public class DefaultMessageStore implements MessageStore {
 
             // 设置重放消息的 commitlog 的物理位置
             this.reputMessageService.setReputFromOffset(maxPhysicalPosInLogicQueue);
+
+
             // 启动 Commitlog 转发到 Consumequeue、Index文件 的任务
             this.reputMessageService.start();
 
@@ -718,26 +722,29 @@ public class DefaultMessageStore implements MessageStore {
      * @param messageFilter 消息过滤器
      * @return
      */
-    public GetMessageResult getMessage(final String group, final String topic, final int queueId, final long offset,
+    public GetMessageResult getMessage(final String group,
+                                       final String topic,
+                                       final int queueId,
+                                       final long offset,
                                        final int maxMsgNums,
                                        final MessageFilter messageFilter) {
         if (this.shutdown) {
             log.warn("message store has shutdown, so getMessage is forbidden");
             return null;
         }
-
         if (!this.runningFlags.isReadable()) {
             log.warn("message store is not readable, so getMessage is forbidden " + this.runningFlags.getFlagBits());
             return null;
         }
 
         long beginTime = this.getSystemClock().now();
-
         GetMessageStatus status = GetMessageStatus.NO_MESSAGE_IN_QUEUE;
 
-        // 设置拉取偏移量
+        // 下一次队列偏移量
         long nextBeginOffset = offset;
+        // 当前消息队列最小偏移量
         long minOffset = 0;
+        // 当前消息队列最大偏移量
         long maxOffset = 0;
 
         GetMessageResult getResult = new GetMessageResult();
@@ -750,12 +757,10 @@ public class DefaultMessageStore implements MessageStore {
         if (consumeQueue != null) {
             // 选中的消息队列，最小编号
             minOffset = consumeQueue.getMinOffsetInQueue();
-
             //  选中的消息队列，最大编号
             maxOffset = consumeQueue.getMaxOffsetInQueue();
 
             // 6 根据需要拉取消息的偏移量 与 队列最小，最大偏移量进行对比
-
 
             // 队列中没有消息
             // 1）如果是主节点，或者是从节点但开启了offsetCheckSlave的话，下次从头开始拉取。
@@ -770,12 +775,12 @@ public class DefaultMessageStore implements MessageStore {
                 status = GetMessageStatus.OFFSET_TOO_SMALL;
                 nextBeginOffset = nextOffsetCorrection(offset, minOffset);
 
-                // 表示超出一个，返回状态：OFFSET_OVERFLOW_ONE，offset 保持不变。
+                // 待拉取偏移量为队列最大偏移量，表示超出一个，返回状态：OFFSET_OVERFLOW_ONE，offset 保持不变。
             } else if (offset == maxOffset) {
                 status = GetMessageStatus.OFFSET_OVERFLOW_ONE;
                 nextBeginOffset = nextOffsetCorrection(offset, offset);
 
-                // 表示超出，返回状态：OFFSET_OVERFLOW_BADLY
+                // 偏移量越界，返回状态：OFFSET_OVERFLOW_BADLY
                 // 如果为从节点并未开启 offsetCheckSlave,则使用原偏移量，这个是正常的，等待消息到达从服务器。如果是主节点：表示offset是一个非法的偏移量，如果minOffset=0,则设置下一个拉取偏移量为0,否则设置为最大，我感觉设置为0，重新拉取，有可能消息重复，
                 // 设置为最大可能消息会丢失？什么时候会offset > maxOffset(在主节点）拉取完消息，进行第二次拉取时，重点看一下这些状态下，应该还有第二次修正消息的处理。
             } else if (offset > maxOffset) {
@@ -2383,20 +2388,26 @@ public class DefaultMessageStore implements MessageStore {
                             // 读取成功
                             if (dispatchRequest.isSuccess()) {
 
-                                // 对应的是 Message
+                                // 有消息
                                 if (size > 0) {
 
                                     // 3 转发 DispatchRequest，构建消息队列和IndexFile todo 重要
                                     DefaultMessageStore.this.doDispatch(dispatchRequest);
 
-                                    // 当 Broker 是主节点 && Broker 开启的是长轮询，通知消费队列有新的消息
+                                    // todo 4 当 Broker 是主节点 && Broker 开启的是长轮询，则通知消费队列有新的消息到达，这样处理等待中拉取消息请求可以再次拉取消息
+                                    // 因为在拉取消息时
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
                                             && DefaultMessageStore.this.brokerConfig.isLongPollingEnable()
                                             && DefaultMessageStore.this.messageArrivingListener != null) {
-                                        DefaultMessageStore.this.messageArrivingListener.arriving(dispatchRequest.getTopic(),
-                                                dispatchRequest.getQueueId(), dispatchRequest.getConsumeQueueOffset() + 1,
-                                                dispatchRequest.getTagsCode(), dispatchRequest.getStoreTimestamp(),
-                                                dispatchRequest.getBitMap(), dispatchRequest.getPropertiesMap());
+
+                                        DefaultMessageStore.this.messageArrivingListener.arriving(
+                                                dispatchRequest.getTopic(),
+                                                dispatchRequest.getQueueId(),
+                                                dispatchRequest.getConsumeQueueOffset() + 1,
+                                                dispatchRequest.getTagsCode(),
+                                                dispatchRequest.getStoreTimestamp(),
+                                                dispatchRequest.getBitMap(),
+                                                dispatchRequest.getPropertiesMap());
                                     }
 
                                     // 更新下次重放消息的偏移量

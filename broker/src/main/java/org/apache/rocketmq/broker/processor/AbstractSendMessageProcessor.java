@@ -218,7 +218,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
                 }
             }
 
-            // todo 在 Broker 中缓存并上报 Topic
+            // todo 创建 Topic 在 Broker 中缓存并上报 Topic
             log.warn("the topic {} not exist, producer: {}", requestHeader.getTopic(), ctx.channel().remoteAddress());
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageMethod(
                     requestHeader.getTopic(),

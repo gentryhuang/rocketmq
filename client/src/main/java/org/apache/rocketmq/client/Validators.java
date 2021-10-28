@@ -126,6 +126,11 @@ public class Validators {
         }
     }
 
+    /**
+     * 不允许发送的 Topic
+     * @param topic
+     * @throws MQClientException
+     */
     public static void isNotAllowedSendTopic(String topic) throws MQClientException {
         if (TopicValidator.isNotAllowedSendTopic(topic)) {
             throw new MQClientException(

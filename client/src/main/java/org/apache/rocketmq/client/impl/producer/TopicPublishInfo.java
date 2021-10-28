@@ -38,6 +38,7 @@ public class TopicPublishInfo {
     private boolean haveTopicRouterInfo = false;
     /**
      * topic 的队列集合
+     * todo 注意：是所有 Broker 上分布的队列。如有 BrokerA 和 BrokerB ，写队列4个，则这里共有 8 个队列
      */
     private List<MessageQueue> messageQueueList = new ArrayList<MessageQueue>();
 
@@ -47,7 +48,7 @@ public class TopicPublishInfo {
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
 
     /**
-     * Topic 的路由信息：包含队列信息和 Broker 信息
+     * Topic 的路由信息(原始信息)：包含队列信息和 Broker 信息
      */
     private TopicRouteData topicRouteData;
 
@@ -93,7 +94,7 @@ public class TopicPublishInfo {
     }
 
     /**
-     * 基于 BrokerName 的随机递增取模算法，获取对应的 MessageQueue
+     * 基于递增取模算法，获取对应的 MessageQueue。如果传入了发送消息失败的 Broker ，则要先过滤再考虑基于递增取模
      *
      * @param lastBrokerName
      * @return
@@ -111,6 +112,8 @@ public class TopicPublishInfo {
                 if (pos < 0)
                     pos = 0;
                 MessageQueue mq = this.messageQueueList.get(pos);
+
+                // 过滤掉上次发送消息失败的 Broker
                 if (!mq.getBrokerName().equals(lastBrokerName)) {
                     return mq;
                 }

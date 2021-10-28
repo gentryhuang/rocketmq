@@ -40,6 +40,8 @@ import org.apache.rocketmq.common.protocol.body.ProcessQueueInfo;
  * <p>
  * 1 Queue consumption snapshot 消息队列快照
  * 2 每个 MessageQueue 对应一个 ProcessQueue
+ * 3 PullMessageService从消息服务器默认每次拉取32条消息，按照消息的队列偏移量顺序存放在ProcessQueue中，
+ * PullMessageService然后将消息提交到消费者消费线程池，消息成功消费后从ProcessQueue中移除。
  */
 public class ProcessQueue {
     public final static long REBALANCE_LOCK_MAX_LIVE_TIME =
@@ -53,16 +55,18 @@ public class ProcessQueue {
      */
     private final ReadWriteLock treeMapLock = new ReentrantReadWriteLock();
     /**
+     * 消息容器
+     * <p>
      * 消息映射 - 注意是 TreeMap 结构，根据消费进度排序
      * key: 消息队列进度 value: 消息
      */
     private final TreeMap<Long, MessageExt> msgTreeMap = new TreeMap<Long, MessageExt>();
     /**
-     * 消息数
+     * ProcessQueue 总消息数
      */
     private final AtomicLong msgCount = new AtomicLong();
     /**
-     * 添加消息最大队列位置
+     * ProcessQueue 队列最大偏移量
      */
     private final AtomicLong msgSize = new AtomicLong();
 
@@ -80,13 +84,20 @@ public class ProcessQueue {
 
     private final AtomicLong tryUnlockTimes = new AtomicLong(0);
     private volatile long queueOffsetMax = 0L;
+
+    /**
+     * 当前 ProcessQueue 是否被丢弃
+     */
     private volatile boolean dropped = false;
 
     /**
-     * 消息处理队列最后拉取消息的时间
+     * 上一次拉取消息的时间
      */
     private volatile long lastPullTimestamp = System.currentTimeMillis();
 
+    /**
+     * 上一次消费时间戳
+     */
     private volatile long lastConsumeTimestamp = System.currentTimeMillis();
 
     /**
@@ -209,6 +220,8 @@ public class ProcessQueue {
                         msgSize.addAndGet(msg.getBody().length);
                     }
                 }
+
+                // 记录消息处理队列中消息的数量
                 msgCount.addAndGet(validMsgCnt);
 
                 // 计算是否正在消费
@@ -238,6 +251,11 @@ public class ProcessQueue {
         return dispatchToConsume;
     }
 
+    /**
+     * 获取消息最大间隔，即消费进度差值
+     *
+     * @return
+     */
     public long getMaxSpan() {
         try {
             this.treeMapLock.readLock().lockInterruptibly();
@@ -282,6 +300,8 @@ public class ProcessQueue {
                             msgSize.addAndGet(0 - msg.getBody().length);
                         }
                     }
+
+                    // 递减统计数量
                     msgCount.addAndGet(removedCnt);
 
                     // 删除后当前msgTreeMap不为空，返回第一个元素，即最小的offset
@@ -328,7 +348,7 @@ public class ProcessQueue {
     }
 
     /**
-     * 回滚消费中的消息
+     * 回滚消费中的消息，即将consumingMsgOrderlyTreeMap中消息重新放在msgTreeMap,并清空consumingMsgOrderlyTreeMap
      * 逻辑类似于
      * {@link #makeMessageToConsumeAgain(List)}
      */
@@ -347,7 +367,7 @@ public class ProcessQueue {
     }
 
     /**
-     * 提交消费中的消息已消费成功，返回消费进度
+     * //将consumingMsgOrderlyTreeMap消息清除,表示成功处理该批消息，并返回消费进度
      *
      * @return
      */

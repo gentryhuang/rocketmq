@@ -32,11 +32,11 @@ import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 public class TopicRouteData extends RemotingSerializable {
     private String orderTopicConf;
     /**
-     * Topic 下的队列数据
+     * Topic 队列元数据
      */
     private List<QueueData> queueDatas;
     /**
-     * Topic 对应的 Broker 数据
+     * Topic 分布的 Broker 元数据
      */
     private List<BrokerData> brokerDatas;
 

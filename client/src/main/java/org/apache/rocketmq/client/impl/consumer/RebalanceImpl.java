@@ -124,29 +124,45 @@ public abstract class RebalanceImpl {
         }
     }
 
+    /**
+     * 解锁当前消费客户端实例的所有消费队列
+     *
+     * @param oneway
+     */
     public void unlockAll(final boolean oneway) {
+        // 获取当前消费客户端实例分配的所有队列以及这些队列所在的 Broker
         HashMap<String, Set<MessageQueue>> brokerMqs = this.buildProcessQueueTableByBrokerName();
 
         for (final Map.Entry<String, Set<MessageQueue>> entry : brokerMqs.entrySet()) {
+            // 队列所在的 Broker
             final String brokerName = entry.getKey();
+            // 队列
             final Set<MessageQueue> mqs = entry.getValue();
 
             if (mqs.isEmpty())
                 continue;
 
+            // 根据 BrokerName 获取 Broker
             FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(brokerName, MixAll.MASTER_ID, true);
             if (findBrokerResult != null) {
+                // 构建解锁队列的请求体
                 UnlockBatchRequestBody requestBody = new UnlockBatchRequestBody();
+                // 当前消费者所在的消费组
                 requestBody.setConsumerGroup(this.consumerGroup);
+                // 当前消费客户端实例ID
                 requestBody.setClientId(this.mQClientFactory.getClientId());
+                // 要解锁的队列集合
                 requestBody.setMqSet(mqs);
 
                 try {
+                    // 向 Broker 请求解锁 mqs
                     this.mQClientFactory.getMQClientAPIImpl().unlockBatchMQ(findBrokerResult.getBrokerAddr(), requestBody, 1000, oneway);
 
+                    // 将消费端分配到的消息队列对应的 ProcessQueue 标记解除锁定
                     for (MessageQueue mq : mqs) {
                         ProcessQueue processQueue = this.processQueueTable.get(mq);
                         if (processQueue != null) {
+                            // 解除锁定
                             processQueue.setLocked(false);
                             log.info("the message queue unlock OK, Group: {} {}", this.consumerGroup, mq);
                         }
@@ -188,11 +204,17 @@ public abstract class RebalanceImpl {
      * @return 是否成功
      */
     public boolean lock(final MessageQueue mq) {
+        // 获取 mq 所在的 Broker 地址（主节点）
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(), MixAll.MASTER_ID, true);
         if (findBrokerResult != null) {
+
+            // 锁定 MessageQueue 的请求体
             LockBatchRequestBody requestBody = new LockBatchRequestBody();
+            // 消费组
             requestBody.setConsumerGroup(this.consumerGroup);
+            // 消费组下的消费者客户端实例
             requestBody.setClientId(this.mQClientFactory.getClientId());
+            // 要锁定的 MessageQueue 集合
             requestBody.getMqSet().add(mq);
 
             try {
@@ -230,7 +252,9 @@ public abstract class RebalanceImpl {
     }
 
     /**
-     * Consumer 不断向 Broker 刷新锁消息队列锁过期时间
+     * Consumer 不断向 Broker 刷新锁消息队列锁过期时间。
+     * todo 特别说明：
+     * 每个 MQ 客户端，会定时发送 LOCK_BATCH_MQ 请求，并且在本地维护获取到锁的所有队列，即在消息处理队列 ProcessQueue 中使用 locked 和 lastLockTimestamp 进行标记。
      */
     public void lockAll() {
 
@@ -273,6 +297,7 @@ public abstract class RebalanceImpl {
                                 log.info("the message queue locked OK, Group: {} {}", this.consumerGroup, mq);
                             }
 
+                            // 标记锁定
                             processQueue.setLocked(true);
                             processQueue.setLastLockTimestamp(System.currentTimeMillis());
                         }
@@ -297,11 +322,12 @@ public abstract class RebalanceImpl {
 
     /**
      * 为 Consumer 分配队列
+     * 说明：当前 RebalanceImpl 是某个 Consumer 持有的
      *
      * @param isOrder 是否顺序消息
      */
     public void doRebalance(final boolean isOrder) {
-        // todo 获取订阅数据，以 Topic 维度。注意每个 Topic 自动对应一个重试主题
+        // todo 获取 Consumer 订阅数据，以 Topic 维度。注意每个 Topic 自动对应一个重试主题
         // 分配 Topic 下的队列
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
 
@@ -348,7 +374,7 @@ public abstract class RebalanceImpl {
             // todo 广播模式
             case BROADCASTING: {
 
-                // 根据 Topic 获取下面的消息队列，即缓存中订阅该 Topic 分配的队列
+                // 根据 Topic 获取对应的消息队列，即缓存中订阅该 Topic 分配的队列
                 Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
 
                 if (mqSet != null) {
@@ -588,6 +614,7 @@ public abstract class RebalanceImpl {
 
         // 派发拉取消息请求
         // todo 注意：这是拉取消息的起点，即每个消费队列对应一个 PullRequest
+        // todo 消息拉取由PullMessageService线程根据这里的拉取任务进行拉取
         this.dispatchPullRequest(pullRequestList);
 
         return changed;

@@ -21,20 +21,20 @@ import org.apache.rocketmq.common.message.MessageQueue;
 /**
  * 拉取消息请求
  * 说明：
- * - 每个MessageQueue 对应了封装成了一个PullRequest，因为拉取数据是以每个Broker下面的Queue为单位，
+ * - 每个MessageQueue 对应封装成了一个PullRequest，因为拉取数据是以每个Broker下面的Queue为单位，
  * - 同时里面还一个ProcessQueue，每个MessageQueue也同样对应一个ProcessQueue，保存了这个MessageQueue消息处理状态的快照；
  * - 还有nextOffset用来标识读取的位置；
- *
+ * - consumerGroup 指定了哪个消费者组要拉取消息
 
  *
  */
 public class PullRequest {
     /**
-     * 消费组
+     * 消费者组
      */
     private String consumerGroup;
     /**
-     * 消息队列
+     * 待拉取消息队列
      */
     private MessageQueue messageQueue;
     /**
@@ -42,9 +42,12 @@ public class PullRequest {
      */
     private ProcessQueue processQueue;
     /**
-     * 下次拉取消息的位置
+     * 待拉取的 MessageQueue 偏移量
      */
     private long nextOffset;
+    /**
+     * 是否被锁定
+     */
     private boolean previouslyLocked = false;
 
     public boolean isPreviouslyLocked() {

@@ -165,6 +165,9 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
+/**
+ * RocketMQ 网络通信客户端封装类
+ */
 public class MQClientAPIImpl {
 
     private final static InternalLogger log = ClientLogger.getLog();
@@ -791,7 +794,7 @@ public class MQClientAPIImpl {
     /**
      * 拉取消息
      *
-     * @param addr
+     * @param addr              Broker 地址
      * @param requestHeader
      * @param timeoutMillis
      * @param communicationMode
@@ -808,15 +811,22 @@ public class MQClientAPIImpl {
             final CommunicationMode communicationMode,
             final PullCallback pullCallback
     ) throws RemotingException, MQBrokerException, InterruptedException {
+
+        // 拉取消息请求，请求码 PULL_MESSAGE
+        /**
+         * @see
+         */
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.PULL_MESSAGE, requestHeader);
 
         switch (communicationMode) {
             case ONEWAY:
                 assert false;
                 return null;
+            // 异步拉取
             case ASYNC:
                 this.pullMessageAsync(addr, request, timeoutMillis, pullCallback);
                 return null;
+            // 同步拉取
             case SYNC:
                 return this.pullMessageSync(addr, request, timeoutMillis);
             default:
@@ -827,12 +837,23 @@ public class MQClientAPIImpl {
         return null;
     }
 
+    /**
+     * 异步拉取消息
+     *
+     * @param addr
+     * @param request
+     * @param timeoutMillis
+     * @param pullCallback
+     * @throws RemotingException
+     * @throws InterruptedException
+     */
     private void pullMessageAsync(
             final String addr,
             final RemotingCommand request,
             final long timeoutMillis,
             final PullCallback pullCallback
     ) throws RemotingException, InterruptedException {
+
         this.remotingClient.invokeAsync(addr, request, timeoutMillis, new InvokeCallback() {
             /**
              * 执行调用回调用，即 PullCallback ，将拉取的结果或异常信息传过去
@@ -843,10 +864,14 @@ public class MQClientAPIImpl {
                 RemotingCommand response = responseFuture.getResponseCommand();
                 if (response != null) {
                     try {
+                        // 处理拉取消息结果
                         PullResult pullResult = MQClientAPIImpl.this.processPullResponse(response, addr);
                         assert pullResult != null;
+
+                        // 将结果交给回调用
                         pullCallback.onSuccess(pullResult);
                     } catch (Exception e) {
+                        // 出现异常，将异常交给回调
                         pullCallback.onException(e);
                     }
                 } else {
@@ -863,6 +888,17 @@ public class MQClientAPIImpl {
         });
     }
 
+    /**
+     * 同步拉取消息
+     *
+     * @param addr
+     * @param request
+     * @param timeoutMillis
+     * @return
+     * @throws RemotingException
+     * @throws InterruptedException
+     * @throws MQBrokerException
+     */
     private PullResult pullMessageSync(
             final String addr,
             final RemotingCommand request,
@@ -873,10 +909,21 @@ public class MQClientAPIImpl {
         return this.processPullResponse(response, addr);
     }
 
+    /**
+     * 处理拉取结果
+     *
+     * @param response
+     * @param addr
+     * @return
+     * @throws MQBrokerException
+     * @throws RemotingCommandException
+     */
     private PullResult processPullResponse(
             final RemotingCommand response,
             final String addr) throws MQBrokerException, RemotingCommandException {
         PullStatus pullStatus = PullStatus.NO_NEW_MSG;
+
+        // 判断拉取消息响应结果
         switch (response.getCode()) {
             case ResponseCode.SUCCESS:
                 pullStatus = PullStatus.FOUND;
@@ -895,9 +942,11 @@ public class MQClientAPIImpl {
                 throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
         }
 
+        // 解码响应头
         PullMessageResponseHeader responseHeader =
                 (PullMessageResponseHeader) response.decodeCommandCustomHeader(PullMessageResponseHeader.class);
 
+        // 封装 PullResultExt 返回
         return new PullResultExt(pullStatus, responseHeader.getNextBeginOffset(), responseHeader.getMinOffset(),
                 responseHeader.getMaxOffset(), null, responseHeader.getSuggestWhichBrokerId(), response.getBody());
     }
@@ -1290,6 +1339,8 @@ public class MQClientAPIImpl {
             final String addr,
             final LockBatchRequestBody requestBody,
             final long timeoutMillis) throws RemotingException, MQBrokerException, InterruptedException {
+
+        // 对指定的 MessageQueue（们）上锁
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.LOCK_BATCH_MQ, null);
 
         request.setBody(requestBody.encode());

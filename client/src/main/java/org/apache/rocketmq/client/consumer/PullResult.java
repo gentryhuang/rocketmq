@@ -32,10 +32,16 @@ public class PullResult {
      * 结果中返回，下次从哪里开始拉取
      */
     private final long nextBeginOffset;
+    /**
+     * 消息队列最小偏移量
+     */
     private final long minOffset;
+    /**
+     * 消息队列最大偏移量
+     */
     private final long maxOffset;
     /**
-     * 拉取到的消息
+     * 拉取的消息列表
      */
     private List<MessageExt> msgFoundList;
 

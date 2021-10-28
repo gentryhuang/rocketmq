@@ -12,17 +12,19 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
  * @since 2021/10/08
  * <p>
  * desc：
+ * 1 删除 store 下的存储
+ * 2 删除 logs 下的 RocketMQ 日志
  */
 public class DemoProducer {
     public static void main(String[] args) throws Exception {
         //Instantiate with a producer group name.
         DefaultMQProducer producer = new
-                DefaultMQProducer("please_rename_unique_group_name");
+                DefaultMQProducer("demo_producer");
         // Specify name server addresses.
         producer.setNamesrvAddr("localhost:9876");
         //Launch the instance.
         producer.start();
-        for (int i = 0; i < Integer.MAX_VALUE; i++) {
+        for (int i = 0; i < 1; i++) {
             //Create a message instance, specifying topic, tag and message body.
             Message msg = new Message("TopicTest" /* Topic */,
                     "TagA" /* Tag */,
@@ -30,11 +32,11 @@ public class DemoProducer {
                             i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
             );
             //Call send message to deliver message to one of brokers.
-            SendResult sendResult = producer.send(msg,50000);
+            SendResult sendResult = producer.send(msg, 50000);
             System.out.printf("%s%n", sendResult);
             try {
                 Thread.sleep(3000);
-            }catch (Exception ex){
+            } catch (Exception ex) {
                 //...
             }
         }

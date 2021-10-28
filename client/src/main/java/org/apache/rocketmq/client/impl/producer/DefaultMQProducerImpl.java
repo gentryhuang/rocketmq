@@ -104,8 +104,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     /**
      * Producer 本地缓存的 Topic 信息表 - 由路由信息转换而得到的 （todo 注意：起始的时候是全部的队列）
-     *
+     * <p>
      * 根据Topic路由设置该字段的情况如下：
+     *
      * @see MQClientInstance#updateTopicRouteInfoFromNameServer(java.lang.String, boolean, org.apache.rocketmq.client.producer.DefaultMQProducer)
      */
     private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable = new ConcurrentHashMap<String, TopicPublishInfo>();
@@ -122,6 +123,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      * 服务状态
      */
     private ServiceState serviceState = ServiceState.CREATE_JUST;
+    /**
+     * 客户端实例
+     */
     private MQClientInstance mQClientFactory;
     private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>();
     private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5"));
@@ -194,6 +198,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         this.start(true);
     }
 
+    /**
+     * 启动消息生产者
+     *
+     * @param startFactory 是否开启生产者对应的客户端
+     * @throws MQClientException
+     */
     public void start(final boolean startFactory) throws MQClientException {
         switch (this.serviceState) {
             case CREATE_JUST:
@@ -202,15 +212,20 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 配置检查
                 this.checkConfig();
 
+                // 如果生产者组名非 CLIENT_INNER_PRODUCER ，说明非内部生产者
+                // 改变生产者的 instanceName 为进程ID
                 if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
 
-                // 创建 mqclient 对象
+                // 创建客户端实例
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
-                // 注册生产者
+                // 向 MQClientInstance 注册消息生产者，将当前生产者加入客户端管理
+                // 其实消息生产者的智能是交给 客户端实例完成的
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
+
+                // 更新消息生产者的状态
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
                     throw new MQClientException("The producer group[" + this.defaultMQProducer.getProducerGroup()
@@ -222,6 +237,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // todo 只缓存了 TBW102（这里只有key（topic），实际也无详细信息，还是要从NameSrv获取
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
+
+                // 启动客户端实例
                 if (startFactory) {
                     // 启动 mqclient
                     mQClientFactory.start();
@@ -667,7 +684,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
             // 循环发送消息，直到成功
             for (; times < timesTotal; times++) {
-                // 第一次 mq 为空
+
+                // lastBrokerName 就是上一次选择的执行发送消息失败的 Broker
                 String lastBrokerName = null == mq ? null : mq.getBrokerName();
 
                 // 2 根据负载均衡算法选择一个MessageQueue，即选择消息要发送到的队列
@@ -814,13 +832,19 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     /**
-     * 获取 Topic 的发布信息。是对路由信息的解析封装
+     * 获取 Topic 的发布信息。是对路由信息的解析封装。
+     * <p>
+     * todo 特别说明：在 RocketMQ 开启自动创建主题的机制下（默认开启）
+     * 1 消息发送者向一个不存在的主题发送消息时，向 NameServer 查询该主题的路由信息会返回空
+     * 2 然后使用默认的主题名即TWB102再次从 NameServer 查询路由信息
+     * 3 然后发送者会使用默认主题的路由信息进行负载均衡，就是说该路由信息中的消息队列是属于默认主题的，而不是我们的主题的
+     * 4 注意，是使用默认主题的路由信息，而不是直接使用默认路由信息作为新主题创建对应的路由信息
      *
      * @param topic
      * @return
      */
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
-        // 从本地缓存中尝试获取 Topic 路由信息
+        // 从生产者本地缓存中尝试获取 Topic 路由信息
         // Producer启动后，会添加默认的topic：TBW102，但具体的信息还是没有，需要从NameSrv获取
         TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
 
@@ -961,7 +985,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 requestHeader.setTopic(msg.getTopic());
                 // 默认主题：TBW102
                 requestHeader.setDefaultTopic(this.defaultMQProducer.getCreateTopicKey());
-                // 创建topic时的队列数量，默认为 4
+
+
+                // 默认队列数量，默认为 4
                 requestHeader.setDefaultTopicQueueNums(this.defaultMQProducer.getDefaultTopicQueueNums());
                 requestHeader.setQueueId(mq.getQueueId());
                 // 消息类型

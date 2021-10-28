@@ -64,9 +64,13 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
      */
     private final BlockingQueue<Runnable> consumeRequestQueue;
     /**
-     * 消费线程池
+     * 消费线程池，消费任务 ConsumeRequest 提交到该线程池执行
      */
     private final ThreadPoolExecutor consumeExecutor;
+
+    /**
+     * 消费组
+     */
     private final String consumerGroup;
 
     private final ScheduledExecutorService scheduledExecutorService;
@@ -88,6 +92,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         this.consumerGroup = this.defaultMQPushConsumer.getConsumerGroup();
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
+        /**
+         * 消费线程池
+         */
         this.consumeExecutor = new ThreadPoolExecutor(
                 this.defaultMQPushConsumer.getConsumeThreadMin(),
                 this.defaultMQPushConsumer.getConsumeThreadMax(),
@@ -235,23 +242,23 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             final MessageQueue messageQueue,
             final boolean dispatchToConsume) {
 
-        // 批量方式消费数
+        // 批量消息的数量
         final int consumeBatchSize = this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 
-        // 提交消息数小于等于批量消费数，直接提交消费请求
+        // 提交消息数小于等于批量消息数，直接提交消费请求
         if (msgs.size() <= consumeBatchSize) {
 
             // 创建消费消息任务，将消息封装到里面
             ConsumeRequest consumeRequest = new ConsumeRequest(msgs, processQueue, messageQueue);
             try {
 
-                // 提交到线程池
+                // 提交消费消息任务到线程池
                 this.consumeExecutor.submit(consumeRequest);
             } catch (RejectedExecutionException e) {
                 this.submitConsumeRequestLater(consumeRequest);
             }
 
-            // 提交消息数大于批量消费数，进行分拆成多个请求
+            // 提交消息数大于批量消息数，进行分拆成多个请求
         } else {
             for (int total = 0; total < msgs.size(); ) {
                 // 计算当前拆分请求包含的消息

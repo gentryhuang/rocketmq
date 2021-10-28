@@ -31,6 +31,8 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.ConsumeQueueExt;
 
 /**
+ * PullRequestHoldService方式实现长轮询：
+ * <p>
  * 拉取消息请求挂起维护线程服务：
  * 1 当拉取消息请求获得不了消息时，则会将请求进行挂起，添加到该服务
  * 2 当有符合条件信息时 或 挂起超时时，重新执行获取消息逻辑
@@ -42,7 +44,8 @@ public class PullRequestHoldService extends ServiceThread {
     private final SystemClock systemClock = new SystemClock();
 
     /**
-     * 拉取消息请求集合
+     * 拉取消息 remote 请求集合
+     * key: topic@queueId
      */
     private ConcurrentMap<String/* topic@queueId */, ManyPullRequest> pullRequestTable = new ConcurrentHashMap<String, ManyPullRequest>(1024);
 
@@ -96,8 +99,10 @@ public class PullRequestHoldService extends ServiceThread {
             try {
                 // 根据 长轮训 还是 短轮训 设置不同的等待时间
                 if (this.brokerController.getBrokerConfig().isLongPollingEnable()) {
+                    // 如果开启长轮询，则每隔 5 秒判断消息是否到达
                     this.waitForRunning(5 * 1000);
                 } else {
+                    // 没有开启长轮询，每隔 1s 再次尝试
                     this.waitForRunning(this.brokerController.getBrokerConfig().getShortPollingTimeMills());
                 }
 
@@ -124,7 +129,7 @@ public class PullRequestHoldService extends ServiceThread {
     }
 
     /**
-     * 遍历挂起请求，检查是否有需要通知的请求
+     * 遍历挂起的拉取消息请求，检查要消息是否到来
      */
     private void checkHoldRequest() {
         for (String key : this.pullRequestTable.keySet()) {
@@ -132,9 +137,12 @@ public class PullRequestHoldService extends ServiceThread {
             if (2 == kArray.length) {
                 String topic = kArray[0];
                 int queueId = Integer.parseInt(kArray[1]);
+
+                // 判断当前 Topic 下的 queueId 对应的队列是否有消息到达
+                // 即获取 Topic 的 queueId 最大 offset
                 final long offset = this.brokerController.getMessageStore().getMaxOffsetInQueue(topic, queueId);
                 try {
-                    // 检查是否有需要通知的请求
+                    // 通知有消息到达
                     this.notifyMessageArriving(topic, queueId, offset);
                 } catch (Throwable e) {
                     log.error("check hold request failed. topic={}, queueId={}", topic, queueId, e);
@@ -157,24 +165,28 @@ public class PullRequestHoldService extends ServiceThread {
     /**
      * 检查指定队列是否有需要通知的请求
      *
-     * @param topic
-     * @param queueId
-     * @param maxOffset
-     * @param tagsCode
+     * @param topic        主题
+     * @param queueId      队列编号
+     * @param maxOffset    消息队列最大 ofset
+     * @param tagsCode     tag hash 码
      * @param msgStoreTime
      * @param filterBitMap
      * @param properties
      */
     public void notifyMessageArriving(final String topic, final int queueId, final long maxOffset, final Long tagsCode,
                                       long msgStoreTime, byte[] filterBitMap, Map<String, String> properties) {
+
+        // 标志 topic 下 queue
         String key = this.buildKey(topic, queueId);
+        // 获取具体 queue 对应的拉取消息的请求对象
         ManyPullRequest mpr = this.pullRequestTable.get(key);
         if (mpr != null) {
             List<PullRequest> requestList = mpr.cloneListAndClear();
             if (requestList != null) {
-                // 不符合唤醒的请求数组
+                // 消息还没有到的请求数组
                 List<PullRequest> replayList = new ArrayList<PullRequest>();
 
+                // 遍历每个等待拉取消息的 请求
                 for (PullRequest request : requestList) {
                     // 如果 maxOffset 过小，则重新读取一次。
                     long newestOffset = maxOffset;
@@ -182,27 +194,33 @@ public class PullRequestHoldService extends ServiceThread {
                         newestOffset = this.brokerController.getMessageStore().getMaxOffsetInQueue(topic, queueId);
                     }
 
-                    // 有新的匹配消息，唤醒请求，即再次拉取消息。
+                    // 1 如果拉取消息偏移大于请求偏移量，说明有新的匹配消息，唤醒请求，即再次拉取消息。
                     if (newestOffset > request.getPullFromThisOffset()) {
+
+                        // 验证消息是否是自己感兴趣的消息，过滤
                         boolean match = request.getMessageFilter().isMatchedByConsumeQueue(tagsCode, new ConsumeQueueExt.CqExtUnit(tagsCode, msgStoreTime, filterBitMap));
                         // match by bit map, need eval again when properties is not null.
                         if (match && properties != null) {
                             match = request.getMessageFilter().isMatchedByCommitLog(null, properties);
                         }
 
+                        // 如果是则拉取消息
                         if (match) {
                             try {
-                                // 唤醒请求，再次拉取消息。实际是丢到线程池进行一步的消息拉取，不会有性能上的问题。
+                                // 再次尝试去拉取消息。
+                                // 实际是丢到线程池，获取消息，不会有性能上的问题。
                                 this.brokerController.getPullMessageProcessor().executeRequestWhenWakeup(request.getClientChannel(),
                                         request.getRequestCommand());
                             } catch (Throwable e) {
                                 log.error("execute request when wakeup failed.", e);
                             }
+
+                            // 继续下一个拉取消息请求
                             continue;
                         }
                     }
 
-                    // 超过挂起时间，唤醒请求，即再次拉取消息。
+                    // 2 即使没有消息或没有匹配消息，如果超过挂起时间，会再次拉取消息。
                     if (System.currentTimeMillis() >= (request.getSuspendTimestamp() + request.getTimeoutMillis())) {
                         try {
                             // 唤醒请求，再次拉取消息。实际是丢到线程池进行一步的消息拉取，不会有性能上的问题。

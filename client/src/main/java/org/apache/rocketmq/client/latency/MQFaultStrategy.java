@@ -151,7 +151,8 @@ public class MQFaultStrategy {
             return tpInfo.selectOneMessageQueue();
         }
 
-        // 未开启容错策略选择消息队列逻辑，直接按 BrokerName 选择一个消息队列，不考虑队列的可用性
+        // 未开启容错策略选择消息队列逻辑，
+        // 直接从缓存的队列中选择一个队列，过滤掉发送失败的 Broker。如果队列没有符合的，那么使用自增取模即可
         return tpInfo.selectOneMessageQueue(lastBrokerName);
     }
 

@@ -62,6 +62,7 @@ public class TopicValidator {
 
     /**
      * Topics'set which client can not send msg!
+     * 客户端不能发送消息到该 Topic 集合下，也就是系统的 Topic
      */
     private static final Set<String> NOT_ALLOWED_SEND_TOPIC_SET = new HashSet<String>();
 

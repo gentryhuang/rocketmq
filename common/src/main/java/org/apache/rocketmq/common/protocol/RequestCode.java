@@ -71,6 +71,9 @@ public class RequestCode {
 
     public static final int NOTIFY_CONSUMER_IDS_CHANGED = 40;
 
+    /**
+     * 对指定的 MessageQueue（们）上锁
+     */
     public static final int LOCK_BATCH_MQ = 41;
 
     public static final int UNLOCK_BATCH_MQ = 42;

@@ -22,14 +22,18 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer;
 import org.apache.rocketmq.client.impl.factory.MQClientInstance;
 import org.apache.rocketmq.client.log.ClientLogger;
+import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.common.ServiceThread;
+import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.common.utils.ThreadUtils;
 
 /**
- * 拉取消费服务，不断从 Broker 拉取消息并提交消费任务到 ConsumeMessageService，进行消费消息逻辑
+ * 负责对消息队列进行消息拉取，从远端服务器（Broker 使用存储服务）拉取消息后将消息存储 ProcessQueue 消息队列处理中，
+ * 并提交消费任务到 ConsumeMessageService，使用线程池来消费消息，确保了消息拉取与消息消费的解耦。
  */
 public class PullMessageService extends ServiceThread {
     private final InternalLogger log = ClientLogger.getLog();
@@ -39,7 +43,7 @@ public class PullMessageService extends ServiceThread {
      */
     private final LinkedBlockingQueue<PullRequest> pullRequestQueue = new LinkedBlockingQueue<PullRequest>();
     /**
-     * MQClient 对象
+     * 客户端实例，消息消费者对应的客户端实例
      */
     private final MQClientInstance mQClientFactory;
     /**
@@ -109,14 +113,21 @@ public class PullMessageService extends ServiceThread {
 
     /**
      * 拉取消息
+     * todo 特别说明：
+     * 1 RocketMQ 未真正实现消息推模式，而是消费者主动向消费服务器拉取消息。RocketMQ推模式是循环向消息服务端发起消息拉取请求。
      *
      * @param pullRequest 拉取消息请求
      */
     private void pullMessage(final PullRequest pullRequest) {
-        // 根据 消费组（名） 获取消费者
+        // 根据 消费组（名） 获取消费者实例
         final MQConsumerInner consumer = this.mQClientFactory.selectConsumer(pullRequest.getConsumerGroup());
         if (consumer != null) {
+
+            //强转为推送模式消费者
             DefaultMQPushConsumerImpl impl = (DefaultMQPushConsumerImpl) consumer;
+
+          //  DefaultMQPullConsumer impl1 = (DefaultMQPullConsumer)consumer;
+          //  impl1.pull(final MessageQueue mq, final String subExpression, final long offset, final int maxNums)
 
             // 从 Broker 拉取消息，并消费
             impl.pullMessage(pullRequest);

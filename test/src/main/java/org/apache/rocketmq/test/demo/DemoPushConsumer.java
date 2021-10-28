@@ -17,12 +17,12 @@ import java.util.List;
  * <p>
  * desc：
  */
-public class DemoConsumer {
+public class DemoPushConsumer {
     public static void main(String[] args) throws InterruptedException, MQClientException {
 
         // Instantiate with specified consumer group name.
         // 使用指定的用户组名实例化消费者
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("please_rename_unique_group_name");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("demo_consumer");
 
         // Specify name server addresses.
         // namesrv 地址
@@ -42,6 +42,7 @@ public class DemoConsumer {
                                                             ConsumeConcurrentlyContext context) {
                 System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+                //return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
         });
 

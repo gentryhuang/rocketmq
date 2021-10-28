@@ -53,7 +53,7 @@ import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
 /**
- * 有序消息处理服务 - 严格顺序消息
+ * 有序消息处理服务 - 严格顺序消息 （todo 局部还是全局？？？）
  * 说明：Consumer 在严格顺序消费时，通过三把锁保证
  * 1 Broker 消息队列锁（分布式锁）
  * - 集群模式下，Consumer 从 Broker 获得该锁后，才能进行消息拉取、消费
@@ -62,7 +62,6 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
  * 3 Consumer 消息处理队列锁（本地锁）：Consumer 获得该锁才能消费消息队列
  * 小结：
  * ConsumeMessageOrderlyService 在消费的时候，会先获取每一个 ConsumerQueue 的锁，然后从 processQueue 获取消息消费，这也就意味着，对于每一个 ConsumerQueue 的消息来说，消费的逻辑也是顺序的。
- *
  */
 public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
@@ -117,12 +116,15 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     }
 
     /**
-     * 在消费者启动时会调用该方法
+     * 在消费者启动时会调用该方法，在集群模式下，默认每隔20s执行一次锁定分配给自己的消息消费队列。
+     * todo 特别说明：
+     * 每个 MQ 客户端，会定时发送 LOCK_BATCH_MQ 请求，并且在本地维护获取到锁的所有队列，即在消息处理队列 ProcessQueue 中使用 locked 和 lastLockTimestamp 进行标记。
      */
     public void start() {
         // 集群消费
         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())) {
             // 消费方需要不断向 Broker 刷新该锁过期时间，默认配置 20s 刷新一次
+            // 默认每隔 20s 执行一次锁定分配给自己的消息消费队列
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -132,15 +134,27 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }
     }
 
+    /**
+     * 关闭
+     * todo 可能出现问题，机器宕机，锁没有释放，需要等待 60s （Broker 端默认60s锁过期）。如果在这期间，消费组内其它实例分配到了该宕机机器，
+     * 那么就不能消费消息，造成消费消息延迟
+     *
+     * @param awaitTerminateMillis
+     */
     public void shutdown(long awaitTerminateMillis) {
         this.stopped = true;
         this.scheduledExecutorService.shutdown();
         ThreadUtils.shutdownGracefully(this.consumeExecutor, awaitTerminateMillis, TimeUnit.MILLISECONDS);
+
+        // 集群模式下，unlock 所有的队列
         if (MessageModel.CLUSTERING.equals(this.defaultMQPushConsumerImpl.messageModel())) {
             this.unlockAllMQ();
         }
     }
 
+    /**
+     * unlock 所有队列
+     */
     public synchronized void unlockAllMQ() {
         this.defaultMQPushConsumerImpl.getRebalanceImpl().unlockAll(false);
     }
@@ -234,7 +248,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
      * @param msgs             消息 ，顺序消息用不到
      * @param processQueue     消息处理队列
      * @param messageQueue     消息队列
-     * @param dispathToConsume
+     * @param dispathToConsume 派发到消费
      */
     @Override
     public void submitConsumeRequest(
@@ -248,21 +262,35 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }
     }
 
+    /**
+     * 周期性锁定当前消费实例分配到的所有 MessageQueue
+     */
     public synchronized void lockMQPeriodically() {
         if (!this.stopped) {
             this.defaultMQPushConsumerImpl.getRebalanceImpl().lockAll();
         }
     }
 
+    /**
+     * 只有锁住 MessageQueue 当前消费端才能操作消息队列
+     *
+     * @param mq           消息队列
+     * @param processQueue 消息处理队列
+     * @param delayMills   延时执行时间
+     */
     public void tryLockLaterAndReconsume(final MessageQueue mq, final ProcessQueue processQueue,
                                          final long delayMills) {
         this.scheduledExecutorService.schedule(new Runnable() {
             @Override
             public void run() {
                 // 锁定 mq 是否成功
+                // 第 3 把锁
                 boolean lockOK = ConsumeMessageOrderlyService.this.lockOneMQ(mq);
+                // 锁住 mq ，则立即消费
                 if (lockOK) {
                     ConsumeMessageOrderlyService.this.submitConsumeRequestLater(processQueue, mq, 10);
+
+                    // 没有锁住，3s 后重试
                 } else {
                     ConsumeMessageOrderlyService.this.submitConsumeRequestLater(processQueue, mq, 3000);
                 }
@@ -270,6 +298,12 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }, delayMills, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * 尝试锁住执行的 mq
+     *
+     * @param mq
+     * @return
+     */
     public synchronized boolean lockOneMQ(final MessageQueue mq) {
         if (!this.stopped) {
             return this.defaultMQPushConsumerImpl.getRebalanceImpl().lock(mq);
@@ -315,7 +349,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
      * 说明：
      * 1 在并发消费场景时，如果消费失败，Consumer 会将消费失败消息发回到 Broker 重试队列，跳过当前消息，等待下次拉取该消息再进行消费。
      * 2 在完全严格顺序消费消费时，如果消费失败，这样做显然不行。也因此，消费失败的消息，会挂起队列一会会，稍后继续消费。即将消息重新放入缓存中，因为它们使用 TreeMap 保存的，
-     *   根据消费进度排序
+     * 根据消费进度排序
      * 3 不过消费失败的消息一直失败，也不可能一直消费。当超过消费重试上限时，Consumer 会将消费失败超过上限的消息发回到 Broker 死信队列
      *
      * @param msgs           消息
@@ -514,7 +548,10 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     }
 
     /**
-     * 消费请求任务
+     * 消费请求任务。
+     * todo 特别说明：
+     * 1 并发消息消费指消费线程池中的线程可以并发对同一个消费队列的消息进行消费
+     * 2 顺序消息是指消费线程池中的线程对消息队列只能串行消费。消息消费时必须成功锁定消息队列，在 Broker 端会存储消息队列的锁占用情况。
      */
     class ConsumeRequest implements Runnable {
         /**
@@ -548,12 +585,16 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             }
 
             // 根据消息队列获得消息队列的 锁对象
+            // 顺序消息一个消息消费队列同一时刻只会被一个消费线程池处理
+            // 1 第一把锁
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
 
-            // JVM 加锁
+            // JVM 加锁（这里加 JVM 锁就够了，因为每个消费方都有自己的队列）
             synchronized (objLock) {
-                // (广播模式) 或者 (集群模式 && 消息队列锁有效)
+
+                // todo (广播模式) 或者 (集群模式 && 消息处理队列锁有效)
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
+                        // 2 第二把锁
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
                     // 记录开始时间
@@ -567,7 +608,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             break;
                         }
 
-                        // 消息队列锁未锁定，提交延迟获得锁并消费请求
+                        // todo 消息队列锁未锁定，提交延迟获得锁并消费请求
                         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                                 && !this.processQueue.isLocked()) {
                             log.warn("the message queue not locked, so consume later, {}", this.messageQueue);
@@ -602,7 +643,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         // 获取指定大小的消息
                         List<MessageExt> msgs = this.processQueue.takeMessages(consumeBatchSize);
 
-                        // 处理消息的 Topic，还原 Topic
+                        // todo 处理消息的 Topic，还原 Topic,针对重试 Topic
                         defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
 
                         // 有消息
@@ -708,20 +749,23 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeMessageOrderlyService.this.getConsumerStatsManager()
                                     .incConsumeRT(ConsumeMessageOrderlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
-                            // 处理消费结果
+                            // todo 处理消费结果
                             continueConsume = ConsumeMessageOrderlyService.this.processConsumeResult(msgs, status, context, this);
 
-                            // 没有消息，则继续消费
+                            // 没有消息，则
                         } else {
                             continueConsume = false;
                         }
                     }
+
+                    // 没有锁定 ConsumeQueue
                 } else {
                     if (this.processQueue.isDropped()) {
                         log.warn("the message queue not be able to consume, because it's dropped. {}", this.messageQueue);
                         return;
                     }
 
+                    // 延迟重试
                     ConsumeMessageOrderlyService.this.tryLockLaterAndReconsume(this.messageQueue, this.processQueue, 100);
                 }
             }

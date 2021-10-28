@@ -37,7 +37,7 @@ public class SubscriptionData implements Comparable<SubscriptionData> {
      */
     private String topic;
     /**
-     * 订阅表达式
+     * 订阅表达式原始信息
      */
     private String subString;
     /**
