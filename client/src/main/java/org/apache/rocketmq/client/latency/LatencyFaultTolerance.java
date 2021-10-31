@@ -20,35 +20,36 @@ package org.apache.rocketmq.client.latency;
 /**
  * 延迟故障容错接口
  * 说明：当 Producer 发送消息时间过长，则逻辑认为N秒内不可
+ *
  * @param <T>
  */
 public interface LatencyFaultTolerance<T> {
     /**
-     * 更新对应的延迟和不可用时长
+     * 更新失败条目
      *
-     * @param name
-     * @param currentLatency
-     * @param notAvailableDuration
+     * @param name                 Broker 名称
+     * @param currentLatency       消息发送故障的延迟时间
+     * @param notAvailableDuration 不可用持续时长，在这个时间内，Broker 将被规避
      */
     void updateFaultItem(final T name, final long currentLatency, final long notAvailableDuration);
 
     /**
-     * 对象是否可用
+     * 判断 Broker 是否可用
      *
-     * @param name
+     * @param name Broker 名
      * @return
      */
     boolean isAvailable(final T name);
 
     /**
-     * 移除对象
+     * 移除失败条目，意味着 Broker 重新参与路由计算
      *
      * @param name
      */
     void remove(final T name);
 
     /**
-     * 获取一个对象
+     * 尝试从规避的 Broker 中选择一个可用的 Broker ，如果没有找到，返回 null
      *
      * @return
      */

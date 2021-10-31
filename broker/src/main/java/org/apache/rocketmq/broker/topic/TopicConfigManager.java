@@ -70,7 +70,6 @@ public class TopicConfigManager extends ConfigManager {
      * todo 构造方法，Broker 在初始化时，会设置一些 Topic （系统 Topic）到 TopicConfig 的映射，然后上报到 NameSrv 中。
      * 即：该topicConfigTable中所有的路由信息，会随着Broker向Nameserver发送心跳包中，Nameserver收到这些信息后，更新对应Topic的路由信息表。
      *
-     *
      * @param brokerController
      */
     public TopicConfigManager(BrokerController brokerController) {
@@ -295,6 +294,15 @@ public class TopicConfigManager extends ConfigManager {
         return topicConfig;
     }
 
+    /**
+     * 在重发消息的方法中创建 Topic ，todo 即创建重试 Topic 或者死信 Topic
+     *
+     * @param topic                       重试/死信 Topic
+     * @param clientDefaultTopicQueueNums 队列数
+     * @param perm
+     * @param topicSysFlag
+     * @return
+     */
     public TopicConfig createTopicInSendMessageBackMethod(
             final String topic,
             final int clientDefaultTopicQueueNums,
@@ -309,10 +317,12 @@ public class TopicConfigManager extends ConfigManager {
         try {
             if (this.topicConfigTableLock.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
                 try {
+                    // 是否有存在的缓存
                     topicConfig = this.topicConfigTable.get(topic);
                     if (topicConfig != null)
                         return topicConfig;
 
+                    // 创建新 topic
                     topicConfig = new TopicConfig(topic);
                     topicConfig.setReadQueueNums(clientDefaultTopicQueueNums);
                     topicConfig.setWriteQueueNums(clientDefaultTopicQueueNums);
@@ -323,6 +333,8 @@ public class TopicConfigManager extends ConfigManager {
                     this.topicConfigTable.put(topic, topicConfig);
                     createNew = true;
                     this.dataVersion.nextVersion();
+
+                    // 持久化到 Broker 本地文件
                     this.persist();
                 } finally {
                     this.topicConfigTableLock.unlock();
@@ -332,6 +344,7 @@ public class TopicConfigManager extends ConfigManager {
             log.error("createTopicInSendMessageBackMethod exception", e);
         }
 
+        // 上报到 NameSrv
         if (createNew) {
             this.brokerController.registerBrokerAll(false, true, true);
         }

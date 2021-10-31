@@ -330,6 +330,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
             // 有序消费
         } else {
+            // 消息处理队列是否被锁定
             if (processQueue.isLocked()) {
                 if (!pullRequest.isPreviouslyLocked()) {
                     long offset = -1L;
@@ -356,7 +357,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     pullRequest.setNextOffset(offset);
                 }
 
-                // 延迟拉取消息 3000ms
+                // 没有被锁定，延迟拉取消息 3000ms
             } else {
                 this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
                 log.info("pull message later because not locked in broker, {}", pullRequest);
@@ -375,6 +376,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         final long beginTimestamp = System.currentTimeMillis();
 
         // 拉取消息回调
+        // todo 不断通过向 pullRequestQueue 中加入拉取消息的请求
         PullCallback pullCallback = new PullCallback() {
             /**
              * 拉取消息成功
@@ -545,7 +547,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
         // 计算拉取消息系统标识
         int sysFlag = PullSysFlag.buildSysFlag(
-                commitOffsetEnable, // commitOffset
+                commitOffsetEnable, // commitOffsetEnable
                 true, // suspend
                 subExpression != null, // subscription
                 classFilter // class filter

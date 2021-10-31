@@ -30,7 +30,9 @@ import org.apache.rocketmq.client.common.ThreadLocalIndex;
  */
 public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> {
     /**
-     * 对象故障信息 Table
+     * 规避对象集合
+     * key: 不可用 Broker 的名
+     * value: 失败条目
      */
     private final ConcurrentHashMap<String, FaultItem> faultItemTable = new ConcurrentHashMap<String, FaultItem>(16);
     /**
@@ -82,7 +84,8 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
     }
 
     /**
-     * 移除故障对象
+     * 移除失败条目，意味着 Broker 重新参与路由计算
+     *
      * @param name
      */
     @Override
@@ -91,7 +94,7 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
     }
 
     /**
-     * 选择一个相对优秀的对象
+     * 尝试从规避的 Broker 中选择一个可用的 Broker ，如果没有找到，返回 null
      *
      * @return
      */
@@ -133,14 +136,14 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
 
 
     /**
-     * 对象故障信息。维护对象的名字、延迟、开始可用的时间。
+     * 失败条目。维护对象的名字、延迟、开始可用的时间。
      */
     class FaultItem implements Comparable<FaultItem> {
-        // 对象名
+        // 条目名，这里为 brokerName
         private final String name;
-        // 延迟
+        // 消息发送故障的延迟时间
         private volatile long currentLatency;
-        // 开始可用时间
+        // 故障规避的开始时间
         private volatile long startTimestamp;
 
         public FaultItem(final String name) {

@@ -21,11 +21,16 @@ package org.apache.rocketmq.store;
  * When write a message to the commit log, returns results
  */
 public class AppendMessageResult {
-    // Return code 结果标识
+
+    /**
+     * 消息追加结果
+     */
     private AppendMessageStatus status;
 
-    // 下一个写入的偏移量
-    // Where to start writing
+    /**
+     * 消息的物理偏移量，即当前消息从哪里开始写的
+     * Where to start writing
+     */
     private long wroteOffset;
 
     // 写入字节总长度
@@ -40,13 +45,20 @@ public class AppendMessageResult {
     // Message storage timestamp
     private long storeTimestamp;
 
-    // 逻辑的consumeque 偏移量
-    // Consume queue's offset(step by one)
+    /**
+     * todo 消息消费队列的逻辑偏移量，类似数组下标
+     * Consume queue's offset(step by one)
+     */
     private long logicsOffset;
 
-    // 写入到 MappedByteBuffer (将消息内容写入到内存映射文件中的时长)
+    /**
+     * 写入到页存储的响应时间
+     */
     private long pagecacheRT = 0;
 
+    /**
+     * 批量发消息时的消息条数
+     */
     private int msgNum = 1;
 
     public AppendMessageResult(AppendMessageStatus status) {
@@ -54,17 +66,16 @@ public class AppendMessageResult {
     }
 
     /**
-     *
-     * @param status 追加结果：成功、到达文件尾（文件剩余空间不足）、消息长度超过、消息属性长度超出、未知错误
-     * @param wroteOffset 消息的偏移量（相对于整个 commitlog）
-     * @param wroteBytes 消息待写入字节
-     * @param msgId 消息id
+     * @param status         追加结果：成功、到达文件尾（文件剩余空间不足）、消息长度超过、消息属性长度超出、未知错误
+     * @param wroteOffset    消息的偏移量（相对于整个 commitlog 组）
+     * @param wroteBytes     消息待写入字节
+     * @param msgId          消息id
      * @param storeTimestamp 消息写入时间戳
-     * @param logicsOffset 消息队列偏移量
-     * @param pagecacheRT 消息写入时机戳（消息存储时间戳--- 消息存储开始时间戳）
+     * @param logicsOffset   消息队列逻辑偏移量
+     * @param pagecacheRT    消息写入时机戳（消息存储时间戳--- 消息存储开始时间戳）
      */
     public AppendMessageResult(AppendMessageStatus status, long wroteOffset, int wroteBytes, String msgId,
-        long storeTimestamp, long logicsOffset, long pagecacheRT) {
+                               long storeTimestamp, long logicsOffset, long pagecacheRT) {
         this.status = status;
         this.wroteOffset = wroteOffset;
         this.wroteBytes = wroteBytes;
@@ -145,14 +156,14 @@ public class AppendMessageResult {
     @Override
     public String toString() {
         return "AppendMessageResult{" +
-            "status=" + status +
-            ", wroteOffset=" + wroteOffset +
-            ", wroteBytes=" + wroteBytes +
-            ", msgId='" + msgId + '\'' +
-            ", storeTimestamp=" + storeTimestamp +
-            ", logicsOffset=" + logicsOffset +
-            ", pagecacheRT=" + pagecacheRT +
-            ", msgNum=" + msgNum +
-            '}';
+                "status=" + status +
+                ", wroteOffset=" + wroteOffset +
+                ", wroteBytes=" + wroteBytes +
+                ", msgId='" + msgId + '\'' +
+                ", storeTimestamp=" + storeTimestamp +
+                ", logicsOffset=" + logicsOffset +
+                ", pagecacheRT=" + pagecacheRT +
+                ", msgNum=" + msgNum +
+                '}';
     }
 }

@@ -96,7 +96,7 @@ public class RebalancePushImpl extends RebalanceImpl {
     public boolean removeUnnecessaryMessageQueue(MessageQueue mq, ProcessQueue pq) {
 
         // 同步队列的消费进度，并移除指定队列的缓存消费进度
-        // todo 为啥没有操作消息队列或消息处理队列？？？
+        // todo 为啥没有操作消息队列或消息处理队列？？？ 这里对消费进度进行处理
         this.defaultMQPushConsumerImpl.getOffsetStore().persist(mq);
         this.defaultMQPushConsumerImpl.getOffsetStore().removeOffset(mq);
 

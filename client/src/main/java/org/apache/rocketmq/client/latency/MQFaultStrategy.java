@@ -23,9 +23,15 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
- * RocketMQ 消息发送容错策略。
+ * RocketMQ 消息发送容错策略，延时实现的门面类
+ * todo 特别说明：
+ * 1 开启与不开启延迟规避机制，在消息发送时都能在不同程度上规避故障的 Broker
+ * 2 区别：
+ *   2.1 开启故障延迟机制，其实是一种悲观的做法。一旦消息发送失败后就会悲观认为 Broker 不可用，把这个 Broker 记录下来，在接下来的一段时间（延迟规避时间）内就不能再向其发送消息，直接避开该 Broker。
+ *   2.2 未开始故障延迟机制，只会在本地消息发送的重试过程中规避该 Broker，下一次消息发送是个无状态，还是会继续尝试
+ * 3 联系：开始故障延迟机制是将认为出现问题的 Broker 记录下来，指定多长时间内不能参与消息队列负载；不开启故障延迟机制，只是对上次出现的故障进行规避；
  * <p>
- * 默认情况下容错策略关闭，即sendLatencyFaultEnable=false
+ * 默认情况下容错策略关闭，即 sendLatencyFaultEnable=false
  */
 public class MQFaultStrategy {
 
@@ -44,13 +50,13 @@ public class MQFaultStrategy {
     /*
       | Producer发送消息消耗时长 | Broker不可用时长 |
       | --------------------— | --------------— |
-      | >= 15000 ms | 600 1000 ms |
-      | >= 3000 ms | 180 1000 ms |
-      | >= 2000 ms | 120 1000 ms |
-      | >= 1000 ms | 60 1000 ms |
-      | >= 550 ms | 30 * 1000 ms |
-      | >= 100 ms | 0 ms |
-      | >= 50 ms | 0 ms |
+      | >= 15000 ms           | 600 1000 ms  |
+      | >= 3000 ms            | 180 1000 ms  |
+      | >= 2000 ms            | 120 1000 ms  |
+      | >= 1000 ms            | 60 1000 ms   |
+      | >= 550 ms             | 30 * 1000 ms |
+      | >= 100 ms             | 0 ms         |
+      | >= 50 ms              | 0 ms         |
      */
 
     /**
@@ -116,6 +122,8 @@ public class MQFaultStrategy {
 
                     // 判断当前的消息队列是否可用（即所在的 Broker 可用），一旦一个 MessageQueue 符合条件，立即返回。
                     // 注意：Topic 所在的所 有Broker全部标记不可用时，进入到下一步逻辑处理。（在此处，我们要知道，标记为不可用，并不代表真的不可用，Broker 是可以在故障期间被运营管理人员进行恢复的，比如重启）
+                    // todo 失败延时规避机制就提现在这里，如果消息发送者遇到一次消息发送失败后就会悲观地认为 Broker 不可用，
+                    //  在接下来的一段时间内，该 Broker 就不能参与消息发送队列的负载，直到该队列"可用"
                     if (latencyFaultTolerance.isAvailable(mq.getBrokerName()))
                         return mq;
                 }
@@ -130,7 +138,7 @@ public class MQFaultStrategy {
                 // 获取写队列数量
                 int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
                 if (writeQueueNums > 0) {
-                    // 选择一个消息队列
+                    // 递增取模算法，选择一个消息队列
                     final MessageQueue mq = tpInfo.selectOneMessageQueue();
 
                     if (notBestBroker != null) {
@@ -151,7 +159,7 @@ public class MQFaultStrategy {
             return tpInfo.selectOneMessageQueue();
         }
 
-        // 未开启容错策略选择消息队列逻辑，
+        // 未开启容错策略选择消息队列逻辑（todo 未开启延迟规避机制，也可以规避故障的 Broker，不过只会在本次消息发送的重试过程中规避该 Broker，下一次消息发送还是会继续尝试）
         // 直接从缓存的队列中选择一个队列，过滤掉发送失败的 Broker。如果队列没有符合的，那么使用自增取模即可
         return tpInfo.selectOneMessageQueue(lastBrokerName);
     }
@@ -161,7 +169,7 @@ public class MQFaultStrategy {
      * 说明：当 Producer 发送消息时间过长，则逻辑认为N秒内不可用
      *
      * @param brokerName     BrokerName
-     * @param currentLatency 延迟
+     * @param currentLatency 延迟时间
      * @param isolation      是否隔离。当开启隔离时，默认延迟为30000。目前主要用于发送消息异常时
      */
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
@@ -169,6 +177,8 @@ public class MQFaultStrategy {
         if (this.sendLatencyFaultEnable) {
 
             // 计算延迟对应的不可用时长
+            // 1 如果隔离，则使用 30s 作为消息发送延迟时间
+            // 2 如果不隔离，则使用本次消息发送时延作为消息发送延迟时间
             long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
 
             // 当 Producer 发送消息时间过长，则逻辑认为N秒内 Broker 不可用
@@ -177,9 +187,11 @@ public class MQFaultStrategy {
     }
 
     /**
-     * 计算延迟对应的不可用时间
+     * 计算延迟对应的不可用时间，计算方法如下：
+     * 1 根据消息发送的延迟时间，从 latencyMax 数组尾部向前找到第一个比 currentLatency 小的值的索引 i，如果没有找到返回 0 。
+     * 2 找到的话，根据这个索引从 notAvailableDuration 数组中取出对应的时间，这个时间作为 Broker 不可用时间
      *
-     * @param currentLatency 延迟
+     * @param currentLatency 消息发送延迟时间
      * @return 不可用时间
      */
     private long computeNotAvailableDuration(final long currentLatency) {

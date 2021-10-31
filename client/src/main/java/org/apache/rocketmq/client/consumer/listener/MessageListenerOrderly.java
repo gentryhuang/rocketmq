@@ -17,9 +17,11 @@
 package org.apache.rocketmq.client.consumer.listener;
 
 import java.util.List;
+
 import org.apache.rocketmq.common.message.MessageExt;
 
 /**
+ * 顺序消费监听器
  * A MessageListenerOrderly object is used to receive messages orderly. One queue by one thread
  */
 public interface MessageListenerOrderly extends MessageListener {
@@ -31,5 +33,5 @@ public interface MessageListenerOrderly extends MessageListener {
      * @return The consume status
      */
     ConsumeOrderlyStatus consumeMessage(final List<MessageExt> msgs,
-        final ConsumeOrderlyContext context);
+                                        final ConsumeOrderlyContext context);
 }

@@ -178,6 +178,9 @@ public class MQClientAPIImpl {
         System.setProperty(RemotingCommand.REMOTING_VERSION_KEY, Integer.toString(MQVersion.CURRENT_VERSION));
     }
 
+    /**
+     * 远程客户端
+     */
     private final RemotingClient remotingClient;
     private final TopAddressing topAddressing;
     private final ClientRemotingProcessor clientRemotingProcessor;
@@ -434,6 +437,22 @@ public class MQClientAPIImpl {
 
     }
 
+    /**
+     * 同步或 oneway 方式发送消息
+     *
+     * @param addr
+     * @param brokerName
+     * @param msg
+     * @param requestHeader
+     * @param timeoutMillis
+     * @param communicationMode
+     * @param context
+     * @param producer
+     * @return
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public SendResult sendMessage(
             final String addr,
             final String brokerName,
@@ -450,15 +469,15 @@ public class MQClientAPIImpl {
     /**
      * 发送消息
      *
-     * @param addr
-     * @param brokerName
-     * @param msg
-     * @param requestHeader
-     * @param timeoutMillis
-     * @param communicationMode
-     * @param sendCallback
-     * @param topicPublishInfo
-     * @param instance
+     * @param addr                     Broker 地址
+     * @param brokerName               Broker 名称
+     * @param msg                      消息
+     * @param requestHeader            消息发送请求包
+     * @param timeoutMillis            消息发送超时时间
+     * @param communicationMode        消息发送方式
+     * @param sendCallback             消息发送回调函数
+     * @param topicPublishInfo         topic 发布信息
+     * @param instance                 生产者客户端实例
      * @param retryTimesWhenSendFailed
      * @param context
      * @param producer
@@ -492,6 +511,12 @@ public class MQClientAPIImpl {
             } else {
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_REPLY_MESSAGE, requestHeader);
             }
+
+
+            /**
+             * 消息对应的处理：
+             * @see org.apache.rocketmq.broker.processor.SendMessageProcessor#processRequest(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand)
+             */
         } else {
             if (sendSmartMsg || msg instanceof MessageBatch) {
                 SendMessageRequestHeaderV2 requestHeaderV2 = SendMessageRequestHeaderV2.createSendMessageRequestHeaderV2(requestHeader);
@@ -500,8 +525,11 @@ public class MQClientAPIImpl {
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_MESSAGE, requestHeader);
             }
         }
+
+        // 设置消息体
         request.setBody(msg.getBody());
 
+        // 根据对应的模式发送消息
         switch (communicationMode) {
             case ONEWAY:
 
@@ -641,6 +669,8 @@ public class MQClientAPIImpl {
 
                         producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), false);
                     } catch (Exception e) {
+
+                        // 标记发送失败的 Broker
                         producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), true);
 
                         // 异常处理

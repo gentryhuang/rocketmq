@@ -617,6 +617,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return this.mqFaultStrategy.selectOneMessageQueue(tpInfo, lastBrokerName);
     }
 
+
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
         this.mqFaultStrategy.updateFaultItem(brokerName, currentLatency, isolation);
     }
@@ -703,7 +704,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         }
                         // 耗时时间
                         long costTime = beginTimestampPrev - beginTimestampFirst;
-                        // 如果耗时时间超过 设置的超时时间，则跳出重试
+                        // todo 如果耗时时间超过 设置的超时时间，则跳出重试
                         if (timeout < costTime) {
                             callTimeout = true;
                             break;
@@ -715,7 +716,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
                         endTimestamp = System.currentTimeMillis();
 
-                        // 更新 Broker 可用信息
+                        // 更新 Broker 可用信息 todo 干嘛的？
                         // 在选择发送到的消息队列时，会参考Broker发送消息的延迟
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
 
@@ -729,6 +730,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             // 如果消息发送模式为 Sync ，支持重试机制，通过（retryTimesWhenSendFailed）参数设置，默认为2，表示重试2次，也就时最多运行3次。
                             case SYNC:
                                 if (sendResult.getSendStatus() != SendStatus.SEND_OK) {
+                                    // todo 只有开启重试才会重试，否则发送失败也不会重试
                                     if (this.defaultMQProducer.isRetryAnotherBrokerWhenNotStoreOK()) {
                                         continue;
                                     }
@@ -739,10 +741,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                 break;
                         }
 
-                        // 更新失败策略,主要用于规避发生故障的 broker，更新Broker可用性信息，继续循环
+                        // todo 如果在发送过程中抛出了异常，则调用更新失败策略,主要用于规避发生故障的 broker，更新Broker可用性信息，继续循环
                     } catch (RemotingException e) {
                         endTimestamp = System.currentTimeMillis();
+                        // 发送失败队列对应的 BrokerName
+                        // 本次消息发送的延迟时间
+                        // 是否隔离 Broker，如果该参数为 true，则使用默认时长 30s 来计算 Broker 故障规避时长；如果为 false,则使用本次消息发送延迟时间来计算 Broker 故障规避时长。
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true);
+
                         log.warn(String.format("sendKernelImpl exception, resend at once, InvokeID: %s, RT: %sms, Broker: %s", invokeID, endTimestamp - beginTimestampPrev, mq), e);
                         log.warn(msg.toString());
                         exception = e;
@@ -877,12 +883,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      * 发送消息核心方法- 该方法会真正使用网络发起请求
      * 说明：该方法真正发起网络请求，发送消息给 Broker
      *
-     * @param msg
-     * @param mq
-     * @param communicationMode
-     * @param sendCallback
-     * @param topicPublishInfo
-     * @param timeout
+     * @param msg               待发送消息
+     * @param mq                消息将发送到该消息队列上
+     * @param communicationMode 消息发送模式：同步/异步/oneway
+     * @param sendCallback      异步消息回调函数
+     * @param topicPublishInfo  主题路由信息
+     * @param timeout           消息发送超时时间
      * @return
      * @throws MQClientException
      * @throws RemotingException
@@ -897,7 +903,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                       final long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         long beginStartTime = System.currentTimeMillis();
 
-        // 根据 BrokerName 获取 broker 地址
+        // 根据 mq 所属于的 BrokerName 获取 broker 地址
         String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         if (null == brokerAddr) {
             // 根据 topic 找到发布信息，即更新
@@ -905,6 +911,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             // 找到 broker 的 master 地址
             brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         }
+
 
         SendMessageContext context = null;
         if (brokerAddr != null) {
@@ -914,6 +921,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             // 记录消息内容。下面逻辑可能改变消息内容，例如消息压缩。
             byte[] prevBody = msg.getBody();
             try {
+
+                // 对于批量消息，为消息分配全局唯一ID
                 //for MessageBatch,ID has been set in the generating process
                 if (!(msg instanceof MessageBatch)) {
                     // 设置唯一编号
@@ -930,15 +939,17 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 int sysFlag = 0;
                 boolean msgBodyCompressed = false;
 
-                // 默认对 4k 的消息压缩
+                // 默认对 >= 4k 的消息压缩
                 if (this.tryToCompressMessage(msg)) {
+                    // 设置消息的系统标记为 MessageSysFlag.COMPRESSED_FLAG
                     sysFlag |= MessageSysFlag.COMPRESSED_FLAG;
                     msgBodyCompressed = true;
                 }
 
-                // 是否是事务消息
+                // todo 如果是事务 Prepared 消息（根据属性中的 TRAN_MSG 属性判断）
                 final String tranMsg = msg.getProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED);
                 if (tranMsg != null && Boolean.parseBoolean(tranMsg)) {
+                    // 设置消息的系统标记为 MessageSysFlag.TRANSACTION_PREPARED_TYPE
                     sysFlag |= MessageSysFlag.TRANSACTION_PREPARED_TYPE;
                 }
 
@@ -955,6 +966,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
 
+                // 如果注册了消息发送钩子函数，则执行消息发送之前的增强逻辑
                 // hook：发送消息前逻辑
                 if (this.hasSendMessageHook()) {
                     context = new SendMessageContext();
@@ -979,47 +991,56 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeSendMessageHookBefore(context);
                 }
 
-                // 构建发送消息请求 SendMessageRequestHeader
+                // todo 构建消息发送请求包 SendMessageRequestHeader
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
+                // 生产者组
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
+                // 主题
                 requestHeader.setTopic(msg.getTopic());
                 // 默认主题：TBW102
                 requestHeader.setDefaultTopic(this.defaultMQProducer.getCreateTopicKey());
-
-
-                // 默认队列数量，默认为 4
+                // 主题在单个 Broker 上的默认队列数，默认为 4
                 requestHeader.setDefaultTopicQueueNums(this.defaultMQProducer.getDefaultTopicQueueNums());
+                // 队列 ID（队列序号）
                 requestHeader.setQueueId(mq.getQueueId());
-                // 消息类型
+                // 消息系统标记
                 requestHeader.setSysFlag(sysFlag);
+                // 消息发送时间
                 requestHeader.setBornTimestamp(System.currentTimeMillis());
+                // 消息标记（RocketMQ 对消息中的标记不做任何处理，供应用程序使用）
                 requestHeader.setFlag(msg.getFlag());
-
-                // 消息附加属性
+                // 消息扩展属性
                 requestHeader.setProperties(MessageDecoder.messageProperties2String(msg.getProperties()));
+
+                // 消息重试次数
                 requestHeader.setReconsumeTimes(0);
                 requestHeader.setUnitMode(this.isUnitMode());
+                // 是否是批量消息
                 requestHeader.setBatch(msg instanceof MessageBatch);
 
-                // 如果是重试的 topic
+                // todo 如果是重试的 topic，设置重试次数
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                     // 重试消费次数
                     String reconsumeTimes = MessageAccessor.getReconsumeTime(msg);
                     if (reconsumeTimes != null) {
+                        // 设置重试次数
                         requestHeader.setReconsumeTimes(Integer.valueOf(reconsumeTimes));
+                        // 清除消息中重试次数
                         MessageAccessor.clearProperty(msg, MessageConst.PROPERTY_RECONSUME_TIME);
                     }
 
-                    // 最大重试消费次数
+                    // 最大重试次数
                     String maxReconsumeTimes = MessageAccessor.getMaxReconsumeTimes(msg);
                     if (maxReconsumeTimes != null) {
+                        // 设置最大重试次数
                         requestHeader.setMaxReconsumeTimes(Integer.valueOf(maxReconsumeTimes));
+                        // 清除消息中的最大重试次数
                         MessageAccessor.clearProperty(msg, MessageConst.PROPERTY_MAX_RECONSUME_TIMES);
                     }
                 }
 
 
-                // 发送消息
+                // todo 根据消息发送方式（同步、异步、单向）进行网络传输
                 SendResult sendResult = null;
                 switch (communicationMode) {
                     case ASYNC:
@@ -1085,6 +1106,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         break;
                 }
 
+                // 如果注册了消息发送钩子函数
                 // hook：发送消息后逻辑
                 if (this.hasSendMessageHook()) {
                     context.setSendResult(sendResult);
@@ -1117,6 +1139,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             }
         }
 
+        // 不存 Broker 异常
         throw new MQClientException("The broker[" + mq.getBrokerName() + "] not exist", null);
     }
 
@@ -1124,13 +1147,21 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return mQClientFactory;
     }
 
+    /**
+     * 尝试压缩消息
+     *
+     * @param msg
+     * @return
+     */
     private boolean tryToCompressMessage(final Message msg) {
+        // 批量消息不压缩
         if (msg instanceof MessageBatch) {
             //batch dose not support compressing right now
             return false;
         }
         byte[] body = msg.getBody();
         if (body != null) {
+            // 默认对消息体超过 4KB 采用 zip 压缩
             if (body.length >= this.defaultMQProducer.getCompressMsgBodyOverHowmuch()) {
                 try {
                     byte[] data = UtilAll.compress(body, zipCompressLevel);

@@ -112,9 +112,14 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             case RequestCode.CONSUMER_SEND_MSG_BACK:
                 return this.asyncConsumerSendMsgBack(ctx, request);
 
-            // 非重试请求
+            // 非重试请求（可能也是重试请求，只不过没有用请求码特别指定，但内部处理有兼顾）
+            // 对应的请求码：
+            // SEND_BATCH_MESSAGE
+            // SEND_MESSAGE_V2
+            // SEND_MESSAGE
             default:
-                // 解析请求
+
+                // todo 解析请求，根据不同的请求码进行解析
                 SendMessageRequestHeader requestHeader = parseRequestHeader(request);
                 if (requestHeader == null) {
                     return CompletableFuture.completedFuture(null);
@@ -131,7 +136,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                     return this.asyncSendBatchMessage(ctx, request, mqtraceContext, requestHeader);
 
                     // 非批量发送消息
-                    // todo 包含对事务消息的处理
+                    // todo 包含对事务消息、重试消息以及是否触发私信队列的处理
                 } else {
                     return this.asyncSendMessage(ctx, request, mqtraceContext, requestHeader);
                 }
@@ -155,8 +160,11 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
     private CompletableFuture<RemotingCommand> asyncConsumerSendMsgBack(ChannelHandlerContext ctx,
                                                                         RemotingCommand request) throws RemotingCommandException {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+
+        // 解码重试消息请求
         final ConsumerSendMsgBackRequestHeader requestHeader =
                 (ConsumerSendMsgBackRequestHeader) request.decodeCommandCustomHeader(ConsumerSendMsgBackRequestHeader.class);
+
         String namespace = NamespaceUtil.getNamespaceFromResource(requestHeader.getGroup());
         if (this.hasConsumeMessageHook() && !UtilAll.isBlank(requestHeader.getOriginMsgId())) {
             ConsumeMessageContext context = buildConsumeMessageContext(namespace, requestHeader, request);
@@ -193,6 +201,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
         }
 
+        // todo 创建重试 Topic
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
                 newTopic,
                 subscriptionGroupConfig.getRetryQueueNums(),
@@ -246,11 +255,11 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             // 默认死信队列数为1
             queueIdInt = Math.abs(this.random.nextInt() % 99999999) % DLQ_NUMS_PER_GROUP;
 
+            // todo 创建死信 Topic
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(newTopic,
                     DLQ_NUMS_PER_GROUP,
                     PermName.PERM_WRITE, 0);
 
-            // 加入私信队列后就不管了，返回失败。交给人工补偿
             if (null == topicConfig) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);
                 response.setRemark("topic[" + newTopic + "] not exist");
@@ -279,7 +288,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         // 复制原来消息，重新生成一个 Msg ，将新消息丢给 BrokerController 中，然后存储到 CommitLog 中进行存储
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
 
-        // 设置重试消息 Topic
+        // 设置重试/死信 Topic
         msgInner.setTopic(newTopic);
         msgInner.setBody(msgExt.getBody());
         msgInner.setFlag(msgExt.getFlag());
@@ -287,7 +296,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgExt.getProperties()));
         msgInner.setTagsCode(MessageExtBrokerInner.tagsString2tagsCode(null, msgExt.getTags()));
 
-        // 设置重试队列 ID
+        // 设置重试/死信队列 ID
         msgInner.setQueueId(queueIdInt);
         msgInner.setSysFlag(msgExt.getSysFlag());
         msgInner.setBornTimestamp(msgExt.getBornTimestamp());
@@ -303,6 +312,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgExt.getProperties()));
 
         // 作为新消息存到CommitLog中
+        // todo 如果重试次数达到阈值，则加入死信队列后就不管了。交给人工补偿
         CompletableFuture<PutMessageResult> putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
 
 
@@ -348,7 +358,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                                                 RemotingCommand request,
                                                                 SendMessageContext mqtraceContext,
                                                                 SendMessageRequestHeader requestHeader) {
-        // 发送消息前的处理
+        // 1 发送消息前的处理
         // todo 包括 Topic 的创建与上报
         final RemotingCommand response = preSend(ctx, request, requestHeader);
         final SendMessageResponseHeader responseHeader = (SendMessageResponseHeader) response.readCustomHeader();
@@ -374,8 +384,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         msgInner.setTopic(requestHeader.getTopic());
         msgInner.setQueueId(queueIdInt);
 
-        // 处理重试和死信队列的情况
-        // 如果消息达到最大重试次数，默认 16次，就放入到死信队列
+        // 2 如果消息重试次数超过允许的最大重试次数，消息将进入 DLQ 死信队列。
+        // todo 如果是重试消息，判断是否触发死信队列的情况，触发则创建对应的死信 Topic（如果消息达到最大重试次数，默认 16次，就放入到死信队列）
         if (!handleRetryAndDLQ(requestHeader, response, request, msgInner, topicConfig)) {
             return CompletableFuture.completedFuture(response);
         }
@@ -439,7 +449,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
     }
 
     /**
-     * 处理重试和死信队列
+     * 根据重试消息处理死信队列
      *
      * @param requestHeader
      * @param response
@@ -479,21 +489,24 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             // 获取请求重试次数
             int reconsumeTimes = requestHeader.getReconsumeTimes() == null ? 0 : requestHeader.getReconsumeTimes();
 
-            // 超过最大消费次数，加入到死信对列
+            // todo 超过最大消费次数，加入到死信对列
             if (reconsumeTimes >= maxReconsumeTimes) {
                 // 死信队列主题：%DLQ%+groupName
                 newTopic = MixAll.getDLQTopic(groupName);
                 // 死信队列id
                 int queueIdInt = Math.abs(this.random.nextInt() % 99999999) % DLQ_NUMS_PER_GROUP;
 
+                // todo 创建死信 Topic
                 topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(newTopic,
                         DLQ_NUMS_PER_GROUP,
                         PermName.PERM_WRITE, 0
                 );
+
+                // 更新消息的主题为 死信 Topic
                 msg.setTopic(newTopic);
+                // 设置消息的 queueId
                 msg.setQueueId(queueIdInt);
 
-                // 死信队列，无需再处理消息
                 if (null == topicConfig) {
                     response.setCode(ResponseCode.SYSTEM_ERROR);
                     response.setRemark("topic[" + newTopic + "] not exist");

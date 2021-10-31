@@ -114,6 +114,7 @@ public class TopicPublishInfo {
                 MessageQueue mq = this.messageQueueList.get(pos);
 
                 // 过滤掉上次发送消息失败的 Broker
+                // todo 这样就可以实现，上次发送消息失败的 Broker 就不会参与消息发送队列负载
                 if (!mq.getBrokerName().equals(lastBrokerName)) {
                     return mq;
                 }

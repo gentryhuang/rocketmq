@@ -90,6 +90,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
 
         this.defaultMQPushConsumer = this.defaultMQPushConsumerImpl.getDefaultMQPushConsumer();
         this.consumerGroup = this.defaultMQPushConsumer.getConsumerGroup();
+        /**
+         * 消费消息任务队列
+         */
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
         /**
@@ -510,6 +513,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             return processQueue;
         }
 
+        /**
+         * 消费消息
+         */
         @Override
         public void run() {
             // 废弃处理队列不进行消费

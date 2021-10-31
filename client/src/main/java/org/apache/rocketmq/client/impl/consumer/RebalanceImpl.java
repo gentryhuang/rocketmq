@@ -44,6 +44,9 @@ import org.apache.rocketmq.common.protocol.heartbeat.SubscriptionData;
 
 /**
  * 均衡消息队列服务，负责分配当前消费组下的 Consumer 可消费的消息队列( MessageQueue )
+ * todo 特别说明：
+ * 1 该实例中的 Topic 的队列信息是动态的，随着 Consumer 的变化而变化，数据是全量的，因为要为每个 Consumer 分配队列
+ * 2 每个 Consumer 都持有该实例，用于给当前 Consumer 分配队列。
  */
 public abstract class RebalanceImpl {
     protected static final InternalLogger log = ClientLogger.getLog();
@@ -472,10 +475,10 @@ public abstract class RebalanceImpl {
 
         // 遍历
         for (MessageQueue mq : this.processQueueTable.keySet()) {
-            // 当前消息队列未被订阅，则从缓存中移除
+            // 当前消息队列未被订阅，则从缓存中移除 todo 消费客户端持有的队列必须对应订阅的 Topic，否则是无效队列
             // 注意：DefaultMQPushConsumer#unsubscribe(topic) 时，只移除订阅主题集合( subscriptionInner )，对应消息队列移除在该方法。
             if (!subTable.containsKey(mq.getTopic())) {
-
+                // 移除无效队列
                 ProcessQueue pq = this.processQueueTable.remove(mq);
                 if (pq != null) {
                     pq.setDropped(true);
@@ -486,14 +489,14 @@ public abstract class RebalanceImpl {
     }
 
     /**
-     * 当负载均衡时，更新消息队列，并返回是否变更
-     * - 移除在processQueueTable && 不存在于 mqSet 里的 消息队列
-     * - 增加不在processQueueTable && 存在于mqSet 里的 消息队列
+     * todo 当负载均衡时，更新当前消费客户端的消息队列，并返回是否变更
+     * - 移除在processQueueTable && 不存在于 mqSet 里的 消息队列 - 以新的为准
+     * - 增加不在processQueueTable && 存在于mqSet 里的 消息队列 - 以新的为准
      * - 即 以 mqSet 为准，
      * <p>
      * 特别说明：
      * 1 该方法本质是更新当前消费端 分配到的消息队列 与消息处理队列的映射
-     * 2 对于当前消费端来说，如果是一个新的消费队列，那么会创建一个拉取消息的请求 PullRequest 对象，用于后续从 Broker 中不断拉取消息队列中消息
+     * 2 对于当前消费端来说，如果是一个新的消费队列，那么会创建一个拉取消息的请求 PullRequest 对象，用于后续从 Broker 中不断拉取消息队列中消息；以最新分配的队列为准，删除最新队列外的缓存队列。
      * 3 todo 是不是消费端的 消息处理队列缓存大小（当前分配到的消息队列） <= 消息队列大小（消息队列缓存是针对 Topic 初始化的所有消息队列集合）
      *
      * @param topic   订阅的 topic
@@ -504,7 +507,7 @@ public abstract class RebalanceImpl {
     private boolean updateProcessQueueTableInRebalance(final String topic, final Set<MessageQueue> mqSet, final boolean isOrder) {
         boolean changed = false;
 
-        // 1 移除在 processQueueTable 但 不存在于 maSet 中的消息队列
+        // 1 移除在 processQueueTable 但 不存在于 maSet 中的消息队列 todo 毕竟要以新的为准
         Iterator<Entry<MessageQueue, ProcessQueue>> it = this.processQueueTable.entrySet().iterator();
         while (it.hasNext()) {
             Entry<MessageQueue, ProcessQueue> next = it.next();
@@ -554,6 +557,7 @@ public abstract class RebalanceImpl {
         }
 
         // 2 增加不在 processQueueTable 且 存在 mqSet 中的消息队列
+        // todo 为新的 MessageQueue 创建对应的 PullRequest ，用于从对应的消息队列中拉取消息
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
 
         // 为每个 mq 创建一个处理队列 ProcessQueue
@@ -562,7 +566,8 @@ public abstract class RebalanceImpl {
 
                 /**
                  * todo 说明：
-                 * 顺序消费时，锁定消息队列。如果锁定失败，则新增消息处理队列失败
+                 * 顺序消费时，锁定消息队列。如果锁定失败，则新增消息处理队列失败。
+                 * 也就是在顺序消费时，只有锁定队列才能操作。
                  */
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
@@ -592,12 +597,15 @@ public abstract class RebalanceImpl {
                     if (pre != null) {
                         log.info("doRebalance, {}, mq already exists, {}", consumerGroup, mq);
 
-                        // todo 如果是订阅的新消费队列，则为该消息队列创建一个 PullRequest 拉取消息的对象从 Broker 拉取消息，然后交给当前消费者消费
+                        // todo 如果是订阅的新消费队列，则为该消息队列创建一个 PullRequest 拉取消息的对象，用于从 Broker 拉取消息，然后交给当前消费者消费
                     } else {
                         log.info("doRebalance, {}, add a new mq, {}", consumerGroup, mq);
 
+                        //创建 PullRequest 对象
                         PullRequest pullRequest = new PullRequest();
                         pullRequest.setConsumerGroup(consumerGroup);
+
+                        // todo 待拉取的 MessageQueue 偏移量
                         pullRequest.setNextOffset(nextOffset);
                         pullRequest.setMessageQueue(mq);
                         pullRequest.setProcessQueue(pq);

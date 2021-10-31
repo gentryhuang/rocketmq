@@ -17,10 +17,17 @@
 package org.apache.rocketmq.store;
 
 /**
+ * 写入消息时需要申请的锁，有 ReentrantLock 和 自旋锁两种
  * Used when trying to put message
  */
 public interface PutMessageLock {
+    /**
+     * 加锁
+     */
     void lock();
 
+    /**
+     * 释放锁
+     */
     void unlock();
 }

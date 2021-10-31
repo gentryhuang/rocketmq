@@ -40,10 +40,20 @@ public abstract class ReferenceResource {
         return this.available;
     }
 
+    /**
+     * 关闭
+     *
+     * @param intervalForcibly
+     */
     public void shutdown(final long intervalForcibly) {
+        // 如果可用，则设置为非可用，并
         if (this.available) {
             this.available = false;
+            // 设置关闭时间戳
             this.firstShutdownTimestamp = System.currentTimeMillis();
+
+            // 释放资源
+            // 只有在 MappedFile 引用次数小于 1 的情况下才会释放资源
             this.release();
         } else if (this.getRefCount() > 0) {
             if ((System.currentTimeMillis() - this.firstShutdownTimestamp) >= intervalForcibly) {

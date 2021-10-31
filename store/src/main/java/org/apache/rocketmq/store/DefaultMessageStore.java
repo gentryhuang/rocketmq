@@ -65,7 +65,7 @@ import org.apache.rocketmq.store.schedule.ScheduleMessageService;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
 /**
- * RocketMQ 存储核心类，存储消息的入口方法为 putMessage.
+ * RocketMQ 存储核心类，包含了很多对存储文件进行操作的 API，其他模块对消息实体的操作都是通过该类进行的。
  * 说明：
  * 1 RocketMQ 存储用的是本地文件存储系统，效率高也可靠
  * 2 主要涉及到三种类型的文件：CommitLog、ConsumeQueue、IndexFile
@@ -91,28 +91,32 @@ public class DefaultMessageStore implements MessageStore {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
     /**
+     * 消息存储配置属性
      * 存储相关的配置，如存储路径、commitLog 文件大小、刷盘频次等
      */
     private final MessageStoreConfig messageStoreConfig;
 
 
     /**
-     * 消息存储在 commitlog 文件中
+     * CommitLog 文件的存储实现类
      */
     private final CommitLog commitLog;
 
     /**
-     * topic 的队列信息
+     * topic 的队列文件缓存表，按消息主题分组
+     *
+     * @see DefaultMessageStore#findConsumeQueue(java.lang.String, int)
+     * @see DefaultMessageStore#loadConsumeQueue()
      */
     private final ConcurrentMap<String/* topic */, ConcurrentMap<Integer/* queueId */, ConsumeQueue>> consumeQueueTable;
 
     /**
-     * ConsumeQueue 刷盘任务
+     * ConsumeQueue 文件刷盘线程任务
      */
     private final FlushConsumeQueueService flushConsumeQueueService;
 
     /**
-     * commitLog 过期文件删除任务
+     * CommitLog 过期文件清除线程任务
      */
     private final CleanCommitLogService cleanCommitLogService;
 
@@ -122,22 +126,23 @@ public class DefaultMessageStore implements MessageStore {
     private final CleanConsumeQueueService cleanConsumeQueueService;
 
     /**
-     * 索引服务
+     * Index 文件实现类
      */
     private final IndexService indexService;
 
     /**
-     * MappedFile 分配任务，RocketMQ 使用内存映射处理 commitlog、consumeQueue文件
+     * MappedFile 分配线程任务，RocketMQ 使用内存映射处理 CommitLog、ConsumeQueue文件
      */
     private final AllocateMappedFileService allocateMappedFileService;
 
     /**
+     * CommitLog 消息分发线程任务，根据 CommitLog 文件构建 ConsumeQueue、Index 文件
      * todo 重要，理解 Commitlog 和 Consumequeue 的关系
-     * reput 转发线程（负责 Commitlog 转发到 Consumequeue、Index文件）。
      */
     private final ReputMessageService reputMessageService;
 
     /**
+     * 存储高可用机制
      * 主从同步实现服务
      */
     private final HAService haService;
@@ -153,6 +158,7 @@ public class DefaultMessageStore implements MessageStore {
     private final StoreStatsService storeStatsService;
 
     /**
+     * 消息堆内存缓存
      * ByteBuffer 池
      */
     private final TransientStorePool transientStorePool;
@@ -170,26 +176,28 @@ public class DefaultMessageStore implements MessageStore {
      * Broker 统计服务
      */
     private final BrokerStatsManager brokerStatsManager;
+
     /**
-     * 消息达到监听器
+     * 在消息拉取长轮询模式下的消息达到监听器
      */
     private final MessageArrivingListener messageArrivingListener;
     /**
-     * Broker 配置
+     * Broker 配置属性
      */
     private final BrokerConfig brokerConfig;
 
     private volatile boolean shutdown = true;
 
     /**
-     * 刷盘检测点
+     * 文件刷盘检测点
      */
     private StoreCheckpoint storeCheckpoint;
 
     private AtomicLong printTimes = new AtomicLong(0);
 
     /**
-     * todo 重要
+     * todo CommitLog 文件转发请求
+     * <p>
      * 转发 commitLog 日志，主要是从 commitlog 转发到 consumeQueue、index 文件
      * consumeQueue -> CommitLogDispatcherBuildConsumeQueue
      * index -> CommitlogDispatcherBuildIndex
@@ -299,33 +307,33 @@ public class DefaultMessageStore implements MessageStore {
         boolean result = true;
 
         try {
-            // 1 判断 user.home/store 文件夹是否存在
-            // 在DefaultMessageStore 启动时创建，在 shutdown 时删除，也就是如果该文件存在，说明不是正常的关闭。
+            // 1 判断 user.home/store/abort 文件是否存在
+            // Broker 在启动过时创建，在退出时通过注册 JVM 钩子函数删除 abrot 文件。也就是如果该文件存在，说明不是正常的关闭。
+            // todo 在 Broker 异常退出时，CommitLog 与 ConsumeQueue 数据有可能不一致，需要进行恢复
             boolean lastExitOK = !this.isTempFileExist();
             log.info("last shutdown {}", lastExitOK ? "normally" : "abnormally");
 
-            // 2 需要处理延迟消息
+            // 2 需要处理延迟消息，包括 维护 delayLevelTable 映射表 和加载文件
             if (null != scheduleMessageService) {
                 result = result && this.scheduleMessageService.load();
             }
 
-            // 3 commitlog 文件加载
-            // load Commit Log
+            // 3 Commitlog 文件加载
             result = result && this.commitLog.load();
 
-            // 4 加载 consumequeue 文件
-            // load Consume Queue
+            // 4 加载 ConsumeQueue 文件
             result = result && this.loadConsumeQueue();
 
+            // 以上的文件都加载成功后，加载并存储 checkpoint 文件
             if (result) {
-                // 5 文件存储检测点
+                // 5 文件存储检测点封装对象
                 this.storeCheckpoint =
                         new StoreCheckpoint(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
 
                 // 6 索引文件加载
                 this.indexService.load(lastExitOK);
 
-                // 7 文件恢复
+                // 7 todo 根据 Broker 是否正常停止，进行不同策略的文件恢复
                 this.recover(lastExitOK);
 
                 log.info("load over, and the max phy offset = {}", this.getMaxPhyOffset());
@@ -343,8 +351,8 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 存储服务启动会启动多个后台线程
      * todo 非常重要
+     * 存储服务启动会启动多个后台线程
      *
      * @throws Exception
      */
@@ -357,6 +365,9 @@ public class DefaultMessageStore implements MessageStore {
 
         lockFile.getChannel().write(ByteBuffer.wrap("lock".getBytes()));
         lockFile.getChannel().force(true);
+
+
+        /*-----------todo  获取 CommitLog 最小物理偏移量，用于指定从哪个物理偏移量开始转发消息给 ConsumeQueue 和 Index 文件 -------------*/
         {
             /**
              * 1. Make sure the fast-forward messages to be truncated during the recovering according to the max physical offset of the commitlog;
@@ -393,13 +404,17 @@ public class DefaultMessageStore implements MessageStore {
             log.info("[SetReputOffset] maxPhysicalPosInLogicQueue={} clMinOffset={} clMaxOffset={} clConfirmedOffset={}",
                     maxPhysicalPosInLogicQueue, this.commitLog.getMinOffset(), this.commitLog.getMaxOffset(), this.commitLog.getConfirmOffset());
 
-            /* todo  重放消息开始位置 & 启动重放消息的 CommitLog 的任务构建 ConsumeQueue 和 IndexFile & 启动 CommitLog 和 ConsumeQueue 刷盘任务 */
 
-            // 设置重放消息的 commitlog 的物理位置
+
+
+            /*--------- todo  重放消息开始位置 & 启动重放消息的 CommitLog 的任务构建 ConsumeQueue 和 IndexFile & 启动 CommitLog 和 ConsumeQueue 刷盘任务 -----------*/
+
+
+            // todo 设置从 CommitLog 哪个物理偏移量开始转发消息给 ConsumeQueue 和 Index 文件
             this.reputMessageService.setReputFromOffset(maxPhysicalPosInLogicQueue);
 
 
-            // 启动 Commitlog 转发到 Consumequeue、Index文件 的任务
+            // todo 启动 Commitlog 转发到 Consumequeue、Index文件 的任务，该任务基本不停歇地执行
             this.reputMessageService.start();
 
             /**
@@ -422,10 +437,14 @@ public class DefaultMessageStore implements MessageStore {
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
 
-        // ConsumeQueue 刷盘任务
+        // todo 启动 ConsumeQueue 刷盘任务
         this.flushConsumeQueueService.start();
-        // commitLog 刷盘任务
+
+
+        // todo commitLog 刷盘任务
         this.commitLog.start();
+
+
         this.storeStatsService.start();
 
         this.createTempFile();
@@ -500,12 +519,20 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * 检查消息
+     *
+     * @param msg
+     * @return
+     */
     private PutMessageStatus checkMessage(MessageExtBrokerInner msg) {
+        // 消息主题长度检查
         if (msg.getTopic().length() > Byte.MAX_VALUE) {
             log.warn("putMessage message topic length too long " + msg.getTopic().length());
             return PutMessageStatus.MESSAGE_ILLEGAL;
         }
 
+        // 消息属性长度检查
         if (msg.getPropertiesString() != null && msg.getPropertiesString().length() > Short.MAX_VALUE) {
             log.warn("putMessage message properties length too long " + msg.getPropertiesString().length());
             return PutMessageStatus.MESSAGE_ILLEGAL;
@@ -527,6 +554,11 @@ public class DefaultMessageStore implements MessageStore {
         return PutMessageStatus.PUT_OK;
     }
 
+    /**
+     * 检查存储服务状态
+     *
+     * @return
+     */
     private PutMessageStatus checkStoreStatus() {
         if (this.shutdown) {
             log.warn("message store has shutdown, so putMessage is forbidden");
@@ -541,6 +573,7 @@ public class DefaultMessageStore implements MessageStore {
             return PutMessageStatus.SERVICE_NOT_AVAILABLE;
         }
 
+        // 当前是否可写
         if (!this.runningFlags.isWriteable()) {
             long value = this.printTimes.getAndIncrement();
             if ((value % 50000) == 0) {
@@ -551,6 +584,7 @@ public class DefaultMessageStore implements MessageStore {
         } else {
             this.printTimes.set(0);
         }
+
 
         if (this.isOSPageCacheBusy()) {
             return PutMessageStatus.OS_PAGECACHE_BUSY;
@@ -627,7 +661,7 @@ public class DefaultMessageStore implements MessageStore {
      */
     @Override
     public PutMessageResult putMessage(MessageExtBrokerInner msg) {
-        // 检查存储状态
+        // 检查存储服务状态
         PutMessageStatus checkStoreStatus = this.checkStoreStatus();
         if (checkStoreStatus != PutMessageStatus.PUT_OK) {
             return new PutMessageResult(checkStoreStatus, null);
@@ -638,13 +672,15 @@ public class DefaultMessageStore implements MessageStore {
         if (msgCheckStatus == PutMessageStatus.MESSAGE_ILLEGAL) {
             return new PutMessageResult(msgCheckStatus, null);
         }
+
+        // 消息写入计时
         long beginTime = this.getSystemClock().now();
 
         // todo 重点关注
         // 将消息写入 CommitLog 文件，具体实现类 CommitLog
         PutMessageResult result = this.commitLog.putMessage(msg);
 
-
+        // 消息写入耗时
         long elapsedTime = this.getSystemClock().now() - beginTime;
         if (elapsedTime > 500) {
             log.warn("not in lock elapsed time(ms)={}, bodyLength={}", elapsedTime, msg.getBody().length);
@@ -1447,6 +1483,8 @@ public class DefaultMessageStore implements MessageStore {
     public ConsumeQueue findConsumeQueue(String topic, int queueId) {
         // 获取 topic 对应的所有消费队列
         ConcurrentMap<Integer, ConsumeQueue> map = consumeQueueTable.get(topic);
+
+        // 如果没有则创建一个 ConsumeQueue，并缓存起来
         if (null == map) {
             ConcurrentMap<Integer, ConsumeQueue> newMap = new ConcurrentHashMap<Integer, ConsumeQueue>(128);
             ConcurrentMap<Integer, ConsumeQueue> oldMap = consumeQueueTable.putIfAbsent(topic, newMap);
@@ -1656,18 +1694,20 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * load logics queue
+     * 加载消息消费队列
      *
      * @return
      */
     private boolean loadConsumeQueue() {
+        // 封装 $user.home/store/consumequeue 文件夹
         File dirLogic = new File(StorePathConfigHelper.getStorePathConsumeQueue(this.messageStoreConfig.getStorePathRootDir()));
+
         // 获取 Store consumequeue 目录下所有子目录，加载进来
         File[] fileTopicList = dirLogic.listFiles();
 
-
         if (fileTopicList != null) {
 
+            // 遍历 Topic 级别的目录
             for (File fileTopic : fileTopicList) {
 
                 // 文件夹对应的名 - Topic
@@ -1688,6 +1728,7 @@ public class DefaultMessageStore implements MessageStore {
                         }
 
                         // 还原
+                        // 构建 ConsumeQueue ，主要初始化：topic、queueId、storePah、mappedFileSize
                         ConsumeQueue logic = new ConsumeQueue(
                                 topic,
                                 queueId,
@@ -1695,8 +1736,9 @@ public class DefaultMessageStore implements MessageStore {
                                 this.getMessageStoreConfig().getMappedFileSizeConsumeQueue(),
                                 this);
 
-                        // 加入缓存
+                        // todo 将文件中的 ConsumeQueue 加载到内存
                         this.putConsumeQueue(topic, queueId, logic);
+
                         if (!logic.load()) {
                             return false;
                         }
@@ -1717,7 +1759,7 @@ public class DefaultMessageStore implements MessageStore {
      */
     private void recover(final boolean lastExitOK) {
         // 1 恢复消息队列
-        // 先移除非法的 offset
+        // 返回的结果是 ConsumeQueue 中写入的消息最大物理偏移量
         long maxPhyOffsetOfConsumeQueue = this.recoverConsumeQueue();
 
         // 2 如果是正常退出，则按照正常修复；如果异常退出，则按照异常修复逻辑
@@ -1729,6 +1771,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         // 3 修复主题队列
+        // todo 恢复 ConsumeQueue 文件后，将在 CommitLog 实例中保存每个消息消费队列当前的逻辑偏移量
         this.recoverTopicQueueTable();
     }
 
@@ -1740,6 +1783,13 @@ public class DefaultMessageStore implements MessageStore {
         return transientStorePool;
     }
 
+    /**
+     * 更新存储服务内存中的 consumeQueueTable
+     *
+     * @param topic
+     * @param queueId
+     * @param consumeQueue
+     */
     private void putConsumeQueue(final String topic, final int queueId, final ConsumeQueue consumeQueue) {
         ConcurrentMap<Integer/* queueId */, ConsumeQueue> map = this.consumeQueueTable.get(topic);
         if (null == map) {
@@ -1752,7 +1802,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 恢复消息队列
+     * 恢复并返回 ConsumeQueue 中写入的消息最大物理偏移量（针对 CommitLog）
      *
      * @return
      */
@@ -1772,17 +1822,28 @@ public class DefaultMessageStore implements MessageStore {
     }
 
 
+    /**
+     * 恢复主题队列
+     */
     public void recoverTopicQueueTable() {
         HashMap<String/* topic-queueid */, Long/* offset */> table = new HashMap<String, Long>(1024);
+
+        // 获取 CommitLog 最小的物理偏移量
         long minPhyOffset = this.commitLog.getMinOffset();
+
+        // 遍历 Topic 下消息队列 ConsumeQueue
         for (ConcurrentMap<Integer, ConsumeQueue> maps : this.consumeQueueTable.values()) {
+
+            // 根据
             for (ConsumeQueue logic : maps.values()) {
                 String key = logic.getTopic() + "-" + logic.getQueueId();
+                // 更新 topic-queueid 的逻辑偏移量
                 table.put(key, logic.getMaxOffsetInQueue());
                 logic.correctMinOffset(minPhyOffset);
             }
         }
 
+        // 更新 CommitLog 中 Topic-queueid 对应逻辑偏移量
         this.commitLog.setTopicQueueTable(table);
     }
 
@@ -1839,10 +1900,12 @@ public class DefaultMessageStore implements MessageStore {
      * @param dispatchRequest
      */
     public void putMessagePositionInfo(DispatchRequest dispatchRequest) {
-        // 根据 topic 和 queueId 查找队列，没有会创建一个
+        // 1 根据消息 topic 和 queueId ，获取对应的 ConsumeQueue 文件
+        // 找不到对应 ConsumeQueue 会自动创建一个
+        // todo 因为每一个消息主题下每一个消息队列对应一个文件夹
         ConsumeQueue cq = this.findConsumeQueue(dispatchRequest.getTopic(), dispatchRequest.getQueueId());
 
-        // 同步 commitlog 内容，即建立消息位置信息到 ConsumeQueue
+        // 2 同步 commitlog 内容，即建立消息位置信息到 当前获取的 ConsumeQueue
         cq.putMessagePositionInfoWrapper(dispatchRequest);
     }
 
@@ -1904,7 +1967,7 @@ public class DefaultMessageStore implements MessageStore {
 
         @Override
         public void dispatch(DispatchRequest request) {
-            // 非事务消息 或 事务提交消息 建立 消息位置信息 到 ConsumeQueue
+            // 非事务消息 或 事务提交消息, 建立 消息位置信息 到 ConsumeQueue
             final int tranType = MessageSysFlag.getTransactionValue(request.getSysFlag());
             switch (tranType) {
                 case MessageSysFlag.TRANSACTION_NOT_TYPE: // 非事务消息
@@ -2188,7 +2251,12 @@ public class DefaultMessageStore implements MessageStore {
 
     /**
      * ConsumeQueue 刷盘线程任务
-     * <p>
+     * todo 说明：
+     * 1 刷盘 ConsumeQueue 类似 CommitLog ，但是 ConsumeQueue 只有异步刷盘
+     * 2 ConsumeQueue 刷盘任务基本和 CommitLog 异步刷盘一致，可参考 CommtLog 刷盘逻辑
+     *
+     * @see CommitLog.FlushRealTimeService
+     *
      * flush ConsumeQueue
      */
     class FlushConsumeQueueService extends ServiceThread {
@@ -2224,18 +2292,19 @@ public class DefaultMessageStore implements MessageStore {
             // flush 消费队列
             ConcurrentMap<String, ConcurrentMap<Integer, ConsumeQueue>> tables = DefaultMessageStore.this.consumeQueueTable;
 
-            // 遍历消费队列，flush ConsumeQueue
+            // 遍历存储中心缓存的消费队列，依次 flush ConsumeQueue
             for (ConcurrentMap<Integer, ConsumeQueue> maps : tables.values()) {
                 for (ConsumeQueue cq : maps.values()) {
                     boolean result = false;
                     for (int i = 0; i < retryTimes && !result; i++) {
-                        // flush ConsumeQueue(消费队列)
+
+                        // todo flush ConsumeQueue(消费队列)
                         result = cq.flush(flushConsumeQueueLeastPages);
                     }
                 }
             }
 
-            // flush 存储 check point
+            // todo flush 时保存 check point
             if (0 == flushConsumeQueueLeastPages) {
                 if (logicsMsgTimestamp > 0) {
                     DefaultMessageStore.this.getStoreCheckpoint().setLogicsMsgTimestamp(logicsMsgTimestamp);
@@ -2267,6 +2336,7 @@ public class DefaultMessageStore implements MessageStore {
                 }
             }
 
+            // Broker 关闭时，要强制刷新
             this.doFlush(RETRY_TIMES_OVER);
 
             DefaultMessageStore.log.info(this.getServiceName() + " service end");
@@ -2284,7 +2354,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 说明：重放消息线程服务
+     * 说明：重放消息线程任务
      * 1 该服务不断生成 消息位置信息 到 消费队列(ConsumeQueue)
      * 2 该服务不断生成 消息索引 到 索引文件(IndexFile)
      * 特别说明：
@@ -2357,29 +2427,30 @@ public class DefaultMessageStore implements MessageStore {
                 this.reputFromOffset = DefaultMessageStore.this.commitLog.getMinOffset();
             }
 
-            // 不能超出 CommitLog 最大偏移量
+            // todo 是否可以继续重放 CommitLog，原则是重放的偏移量 reputFromOffset  不能超出 CommitLog 最大偏移量
             for (boolean doNext = true; this.isCommitLogAvailable() && doNext; ) {
+
+                // todo 是否允许重复转发，如果允许重复转发，则重放的偏移量 reputFromOffset 也不能 >= CommitLog 文件的提交指针
                 if (DefaultMessageStore.this.getMessageStoreConfig().isDuplicationEnable()
                         && this.reputFromOffset >= DefaultMessageStore.this.getConfirmOffset()) {
                     break;
                 }
 
-                // 1 根据 offset 从对应的物理 commitlog 中找消息，即获取从reputFromOffset开始的commitLog对应的MappeFile对应的MappedByteBuffer，如果找不到，退出此次循环
+                // 1 返回 reputFromOffset 偏移量开始的全部有效数据( reputFromOffset 对应的 一个 CommitLog 文件)，
+                // 即获取从 reputFromOffset 开始的 commitLog 对应的 MappeFile 对应的MappedByteBuffer，如果找不到，退出此次循环
                 SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
                 if (result != null) {
                     try {
 
-                        // 将从 commitlog 找到的消息的偏移量作为拉取的偏移量，其实就是根据 reputFromOffset 找到的 MappedFile 剩余位置，即 this.fileFromOffset + reputFromOffset
-                        // 下次获取就是从该位置开始
+                        // 更新 reputFromOffset ，以实际拉取消息的起始偏移量为准，即 this.fileFromOffset + reputFromOffset
                         this.reputFromOffset = result.getStartOffset();
 
-                        // 根据数据的大小进行遍历
+                        // todo 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条，创建 DispatchRequest 对象
                         for (int readSize = 0; readSize < result.getSize() && doNext; ) {
 
-                            // 2 尝试构建转发请求对象 DispatchRequest，即生成重放消息重放调度请求，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息 todo ? 一条吗？从 SelectMappedBufferResult 的 ByteBuffer 中只取固定大小数据？。
-                            // 主要是从Nio ByteBuffer中，根据 commitlog 消息存储格式，解析出消息的核心属性
-                            // 其中延迟消息的时间计算也在该逻辑中
-                            // 注意：生成重放消息重放调度请求 (DispatchRequest) 。请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。
+                            // 2 尝试构建转发请求对象 DispatchRequest，即生成重放消息调度请求，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
+                            // todo 主要是从Nio ByteBuffer中，根据 commitlog 消息存储格式，解析出消息的核心属性，其中延迟消息的时间计算也在该逻辑中
+                            // todo 注意：生成重放消息调度请求 (DispatchRequest) ，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。不太明白怎么做到只有一条的？？？
                             DispatchRequest dispatchRequest =
                                     DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
                             // 消息长度
@@ -2388,14 +2459,13 @@ public class DefaultMessageStore implements MessageStore {
                             // 读取成功
                             if (dispatchRequest.isSuccess()) {
 
-                                // 有消息
+                                // 解析得到的消息程度大于 0
                                 if (size > 0) {
 
-                                    // 3 转发 DispatchRequest，构建消息队列和IndexFile todo 重要
+                                    // 3 todo 转发 DispatchRequest，构建 消息队列 和 IndexFile
                                     DefaultMessageStore.this.doDispatch(dispatchRequest);
 
                                     // todo 4 当 Broker 是主节点 && Broker 开启的是长轮询，则通知消费队列有新的消息到达，这样处理等待中拉取消息请求可以再次拉取消息
-                                    // 因为在拉取消息时
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
                                             && DefaultMessageStore.this.brokerConfig.isLongPollingEnable()
                                             && DefaultMessageStore.this.messageArrivingListener != null) {
@@ -2410,9 +2480,9 @@ public class DefaultMessageStore implements MessageStore {
                                                 dispatchRequest.getPropertiesMap());
                                     }
 
-                                    // 更新下次重放消息的偏移量
+                                    // todo 更新下次重放消息的偏移量
                                     this.reputFromOffset += size;
-                                    // 累加读取大小，判断是否读取完毕
+                                    // todo 累加读取大小，判断是否读取完毕
                                     readSize += size;
 
                                     // 统计
@@ -2459,7 +2529,8 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         /**
-         * 重放消息线程任务，不断生成消息位置信息到消费队列 ConsumeQueue 和 消息索引到索引文件 IndexFile
+         * 重放消息线程任务。每执行一次任务推送，休息 1ms 后继续尝试推送消息到 ConsumeQueue 和 Index 文件中
+         * 即：不断生成消息位置信息到消费队列 ConsumeQueue 和 消息索引到索引文件 IndexFile
          */
         @Override
         public void run() {

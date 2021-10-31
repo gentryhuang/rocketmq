@@ -18,41 +18,46 @@ package org.apache.rocketmq.store;
 
 import java.util.Map;
 
+/**
+ * CommitLog 派发请求
+ */
 public class DispatchRequest {
     /**
-     * 消息主题
+     * 消息主题名称
      */
     private final String topic;
     /**
-     * 消息队列id
+     * 消息队列ID
      */
     private final int queueId;
     /**
-     * commitlog 中的偏移量
+     * 消息在 Commitlog 中的物理偏移量
      */
     private final long commitLogOffset;
     /**
-     * 消息大小
+     * 消息大小/长度
      */
     private int msgSize;
     /**
-     * tagsCode
+     * 消息过滤 tag 哈希码
      */
     private final long tagsCode;
     /**
-     * 消息存储时间
+     * 消息存储时间戳
      */
     private final long storeTimestamp;
     /**
-     * 消息在消息队列的 offset
+     * 消息在消息队列的逻辑偏移量
+     * @see CommitLog.DefaultAppendMessageCallback#doAppend(long, java.nio.ByteBuffer, int, org.apache.rocketmq.store.MessageExtBrokerInner)
      */
     private final long consumeQueueOffset;
     /**
+     * 消息索引 key，多个索引 key 用空格隔开，如：key1 key2
      * 存放在消息属性中的 keys ：PROPERTY_KEYS = "KEYS"
      */
     private final String keys;
     /**
-     * 是否成功
+     * 是否成功解析到完整的消息
      */
     private final boolean success;
     /**
@@ -60,17 +65,20 @@ public class DispatchRequest {
      */
     private final String uniqKey;
     /**
-     * 系统标志
+     * 消息系统标志
      */
     private final int sysFlag;
     /**
-     * 事务 pre 消息偏移量
+     * 消息预处理事务偏移量
      */
     private final long preparedTransactionOffset;
     /**
-     * 属性
+     * 消息属性
      */
     private final Map<String, String> propertiesMap;
+    /**
+     * 位图
+     */
     private byte[] bitMap;
 
     private int bufferSize = -1;//the buffer size maybe larger than the msg size if the message is wrapped by something

@@ -184,7 +184,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
     protected RemotingCommand msgCheck(final ChannelHandlerContext ctx,
                                        final SendMessageRequestHeader requestHeader, final RemotingCommand response) {
 
-        // 检查 Broker 是否有写入权限
+        // 1 检查 Broker 是否有写入权限
         if (!PermName.isWriteable(this.brokerController.getBrokerConfig().getBrokerPermission())
                 && this.brokerController.getTopicConfigManager().isOrderTopic(requestHeader.getTopic())) {
             response.setCode(ResponseCode.NO_PERMISSION);
@@ -193,9 +193,11 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
             return response;
         }
 
-        // Topic 的校验
-        // 1 检查Topic是否可以被发送，目前是 {@link MixAll.DEFAULT_TOPIC} 不被允许发送
-        // 2 当找不到Topic配置，则进行创建
+        /**
+         * 2 Topic 的校验 (todo 主要针对默认主题，默认主题不能发送消息，仅供路由查找)
+         *  2.1 检查Topic是否可以被发送，目前是 TWB102 不被允许发送
+         *  2.2 当找不到Topic配置，则进行创建
+         */
         if (!TopicValidator.validateTopic(requestHeader.getTopic(), response)) {
             return response;
         }
@@ -203,14 +205,17 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
             return response;
         }
 
-        // 检查下发送消息的 Topic 在 Broker 本地有没有
+
+        // 3 在 Broker 端存储主题的配置信息，并定时上报到 NmaeSrv
+        // 3.1 检查下发送消息的 Topic 在 Broker 本地有没有
         TopicConfig topicConfig =
                 this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
 
-        // todo 没有，则自动创建topic，实际就是创建一个topicConfig对象，存放到本地map，并同步到NameSrv
+        // 3.2 todo 没有，则自动创建topic，实际就是创建一个topicConfig对象，存放到本地map，并同步到NameSrv
         if (null == topicConfig) {
             int topicSysFlag = 0;
             if (requestHeader.isUnitMode()) {
+                // todo 如果是重试主题
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                     topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
                 } else {
@@ -245,7 +250,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
             }
         }
 
-        // 队列编号是否正确
+        // 4 检查队列
         int queueIdInt = requestHeader.getQueueId();
         int idValid = Math.max(topicConfig.getWriteQueueNums(), topicConfig.getReadQueueNums());
         if (queueIdInt >= idValid) {
@@ -322,12 +327,16 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
 
         SendMessageRequestHeaderV2 requestHeaderV2 = null;
         SendMessageRequestHeader requestHeader = null;
+        // 根据请求码进行解析请求
         switch (request.getCode()) {
+            // 批量消息发送
             case RequestCode.SEND_BATCH_MESSAGE:
             case RequestCode.SEND_MESSAGE_V2:
                 requestHeaderV2 =
                         (SendMessageRequestHeaderV2) request
                                 .decodeCommandCustomHeader(SendMessageRequestHeaderV2.class);
+
+                // 消息发送
             case RequestCode.SEND_MESSAGE:
                 if (null == requestHeaderV2) {
                     requestHeader =

@@ -145,7 +145,9 @@ public class BrokerController {
     private final List<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
     private final List<ConsumeMessageHook> consumeMessageHookList = new ArrayList<ConsumeMessageHook>();
 
-    // 消息存储
+    /**
+     * todo 持有的数据存储服务
+     */
     private MessageStore messageStore;
 
     private RemotingServer remotingServer;
@@ -888,11 +890,15 @@ public class BrokerController {
     }
 
     /**
-     * 启动 Broker
+     * todo 启动 Broker
      *
      * @throws Exception
      */
     public void start() throws Exception {
+
+        /**
+         * 启动存储服务，该服务会启动多个任务，如 CommitLog 重放任务、CommitLog 文件刷盘任务、Consumequeue 刷盘任务、清理过期文件任务等等
+         */
         if (this.messageStore != null) {
             // DefaultMessageStore.start()
             this.messageStore.start();

@@ -44,14 +44,20 @@ public class TopicConfig {
     private int readQueueNums = defaultReadQueueNums;
     private int writeQueueNums = defaultWriteQueueNums;
 
-    // 权限
+    // 权限码
     private int perm = PermName.PERM_READ | PermName.PERM_WRITE;
     /**
      * Topic 过滤
      */
     private TopicFilterType topicFilterType = TopicFilterType.SINGLE_TAG;
 
+    /**
+     * topic flag
+     */
     private int topicSysFlag = 0;
+    /**
+     * 是否是顺序消息
+     */
     private boolean order = false;
 
     public TopicConfig() {

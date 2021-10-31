@@ -19,9 +19,13 @@ package org.apache.rocketmq.store;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
+ * 独占锁
  * Exclusive lock implementation to put message
  */
 public class PutMessageReentrantLock implements PutMessageLock {
+    /**
+     * 非公平锁
+     */
     private ReentrantLock putMessageNormalLock = new ReentrantLock(); // NonfairSync
 
     @Override

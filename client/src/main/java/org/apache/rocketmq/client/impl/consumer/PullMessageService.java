@@ -81,7 +81,7 @@ public class PullMessageService extends ServiceThread {
     }
 
     /**
-     * 将拉取消息请求放入队列中，然后等待待执行
+     * 将拉取消息请求放入队列中。有后台线程阻塞等待任务。
      *
      * @param pullRequest 拉取消息请求
      */
@@ -119,17 +119,17 @@ public class PullMessageService extends ServiceThread {
      * @param pullRequest 拉取消息请求
      */
     private void pullMessage(final PullRequest pullRequest) {
-        // 根据 消费组（名） 获取消费者实例
+        // 1 根据 消费组（名）从 JVM 实例中获取消费者实例，也就是当前消费者客户端
         final MQConsumerInner consumer = this.mQClientFactory.selectConsumer(pullRequest.getConsumerGroup());
         if (consumer != null) {
-
             //强转为推送模式消费者
             DefaultMQPushConsumerImpl impl = (DefaultMQPushConsumerImpl) consumer;
 
-          //  DefaultMQPullConsumer impl1 = (DefaultMQPullConsumer)consumer;
-          //  impl1.pull(final MessageQueue mq, final String subExpression, final long offset, final int maxNums)
+            // 对比用的
+            //  DefaultMQPullConsumer impl1 = (DefaultMQPullConsumer)consumer;
+            //  impl1.pull(final MessageQueue mq, final String subExpression, final long offset, final int maxNums)
 
-            // 从 Broker 拉取消息，并消费
+            // 当前消费端实例 从 Broker 拉取消息，拉取到消息后提交给消费线程池。
             impl.pullMessage(pullRequest);
         } else {
             log.warn("No matched consumer for the PullRequest {}, drop it", pullRequest);
@@ -140,7 +140,7 @@ public class PullMessageService extends ServiceThread {
     public void run() {
         log.info(this.getServiceName() + " service started");
 
-        // 循环拉取消息请求队列 pullRequestQueue ，进行消息拉取
+        // 不断获取 拉取消息请求，来一个请求就立马进行消息拉取，没有就阻塞等待。
         while (!this.isStopped()) {
             try {
                 // 从拉取请求队列中不断获取拉取消息的请求

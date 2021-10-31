@@ -39,7 +39,7 @@ public class MessageStoreConfig {
             + File.separator + "commitlog";
 
     /**
-     * 如：commitlog 文件的大小，默认为 1G
+     * 如：每个 Commitlog 文件的大小，默认为 1G
      */
     private int mappedFileSizeCommitLog = 1024 * 1024 * 1024;
 
@@ -75,7 +75,9 @@ public class MessageStoreConfig {
     private int flushIntervalCommitLog = 500;
 
     /**
-     * 提交消息到 CommitLog 对应的文件通道的间隔时间
+     * 提交消息到 CommitLog 对应的文件通道的间隔时间，即
+     *
+     * @see org.apache.rocketmq.store.CommitLog.CommitRealTimeService 执行间隔时间，默认 200ms
      */
     // Only used if TransientStorePool enabled
     // flush data to FileChannel
@@ -89,12 +91,15 @@ public class MessageStoreConfig {
      */
     private boolean useReentrantLockWhenPutMessage = false;
 
+    /**
+     * 默认是 false ，表示使用 await 方法等待；如果是 true ，表示使用 Thread.sleep 方法等待
+     */
     // Whether schedule flush,default is real-time
     @ImportantField
     private boolean flushCommitLogTimed = false;
 
     /**
-     * 刷写到 ConsumeQueue 的间隔，默认为 1s
+     * 两次刷盘的的间隔，默认为 1s
      */
     private int flushIntervalConsumeQueue = 1000;
 
@@ -154,6 +159,10 @@ public class MessageStoreConfig {
     // How many pages are to be flushed when flush ConsumeQueue
     private int flushConsumeQueueLeastPages = 2;
     private int flushCommitLogThoroughInterval = 1000 * 10;
+
+    /**
+     * 两次真实提交的最大间隔时间
+     */
     private int commitCommitLogThoroughInterval = 200;
     private int flushConsumeQueueThoroughInterval = 1000 * 60;
     @ImportantField
@@ -205,6 +214,11 @@ public class MessageStoreConfig {
     private long osPageCacheBusyTimeOutMills = 1000;
     private int defaultQueryMaxNum = 32;
 
+    /**
+     * 内存级别的读写分离机制
+     * 优点：是消息直接写入堆外内存，然后异步写入 pagecache ，相比每条消息追加直接写入 pagecache ，最大的优势是实现了批量化消息写入
+     * 缺点：如果 Broker 进程异常退出，放入 pagecache 中的数据不会丢失，而存储在堆外内存数据会丢失
+     */
     @ImportantField
     private boolean transientStorePoolEnable = false;
     private int transientStorePoolSize = 5;
