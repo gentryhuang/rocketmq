@@ -29,15 +29,15 @@ public class PullResult {
      */
     private final PullStatus pullStatus;
     /**
-     * 结果中返回，下次从哪里开始拉取
+     * 结果中返回，下次从哪里开始拉取（消息队列的逻辑偏移量）
      */
     private final long nextBeginOffset;
     /**
-     * 消息队列最小偏移量
+     * 消息队列最小的逻辑偏移量
      */
     private final long minOffset;
     /**
-     * 消息队列最大偏移量
+     * 消息队列最大的逻辑偏移量
      */
     private final long maxOffset;
     /**

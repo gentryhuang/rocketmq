@@ -76,7 +76,8 @@ public class ProcessQueue {
     private final Lock consumeLock = new ReentrantLock();
 
     /**
-     * msgTreeMap的一个子集，只在有序消费时使用
+     * msgTreeMap的一个子集，只在有序消费时使用。
+     * todo 用于临时存放从 ProcessQueue 中取出的消息，在消费失败时作为还原数据源，在消费成功时删除即可。
      * <p>
      * A subset of msgTreeMap, will only be used when orderly consume
      */
@@ -367,7 +368,7 @@ public class ProcessQueue {
     }
 
     /**
-     * //将consumingMsgOrderlyTreeMap消息清除,表示成功处理该批消息，并返回消费进度
+     * 将consumingMsgOrderlyTreeMap消息清除,表示成功处理该批消息，并返回消费进度
      *
      * @return
      */
@@ -375,13 +376,20 @@ public class ProcessQueue {
         try {
             this.treeMapLock.writeLock().lockInterruptibly();
             try {
-                // 消费进度
+                // 获取消费进度，也就是消费队列的逻辑偏移量，类似于数组的下标
                 Long offset = this.consumingMsgOrderlyTreeMap.lastKey();
+
+                // 维护消息处理队列中的消息条数
                 msgCount.addAndGet(0 - this.consumingMsgOrderlyTreeMap.size());
+
+                // 维护消息处理队列中的消息大小
                 for (MessageExt msg : this.consumingMsgOrderlyTreeMap.values()) {
                     msgSize.addAndGet(0 - msg.getBody().length);
                 }
+
+                // 移除消息
                 this.consumingMsgOrderlyTreeMap.clear();
+
                 if (offset != null) {
                     // 返回消费进度
                     return offset + 1;
@@ -408,6 +416,8 @@ public class ProcessQueue {
             try {
                 for (MessageExt msg : msgs) {
                     this.consumingMsgOrderlyTreeMap.remove(msg.getQueueOffset());
+                    // 将消费失败的消息重新放回 msgTreeMap 中
+                    // 注意，放入后会自动排序的，也就是下次消费还是当前放入的消息
                     this.msgTreeMap.put(msg.getQueueOffset(), msg);
                 }
             } finally {

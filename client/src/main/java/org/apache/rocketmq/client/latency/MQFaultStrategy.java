@@ -27,8 +27,8 @@ import org.apache.rocketmq.common.message.MessageQueue;
  * todo 特别说明：
  * 1 开启与不开启延迟规避机制，在消息发送时都能在不同程度上规避故障的 Broker
  * 2 区别：
- *   2.1 开启故障延迟机制，其实是一种悲观的做法。一旦消息发送失败后就会悲观认为 Broker 不可用，把这个 Broker 记录下来，在接下来的一段时间（延迟规避时间）内就不能再向其发送消息，直接避开该 Broker。
- *   2.2 未开始故障延迟机制，只会在本地消息发送的重试过程中规避该 Broker，下一次消息发送是个无状态，还是会继续尝试
+ * 2.1 开启故障延迟机制，其实是一种悲观的做法。一旦消息发送失败后就会悲观认为 Broker 不可用，把这个 Broker 记录下来，在接下来的一段时间（延迟规避时间）内就不能再向其发送消息，直接避开该 Broker。
+ * 2.2 未开始故障延迟机制，只会在本地消息发送的重试过程中规避该 Broker，下一次消息发送是个无状态，还是会继续尝试
  * 3 联系：开始故障延迟机制是将认为出现问题的 Broker 记录下来，指定多长时间内不能参与消息队列负载；不开启故障延迟机制，只是对上次出现的故障进行规避；
  * <p>
  * 默认情况下容错策略关闭，即 sendLatencyFaultEnable=false
@@ -39,6 +39,7 @@ public class MQFaultStrategy {
 
     /**
      * 延迟故障容错，维护每个 Broker 的发送消息的延迟
+     * todo 说明：latencyFaultTolerance机制是实现消息发送高可用的核心关键所在
      */
     private final LatencyFaultTolerance<String> latencyFaultTolerance = new LatencyFaultToleranceImpl();
 

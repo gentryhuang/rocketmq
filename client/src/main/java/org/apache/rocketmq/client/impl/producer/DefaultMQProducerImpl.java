@@ -312,6 +312,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
     }
 
+    /**
+     * 获取消息生产者中缓存的 Topic 发布信息，将 Topic 返回
+     *
+     * @return
+     */
     @Override
     public Set<String> getPublishTopicList() {
         Set<String> topicList = new HashSet<String>();
@@ -658,6 +663,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 调用编号
         final long invokeID = random.nextLong();
+        // 发送消息的开始时间
         long beginTimestampFirst = System.currentTimeMillis();
         long beginTimestampPrev = beginTimestampFirst;
         long endTimestamp = beginTimestampFirst;
@@ -692,7 +698,6 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 2 根据负载均衡算法选择一个MessageQueue，即选择消息要发送到的队列
                 // todo 这里没有指定队列选择器，使用的是默认的队列选择器
                 MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
-
                 if (mqSelected != null) {
                     mq = mqSelected;
                     brokersSent[times] = mq.getBrokerName();
@@ -704,7 +709,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         }
                         // 耗时时间
                         long costTime = beginTimestampPrev - beginTimestampFirst;
-                        // todo 如果耗时时间超过 设置的超时时间，则跳出重试
+                        // todo 如果本身向broker发送消息产生超时异常，就不会再重试
                         if (timeout < costTime) {
                             callTimeout = true;
                             break;
@@ -713,7 +718,6 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         // 向选中的 MessageQueue 发送消息
                         // 通过 Producer 与Broker的长连接将消息发送给Broker,然后Broker将消息存储，并对发送结果进行封装返回。
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
-
                         endTimestamp = System.currentTimeMillis();
 
                         // 更新 Broker 可用信息 todo 干嘛的？
@@ -721,7 +725,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
 
                         switch (communicationMode) {
-                            // 异步消息发送的重试是在回调时
+                            // 异步消息发送的重试是在回调时，并且只会在当前Broker进行重试
                             case ASYNC:
                                 return null;
                             case ONEWAY:
@@ -1410,8 +1414,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo != null && topicPublishInfo.ok()) {
             MessageQueue mq = null;
             try {
+                // 获取 Topic 对应的写消息队列
                 List<MessageQueue> messageQueueList =
                         mQClientFactory.getMQAdminImpl().parsePublishMessageQueues(topicPublishInfo.getMessageQueueList());
+
                 Message userMessage = MessageAccessor.cloneMessage(msg);
                 String userTopic = NamespaceUtil.withoutNamespace(userMessage.getTopic(), mQClientFactory.getClientConfig().getNamespace());
                 userMessage.setTopic(userTopic);

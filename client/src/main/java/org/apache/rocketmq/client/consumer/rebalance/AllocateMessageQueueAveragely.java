@@ -32,8 +32,9 @@ import org.apache.rocketmq.common.message.MessageQueue;
  * c1:q1,q2,q3
  * c2:q4,q5,a6
  * c3:q7,q8
- * <p>
- * 代码块 (mod > 0 && index < mod ) 判断即在处理相除有余数的情况
+ * todo 特别描述：
+ *  平均分配算法，类似于分页的算法，将所有MessageQueue排好序类似于记录，将所有消费端Consumer排好序类似页数，并求出每一页需要包含的平均size和每个页面记录的范围range，
+ *  最后遍历整个range而计算出当前Consumer端应该分配到的记录（这里即为：MessageQueue）。
  */
 public class AllocateMessageQueueAveragely implements AllocateMessageQueueStrategy {
     private final InternalLogger log = ClientLogger.getLog();

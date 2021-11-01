@@ -192,7 +192,7 @@ public class PullAPIWrapper {
      * @param offset                     拉取队列开始位置
      * @param maxNums                    拉取消息数量
      * @param sysFlag                    拉取请求系统标识
-     * @param commitOffset               提交消息进度
+     * @param commitOffset               提交的消息进度
      * @param brokerSuspendMaxTimeMillis Broker 挂起请求最大时间
      * @param timeoutMillis              请求 Broker 超时时长
      * @param communicationMode          通讯模式

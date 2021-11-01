@@ -150,9 +150,9 @@ public class RebalanceLockManager {
     /**
      * 尝试批量锁定 MessageQueue
      *
-     * @param group
-     * @param mqs
-     * @param clientId
+     * @param group    消费组
+     * @param mqs      队列集合
+     * @param clientId 消费者ID
      * @return
      */
     public Set<MessageQueue> tryLockBatch(final String group, final Set<MessageQueue> mqs,
@@ -166,7 +166,7 @@ public class RebalanceLockManager {
 
         // 遍历目标 MessageQueue
         for (MessageQueue mq : mqs) {
-            // 判断当前遍历的 mq 是否被打标，即被锁定
+            // 判断当前客户端是否已经锁定了当前队列
             if (this.isLocked(group, mq, clientId)) {
                 lockedMqs.add(mq);
             } else {
@@ -180,6 +180,7 @@ public class RebalanceLockManager {
                 // jvm 锁
                 this.lock.lockInterruptibly();
                 try {
+                    // 消费组不在所锁定map中，加入锁定的map中
                     ConcurrentHashMap<MessageQueue, LockEntry> groupValue = this.mqLockTable.get(group);
                     if (null == groupValue) {
                         groupValue = new ConcurrentHashMap<>(32);
@@ -202,7 +203,7 @@ public class RebalanceLockManager {
                                     mq);
                         }
 
-                        // 如果是当前消费端实例占有 mq，则更新时间即可
+                        // 如果是当前客户端占有 mq，则更新时间即可
                         if (lockEntry.isLocked(clientId)) {
                             lockEntry.setLastUpdateTimestamp(System.currentTimeMillis());
                             lockedMqs.add(mq);
@@ -210,7 +211,7 @@ public class RebalanceLockManager {
                         }
 
                         String oldClientId = lockEntry.getClientId();
-                        // 锁过期，那么当前消费端实例占有该锁
+                        // 锁过期，那么当前客户端占有该锁
                         if (lockEntry.isExpired()) {
                             lockEntry.setClientId(clientId);
                             lockEntry.setLastUpdateTimestamp(System.currentTimeMillis());

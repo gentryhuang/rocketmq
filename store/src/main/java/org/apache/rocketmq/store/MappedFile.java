@@ -695,7 +695,7 @@ public class MappedFile extends ReferenceResource {
     }
 
     /**
-     * 销毁 MappedFile
+     * 销毁 MappedFile 封装的文件通道和物理文件
      *
      * @param intervalForcibly 拒绝被销毁的最大存活时间
      * @return

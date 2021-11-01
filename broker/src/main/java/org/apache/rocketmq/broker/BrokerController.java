@@ -184,7 +184,7 @@ public class BrokerController {
 
 
     /**
-     * 构造非常重要
+     * todo 构造非常重要
      *
      * @param brokerConfig
      * @param nettyServerConfig
@@ -201,6 +201,9 @@ public class BrokerController {
         this.nettyServerConfig = nettyServerConfig;
         this.nettyClientConfig = nettyClientConfig;
         this.messageStoreConfig = messageStoreConfig;
+        /**
+         * 维护消费者的消费进度
+         */
         this.consumerOffsetManager = new ConsumerOffsetManager(this);
 
         /**
@@ -212,6 +215,10 @@ public class BrokerController {
         this.pullRequestHoldService = new PullRequestHoldService(this);
         this.messageArrivingListener = new NotifyMessageArrivingListener(this.pullRequestHoldService);
         this.consumerIdsChangeListener = new DefaultConsumerIdsChangeListener(this);
+
+        /**
+         * 维护消费者上报的信息
+         */
         this.consumerManager = new ConsumerManager(this.consumerIdsChangeListener);
         this.consumerFilterManager = new ConsumerFilterManager(this);
         this.producerManager = new ProducerManager();

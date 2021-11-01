@@ -873,7 +873,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         this.updateTopicSubscribeInfoWhenSubscriptionChanged();
         this.mQClientFactory.checkClientInBroker();
 
-        /** Consumer启动成功，立即向所有Broker发送心跳 */
+        /**  todo Consumer启动成功，立即向所有Broker发送心跳 */
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         // todo 唤醒 均衡消息队列任务(RebalanceService)，负责当前 Consumer 可消费的消息队列

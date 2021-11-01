@@ -25,8 +25,6 @@ import org.apache.rocketmq.common.message.MessageQueue;
  * - 同时里面还一个ProcessQueue，每个MessageQueue也同样对应一个ProcessQueue，保存了这个MessageQueue消息处理状态的快照；
  * - 还有nextOffset用来标识读取的位置；
  * - consumerGroup 指定了哪个消费者组要拉取消息
-
- *
  */
 public class PullRequest {
     /**
@@ -42,7 +40,7 @@ public class PullRequest {
      */
     private ProcessQueue processQueue;
     /**
-     * 待拉取的 MessageQueue 偏移量
+     * 待拉取的 MessageQueue 偏移量（逻辑偏移量）
      */
     private long nextOffset;
     /**

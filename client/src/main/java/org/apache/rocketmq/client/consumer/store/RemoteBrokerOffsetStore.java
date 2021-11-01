@@ -53,6 +53,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
     private final String groupName;
     /**
      * 内存中的消费进度
+     * todo 说明：是针对消息队列的逻辑偏移量
      */
     private ConcurrentMap<MessageQueue, AtomicLong> offsetTable = new ConcurrentHashMap<MessageQueue, AtomicLong>();
 
@@ -124,6 +125,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
                 case READ_FROM_STORE: {
                     try {
                         // 从 Broker 读取消费进度
+                        // todo 代码逻辑是逻辑偏移量
                         long brokerOffset = this.fetchConsumeOffsetFromBroker(mq);
                         AtomicLong offset = new AtomicLong(brokerOffset);
                         this.updateOffset(mq, offset.get(), false);
@@ -299,6 +301,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
             requestHeader.setConsumerGroup(this.groupName);
             requestHeader.setQueueId(mq.getQueueId());
 
+            // 从 Broker 拉取执行 Topic 的某个消费组下的某个队列的消费进度
             return this.mQClientFactory.getMQClientAPIImpl().queryConsumerOffset(
                     findBrokerResult.getBrokerAddr(), requestHeader, 1000 * 5);
         } else {

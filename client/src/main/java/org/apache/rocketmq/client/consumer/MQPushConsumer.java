@@ -23,6 +23,7 @@ import org.apache.rocketmq.client.exception.MQClientException;
 
 /**
  * Push consumer
+ * push 方式消费
  */
 public interface MQPushConsumer extends MQConsumer {
     /**
@@ -41,31 +42,42 @@ public interface MQPushConsumer extends MQConsumer {
     @Deprecated
     void registerMessageListener(MessageListener messageListener);
 
+
+    /**
+     * 并行消费方式
+     *
+     * @param messageListener
+     */
     void registerMessageListener(final MessageListenerConcurrently messageListener);
 
+    /**
+     * 串行消费方式
+     *
+     * @param messageListener
+     */
     void registerMessageListener(final MessageListenerOrderly messageListener);
 
     /**
      * Subscribe some topic
      *
      * @param subExpression subscription expression.it only support or operation such as "tag1 || tag2 || tag3" <br> if
-     * null or * expression,meaning subscribe
-     * all
+     *                      null or * expression,meaning subscribe
+     *                      all
      */
     void subscribe(final String topic, final String subExpression) throws MQClientException;
 
     /**
      * This method will be removed in the version 5.0.0,because filterServer was removed,and method <code>subscribe(final String topic, final MessageSelector messageSelector)</code>
      * is recommended.
-     *
+     * <p>
      * Subscribe some topic
      *
-     * @param fullClassName full class name,must extend org.apache.rocketmq.common.filter. MessageFilter
+     * @param fullClassName     full class name,must extend org.apache.rocketmq.common.filter. MessageFilter
      * @param filterClassSource class source code,used UTF-8 file encoding,must be responsible for your code safety
      */
     @Deprecated
     void subscribe(final String topic, final String fullClassName,
-        final String filterClassSource) throws MQClientException;
+                   final String filterClassSource) throws MQClientException;
 
     /**
      * Subscribe some topic with selector.

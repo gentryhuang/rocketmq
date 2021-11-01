@@ -148,7 +148,7 @@ public class MappedFileQueue {
     /**
      * 根据偏移量查找 MappedFile
      *
-     * @param offset
+     * @param offset 物理偏移量
      * @return
      */
     public MappedFile findMappedFileByOffset(final long offset) {
@@ -162,7 +162,7 @@ public class MappedFileQueue {
      * 2 如果不定时将已消费的消息从存储文件中删除，会造成极大的内存压力于资源浪费，因此 RocketMQ 采取定时删除存储文件的策略
      * 3 在存储目录中，第一个文件不一定是 00000000000000000000 ，因为该文件在某一时刻会被删除
      *
-     * @param offset
+     * @param offset                物理偏移量
      * @param returnFirstOnNotFound 如果没有找到，是否返回第一个
      * @return Mapped file or null (when not found and returnFirstOnNotFound is <code>false</code>).
      */
@@ -528,6 +528,15 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 根据时间执行文件销毁和删除
+     *
+     * @param expiredTime
+     * @param deleteFilesInterval
+     * @param intervalForcibly
+     * @param cleanImmediately
+     * @return
+     */
     public int deleteExpiredFileByTime(final long expiredTime,
                                        final int deleteFilesInterval,
                                        final long intervalForcibly,
@@ -537,6 +546,7 @@ public class MappedFileQueue {
         if (null == mfs)
             return 0;
 
+        // 到倒数第二个文件
         int mfsLength = mfs.length - 1;
         int deleteCount = 0;
         List<MappedFile> files = new ArrayList<MappedFile>();
@@ -546,8 +556,14 @@ public class MappedFileQueue {
 
                 // 取文件的修改时间，计算文件最大存活时间。过期时间默认 72小时
                 long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime;
+
+                // 如果当前时间大于文件的最大存活时间或须臾奥强制删除文件（当磁盘使用超过预定的阈值）
                 if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) {
+
+                    // 删除内部封装的文件通道和物理文件
                     if (mappedFile.destroy(intervalForcibly)) {
+
+                        // 将内存文件加入待删除文件列表中，最后统一清除内存文件
                         files.add(mappedFile);
                         deleteCount++;
 
@@ -571,7 +587,7 @@ public class MappedFileQueue {
             }
         }
 
-        // 删除过期文件
+        // 删除过期内存文件
         deleteExpiredFile(files);
 
         return deleteCount;

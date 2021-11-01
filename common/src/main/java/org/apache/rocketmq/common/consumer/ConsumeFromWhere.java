@@ -20,9 +20,8 @@ package org.apache.rocketmq.common.consumer;
  * 从何处开始消费
  */
 public enum ConsumeFromWhere {
-    // 上一次消费偏移量
     /**
-     * 一个新的消费组第一次启动从队列的最后位置开始消费，后续再启动接着上次消费的进度开始消费
+     * 一个新的订阅组第一次启动从队列的最后位置开始消费，后续再启动接着上次消费的进度开始消费，todo 即跳过历史消息
      */
     CONSUME_FROM_LAST_OFFSET,
 
@@ -33,16 +32,15 @@ public enum ConsumeFromWhere {
     @Deprecated
     CONSUME_FROM_MAX_OFFSET,
 
-    // 从头开始
+
     /**
-     * 一个新的消费组第一次启动从队列的最前位置开始消费，后续再启动接着上次消费的进度开始消费
+     * 一个新的订阅组第一次启动从队列的最前位置开始消费，后续再启动接着上次消费的进度开始消费，todo 即消费Broker未过期的历史消息
      */
     CONSUME_FROM_FIRST_OFFSET,
 
 
-    // 从某个时间点开始
     /**
-     * 一个新的消费组第一次启动从指定时间点开始消费，后续再启动接着上次消费的进度开始消费。
+     * 一个新的订阅组第一次启动从指定时间点开始消费，后续再启动接着上次消费的进度开始消费，和consumer.setConsumeTimestamp()配合使用，默认是半个小时以前；
      */
     CONSUME_FROM_TIMESTAMP,
 }

@@ -673,6 +673,12 @@ public class CommitLog {
         return beginTimeInLock;
     }
 
+    /**
+     * 异步存储 Message
+     *
+     * @param msg
+     * @return
+     */
     public CompletableFuture<PutMessageResult> asyncPutMessage(final MessageExtBrokerInner msg) {
 
         // 设置消息存储时间
@@ -721,8 +727,11 @@ public class CommitLog {
 
         long elapsedTimeInLock = 0;
         MappedFile unlockMappedFile = null;
+
+        // 获取 CommitLog 对应映射文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
 
+        // 上锁，独占锁或自旋转锁
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {
             long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
@@ -741,7 +750,9 @@ public class CommitLog {
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.CREATE_MAPEDFILE_FAILED, null));
             }
 
+            // 追加消息
             result = mappedFile.appendMessage(msg, this.appendMessageCallback);
+
             switch (result.getStatus()) {
                 case PUT_OK:
                     break;
@@ -783,18 +794,28 @@ public class CommitLog {
             this.defaultMessageStore.unlockMappedFile(unlockMappedFile);
         }
 
+        // 创建追加消息的结果
         PutMessageResult putMessageResult = new PutMessageResult(PutMessageStatus.PUT_OK, result);
 
         // Statistics
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).incrementAndGet();
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).addAndGet(result.getWroteBytes());
 
+        // 提交刷盘请求
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, msg);
+        // 提交复制请求
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, msg);
+
+
+        // 将刷盘、复制当成一个联合任务执行
         return flushResultFuture.thenCombine(replicaResultFuture, (flushStatus, replicaStatus) -> {
+
+            // 刷盘任务
             if (flushStatus != PutMessageStatus.PUT_OK) {
                 putMessageResult.setPutMessageStatus(flushStatus);
             }
+
+            // 复制任务
             if (replicaStatus != PutMessageStatus.PUT_OK) {
                 putMessageResult.setPutMessageStatus(replicaStatus);
                 if (replicaStatus == PutMessageStatus.FLUSH_SLAVE_TIMEOUT) {
@@ -1103,6 +1124,13 @@ public class CommitLog {
         return putMessageResult;
     }
 
+    /**
+     * 提交刷盘请求
+     *
+     * @param result
+     * @param messageExt
+     * @return
+     */
     public CompletableFuture<PutMessageStatus> submitFlushRequest(AppendMessageResult result, MessageExt messageExt) {
         // Synchronization flush
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
@@ -1128,15 +1156,36 @@ public class CommitLog {
         }
     }
 
+    /**
+     * 提交复制请求
+     *
+     * @param result
+     * @param messageExt
+     * @return
+     */
     public CompletableFuture<PutMessageStatus> submitReplicaRequest(AppendMessageResult result, MessageExt messageExt) {
+        // 当前 Broker 是同步 Master
         if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
+
+            // 获取 HA 服务，主从同步实现服务
             HAService service = this.defaultMessageStore.getHaService();
+
+            // 是否是等待存储后返回
             if (messageExt.isWaitStoreMsgOK()) {
                 if (service.isSlaveOK(result.getWroteBytes() + result.getWroteOffset())) {
-                    GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes(),
+
+                    // 创建同步刷盘请求对象
+                    GroupCommitRequest request = new GroupCommitRequest(
+                            result.getWroteOffset() + result.getWroteBytes(),
                             this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
+
+                    // 向 HAService 提交同步刷盘请求
                     service.putRequest(request);
+
+                    // 唤醒，执行刷盘
                     service.getWaitNotifyObject().wakeupAll();
+
+                    // 注意，这里返回的不是同步结果，而是一个 CompletableFuture，该 complete 方法会在消息被复制到从节点后被调用
                     return request.future();
                 } else {
                     return CompletableFuture.completedFuture(PutMessageStatus.SLAVE_NOT_AVAILABLE);
@@ -1217,6 +1266,13 @@ public class CommitLog {
         }
     }
 
+    /**
+     * 同步阻塞等待复制结果
+     *
+     * @param result
+     * @param putMessageResult
+     * @param messageExt
+     */
     public void handleHA(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
         if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
             HAService service = this.defaultMessageStore.getHaService();
@@ -1228,8 +1284,11 @@ public class CommitLog {
                     service.getWaitNotifyObject().wakeupAll();
                     PutMessageStatus replicaStatus = null;
                     try {
+
+                        // 同步等待复制结果，阻塞的
                         replicaStatus = request.future().get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
                                 TimeUnit.MILLISECONDS);
+
                     } catch (InterruptedException | ExecutionException | TimeoutException e) {
                     }
                     if (replicaStatus != PutMessageStatus.PUT_OK) {
@@ -1657,7 +1716,7 @@ public class CommitLog {
                         this.printFlushProgress();
                     }
 
-                    // 调用 MappedFile 进行 flush
+                    // todo 调用 MappedFile 进行 flush
                     long begin = System.currentTimeMillis();
                     CommitLog.this.mappedFileQueue.flush(flushPhysicQueueLeastPages);
 
@@ -1721,7 +1780,7 @@ public class CommitLog {
         private final long nextOffset;
 
         /**
-         * 刷盘CompletableFuture
+         * 刷盘 CompletableFuture
          */
         private CompletableFuture<PutMessageStatus> flushOKFuture = new CompletableFuture<>();
 

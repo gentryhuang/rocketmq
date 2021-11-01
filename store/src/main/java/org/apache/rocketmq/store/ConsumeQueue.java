@@ -89,9 +89,10 @@ public class ConsumeQueue {
      */
     private long maxPhysicOffset = -1;
     /**
-     * 最小逻辑偏移量
+     * 最小偏移量 （todo ？物理偏移量）
      */
     private volatile long minLogicOffset = 0;
+
     private ConsumeQueueExt consumeQueueExt = null;
 
     /**
@@ -675,7 +676,8 @@ public class ConsumeQueue {
             // 获取对应的数据
             if (mappedFile != null) {
 
-                // todo 通过将该偏移量于物理文件大小取模获取在该文件的偏移量，从偏移量开始连续读取 20 字节即可
+                // todo 通过将该偏移量与物理文件大小取模获取在该文件的偏移量，
+                //  从偏移量开始连续读取 20 字节即可 ？？？ 再看看是否正确
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer((int) (offset % mappedFileSize));
 
                 return result;

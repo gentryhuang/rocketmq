@@ -24,10 +24,17 @@ public class RequestCode {
 
     public static final int SEND_MESSAGE = 10;
 
+    /**
+     * 拉取消息请求
+     */
     public static final int PULL_MESSAGE = 11;
 
     public static final int QUERY_MESSAGE = 12;
     public static final int QUERY_BROKER_OFFSET = 13;
+
+    /**
+     * 获取消费进度请求码
+     */
     public static final int QUERY_CONSUMER_OFFSET = 14;
     public static final int UPDATE_CONSUMER_OFFSET = 15;
     /**

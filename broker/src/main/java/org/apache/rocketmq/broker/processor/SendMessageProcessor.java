@@ -97,6 +97,9 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
     /**
      * 异步处理请求
+     * todo 特别说明：
+     * {@link SendMessageProcessor#sendMessage(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand, org.apache.rocketmq.broker.mqtrace.SendMessageContext, org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader)}
+     * 是完全同步执行的，因此上述方法在新版本中已经被废弃。处理消息都使用该方法，充分利用异步特性，尽可能减少线程等待时间。
      *
      * @param ctx
      * @param request
@@ -435,6 +438,19 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         return handlePutMessageResultFuture(putMessageResult, response, request, msgInner, responseHeader, mqtraceContext, ctx, queueIdInt);
     }
 
+    /**
+     * 出追加消息的结果
+     *
+     * @param putMessageResult
+     * @param response
+     * @param request
+     * @param msgInner
+     * @param responseHeader
+     * @param sendMessageContext
+     * @param ctx
+     * @param queueIdInt
+     * @return
+     */
     private CompletableFuture<RemotingCommand> handlePutMessageResultFuture(CompletableFuture<PutMessageResult> putMessageResult,
                                                                             RemotingCommand response,
                                                                             RemotingCommand request,
@@ -443,6 +459,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                                                             SendMessageContext sendMessageContext,
                                                                             ChannelHandlerContext ctx,
                                                                             int queueIdInt) {
+
+        // 这里的 thenApply 方法不会立即执行，而是在 CompletableFuture 的 complete 方法被调用时才会执行
         return putMessageResult.thenApply((r) ->
                 handlePutMessageResult(r, response, request, msgInner, responseHeader, sendMessageContext, ctx, queueIdInt)
         );
@@ -525,6 +543,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
     /**
      * 发送消息，并返回发送消息结果。
+     * todo 已经废弃，都是用异步编程，提高 Broker 的消息处理能力，重复利用 Broker 资源
      *
      * @param ctx
      * @param request
@@ -532,6 +551,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
      * @param requestHeader
      * @return
      * @throws RemotingCommandException
+     * @see SendMessageProcessor#asyncSendMessage(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand, org.apache.rocketmq.broker.mqtrace.SendMessageContext, org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader)
      */
     private RemotingCommand sendMessage(final ChannelHandlerContext ctx,
                                         final RemotingCommand request,

@@ -127,7 +127,7 @@ public class TopicPublishInfo {
 
     /**
      * 选择一个 MessageQueue
-     * 注意：基于随机递增取模算法
+     * 注意：todo 基于随机递增取模算法
      *
      * @return
      */

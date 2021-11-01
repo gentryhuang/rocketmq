@@ -86,6 +86,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
 
     /**
      * 消费点，即指定消费开始偏移量（最大偏移量、最小偏移量、启动时间戳）开始消费
+     * todo 默认为 从消息队列尾部，即跳过历史消息
      */
     private ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET;
 
@@ -188,7 +189,8 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
 
     /* 批量方式消费，可以很大程度上提高消费吞吐量*/
     /**
-     * 每次传入 MessageListener#consumerMessage 中消息的数量
+     * 每次传入 MessageListener#consumerMessage 中消息的数量，默认是 1 ，即一次只消费一条消息
+     * todo 某些业务流程如果支持批量方式消费，则可以很大程度上提高消费吞吐量，通过设置该值
      * Batch consumption size
      */
     private int consumeMessageBatchMaxSize = 1;
@@ -681,6 +683,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     @Override
     public void start() throws MQClientException {
         setConsumerGroup(NamespaceUtil.wrapNamespace(this.getNamespace(), this.consumerGroup));
+        // 启动消息生产者内部实现
         this.defaultMQPushConsumerImpl.start();
         if (null != traceDispatcher) {
             try {

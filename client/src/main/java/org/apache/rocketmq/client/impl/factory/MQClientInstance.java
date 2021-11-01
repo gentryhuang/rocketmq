@@ -364,7 +364,8 @@ public class MQClientInstance {
                     // Start pull service
                     this.pullMessageService.start();
 
-                    // todo 启动均衡消息队列任务
+                    // todo 启动均衡消息队列任务 - 负载均衡服务线程—RebalanceService的启动（每隔20s执行一次），
+                    // todo 最终调用的是 org.apache.rocketmq.client.impl.consumer.RebalanceImpl.rebalanceByTopic 方法，实现 Consumer 端负载均衡
                     // Start rebalance service
                     this.rebalanceService.start();
 
@@ -403,7 +404,7 @@ public class MQClientInstance {
             }, 1000 * 10, 1000 * 60 * 2, TimeUnit.MILLISECONDS);
         }
 
-        // 更新 Topic 路由
+        // todo 定时更新 Topic 路由，默认 30s 拉取 NameSrv 上的路由信息并更新到本地
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -465,7 +466,7 @@ public class MQClientInstance {
     }
 
     /**
-     * 从 NameSrv 更新 Topic 路由信息，具体如下：
+     * todo 从 NameSrv 更新 Topic 路由信息，具体如下：
      * 1 如果是消费方，则获取订阅的数据，取出订阅的 Topic
      * 2 如果是生产者，则获取 Topic 发布信息，取出对应的 Topic
      * 3 根据 Topic 从 NameSrv 拉取 Topic 路由信息
@@ -475,13 +476,16 @@ public class MQClientInstance {
 
         // Consumer
         {
+            // 遍历当前 JVM 实例下消费组下的消费者
             Iterator<Entry<String, MQConsumerInner>> it = this.consumerTable.entrySet().iterator();
             while (it.hasNext()) {
                 Entry<String, MQConsumerInner> entry = it.next();
                 MQConsumerInner impl = entry.getValue();
                 if (impl != null) {
+                    // 获取消费端订阅信息
                     Set<SubscriptionData> subList = impl.subscriptions();
                     if (subList != null) {
+                        // 遍历订阅的 Topic
                         for (SubscriptionData subData : subList) {
                             topicList.add(subData.getTopic());
                         }
@@ -497,12 +501,15 @@ public class MQClientInstance {
                 Entry<String, MQProducerInner> entry = it.next();
                 MQProducerInner impl = entry.getValue();
                 if (impl != null) {
+                    // 获取消息生产者缓存的 Topic 发布信息中的 Topic
                     Set<String> lst = impl.getPublishTopicList();
                     topicList.addAll(lst);
                 }
             }
         }
 
+
+        // todo 从 NameSrv 拉 Topic 的路由信息，并更新到当前 JVM 实例本地，具体来说就是更新消息生产者本地缓存 Topic 路由信息和消息消费者本地缓存 Topic 路由信息
         for (String topic : topicList) {
             this.updateTopicRouteInfoFromNameServer(topic);
         }

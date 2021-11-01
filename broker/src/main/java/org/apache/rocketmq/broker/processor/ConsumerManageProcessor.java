@@ -60,6 +60,8 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
             // 更新消费进度，即 Consumer 上报自己的消费进度
             case RequestCode.UPDATE_CONSUMER_OFFSET:
                 return this.updateConsumerOffset(ctx, request);
+
+            // 获取消费进度，即获取某个 Topic 下的某个消费组的某个队列消费进度
             case RequestCode.QUERY_CONSUMER_OFFSET:
                 return this.queryConsumerOffset(ctx, request);
             default:
@@ -123,6 +125,14 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
         return response;
     }
 
+    /**
+     * 查询消费进度
+     *
+     * @param ctx
+     * @param request
+     * @return
+     * @throws RemotingCommandException
+     */
     private RemotingCommand queryConsumerOffset(ChannelHandlerContext ctx, RemotingCommand request)
             throws RemotingCommandException {
         final RemotingCommand response =
@@ -133,24 +143,33 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                 (QueryConsumerOffsetRequestHeader) request
                         .decodeCommandCustomHeader(QueryConsumerOffsetRequestHeader.class);
 
+        // Broker 使用 ConsumerOffsetManager 获取消费进度
         long offset =
                 this.brokerController.getConsumerOffsetManager().queryOffset(
-                        requestHeader.getConsumerGroup(), requestHeader.getTopic(), requestHeader.getQueueId());
+                        requestHeader.getConsumerGroup(),
+                        requestHeader.getTopic(),
+                        requestHeader.getQueueId());
 
         if (offset >= 0) {
             responseHeader.setOffset(offset);
             response.setCode(ResponseCode.SUCCESS);
             response.setRemark(null);
         } else {
+
+            // 获取 ComsumeQueue 最小的物理偏移量
             long minOffset =
                     this.brokerController.getMessageStore().getMinOffsetInQueue(requestHeader.getTopic(),
                             requestHeader.getQueueId());
+
+            // 如果最小物理偏移 <= 0 ，说明是新的队列或者还没有被消费者消费过，返回消费进度
             if (minOffset <= 0
                     && !this.brokerController.getMessageStore().checkInDiskByConsumeOffset(
                     requestHeader.getTopic(), requestHeader.getQueueId(), 0)) {
                 responseHeader.setOffset(0L);
                 response.setCode(ResponseCode.SUCCESS);
                 response.setRemark(null);
+
+
             } else {
                 response.setCode(ResponseCode.QUERY_NOT_FOUND);
                 response.setRemark("Not found, V3_0_6_SNAPSHOT maybe this group consumer boot first");

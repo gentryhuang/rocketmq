@@ -104,11 +104,15 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         this.consumerGroup = this.defaultMQPushConsumer.getConsumerGroup();
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
+        // 消息消费线程池
         this.consumeExecutor = new ThreadPoolExecutor(
+                // 核心线程数
                 this.defaultMQPushConsumer.getConsumeThreadMin(),
+                // 最大线程数 (该参数无效，因为使用的任务队列是 LinkedBlockingQueue)
                 this.defaultMQPushConsumer.getConsumeThreadMax(),
                 1000 * 60,
                 TimeUnit.MILLISECONDS,
+                // 任务队列
                 this.consumeRequestQueue,
                 new ThreadFactoryImpl("ConsumeMessageThread_"));
 
@@ -128,6 +132,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
+                    // todo 锁定 broker 上当前消费的队列
                     ConsumeMessageOrderlyService.this.lockMQPeriodically();
                 }
             }, 1000 * 1, ProcessQueue.REBALANCE_LOCK_INTERVAL, TimeUnit.MILLISECONDS);
@@ -257,7 +262,9 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             final MessageQueue messageQueue,
             final boolean dispathToConsume) {
         if (dispathToConsume) {
+            // 创建消费消息任务
             ConsumeRequest consumeRequest = new ConsumeRequest(processQueue, messageQueue);
+            // 提交到线程池
             this.consumeExecutor.submit(consumeRequest);
         }
     }
@@ -284,7 +291,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             @Override
             public void run() {
                 // 锁定 mq 是否成功
-                // 第 3 把锁
+                // 分布式锁，向 Broker 发起锁定 mq 的请求
                 boolean lockOK = ConsumeMessageOrderlyService.this.lockOneMQ(mq);
                 // 锁住 mq ，则立即消费
                 if (lockOK) {
@@ -335,8 +342,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             timeMillis = 30000;
         }
 
+        // 延迟一段时间再提交到消息线程池中
         this.scheduledExecutorService.schedule(new Runnable() {
-
             @Override
             public void run() {
                 ConsumeMessageOrderlyService.this.submitConsumeRequest(null, processQueue, messageQueue, true);
@@ -364,7 +371,10 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             final ConsumeRequest consumeRequest
     ) {
         boolean continueConsume = true;
+
+        // 执行重试时，将不更新消息消费进度
         long commitOffset = -1L;
+
         // 自动提交
         if (context.isAutoCommit()) {
             switch (status) {
@@ -401,7 +411,10 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                                 context.getSuspendCurrentQueueTimeMillis());
                         continueConsume = false;
 
+                        // 消息放入 DLQ （死信队列），提交该批消息
                     } else {
+
+                        // 返回待保存的消息消费进度
                         commitOffset = consumeRequest.getProcessQueue().commit();
                     }
                     break;
@@ -451,6 +464,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }
 
         // todo 消息处理队列未dropped，提交有效消费进度
+        // 逻辑偏移量
         if (commitOffset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), commitOffset, false);
         }
@@ -478,9 +492,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
     /**
      * 检查消息重试次数，计算是否要暂停消费（过一段时间继续消费）
-     * 不暂停（不再消费）条件：
+     * 不再消费条件：
      * - 存在消息超过最大消费次数并且发回broker成功
-     * - 消费还没有达到最大消费次数
      *
      * @param msgs
      * @return
@@ -606,7 +619,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
                 // todo (广播模式) 或者 (集群模式 && 消息处理队列锁有效)
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
-                        // 2 第二把锁
+                        // 2 todo 第二把锁
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
                     // 记录开始时间

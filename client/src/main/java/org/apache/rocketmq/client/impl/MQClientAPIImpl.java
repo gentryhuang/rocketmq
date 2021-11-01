@@ -844,7 +844,7 @@ public class MQClientAPIImpl {
 
         // 拉取消息请求，请求码 PULL_MESSAGE
         /**
-         * @see
+         * @see org.apache.rocketmq.broker.processor.PullMessageProcessor#processRequest(io.netty.channel.Channel, org.apache.rocketmq.remoting.protocol.RemotingCommand, boolean)
          */
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.PULL_MESSAGE, requestHeader);
 
@@ -1145,11 +1145,24 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
     }
 
+    /**
+     * 从 Broker 拉取执行 Topic 的某个消费组下的某个队列的消费进度
+     *
+     * @param addr
+     * @param requestHeader
+     * @param timeoutMillis
+     * @return
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public long queryConsumerOffset(
             final String addr,
             final QueryConsumerOffsetRequestHeader requestHeader,
             final long timeoutMillis
     ) throws RemotingException, MQBrokerException, InterruptedException {
+
+        // 获取消费队列的消费进度，请求码：QUERY_CONSUMER_OFFSET
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.QUERY_CONSUMER_OFFSET, requestHeader);
 
         RemotingCommand response = this.remotingClient.invokeSync(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr),
@@ -1198,7 +1211,7 @@ public class MQClientAPIImpl {
             InterruptedException {
 
         // 组装好RPC请求对象RemotingCommand
-        // 请求码：
+        // 请求码：UPDATE_CONSUMER_OFFSET
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.UPDATE_CONSUMER_OFFSET, requestHeader);
 
         // 发起 RPC 调用
