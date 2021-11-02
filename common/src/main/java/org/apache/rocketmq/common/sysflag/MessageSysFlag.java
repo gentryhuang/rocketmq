@@ -23,6 +23,9 @@ public class MessageSysFlag {
      * 非事务
      */
     public final static int TRANSACTION_NOT_TYPE = 0;
+    /**
+     * 事务
+     */
     public final static int TRANSACTION_PREPARED_TYPE = 0x1 << 2;
     /**
      * 提交状态

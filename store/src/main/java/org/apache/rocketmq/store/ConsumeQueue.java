@@ -474,6 +474,7 @@ public class ConsumeQueue {
     }
 
     public long getMinOffsetInQueue() {
+        // 计算得到的是 下标
         return this.minLogicOffset / CQ_STORE_UNIT_SIZE;
     }
 
@@ -549,7 +550,7 @@ public class ConsumeQueue {
      * <p>
      * 1 ConsumeQueue 每一个条目都是 20个字节（8个字节commitlog偏移量+4字节消息长度+8字节tag的hashcode）
      * 2 todo 注意，是将内容追加到 ConsumeQueue 的内存映射文件中（只追加，不刷盘），ConsumeQueue 的刷盘方式固定为异步刷盘,
-     *   刷盘任务启动是在 {@link DefaultMessageStore#start()}
+     * 刷盘任务启动是在 {@link DefaultMessageStore#start()}
      *
      * @param offset   消息在 Commitlog 中的物理偏移量，8 字节
      * @param size     消息体大小 4 字节

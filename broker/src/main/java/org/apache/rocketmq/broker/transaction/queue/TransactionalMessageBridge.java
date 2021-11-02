@@ -268,12 +268,12 @@ public class TransactionalMessageBridge {
     }
 
     /**
-     * 解析半消息，重置消息相关属性
+     * 解析半消息，重置消息相关属性（todo 和延迟消息同样的套路）
      * 主要任务：
      * 1 备份消息的原主题名称和原队列ID
      * 2 取消事务消息的消息标签
      * 3 重新设置消息的主题为：RMQ_SYS_TRANS_HALF_TOPIC，队列ID固定为0
-     * 与其他普通消息区分开，就可以执行后续消息持久化了。
+     * 与其他普通消息区分开，就可以执行后续消息持久化了。这个主题和队列对消费者是不可见的，所以里面的消息永远不会被消费。这样，就保证了在事务提交成功之前，这个半消息对消费者来说是消费不到的。
      *
      * @param msgInner
      * @return
@@ -287,6 +287,8 @@ public class TransactionalMessageBridge {
                 MessageSysFlag.resetTransactionValue(msgInner.getSysFlag(), MessageSysFlag.TRANSACTION_NOT_TYPE));
 
         // 事务消息的 Topic 和 queueId 是写死固定的
+        // topic: RMQ_SYS_TRANS_HALF_TOPIC
+        // queueId: 0
         msgInner.setTopic(TransactionalMessageUtil.buildHalfTopic());
         msgInner.setQueueId(0);
 
@@ -304,12 +306,15 @@ public class TransactionalMessageBridge {
      */
     public boolean putOpMessage(MessageExt messageExt, String opType) {
         // 构建消息队列
-        MessageQueue messageQueue = new MessageQueue(messageExt.getTopic(),
+        MessageQueue messageQueue = new MessageQueue(
+                messageExt.getTopic(),
                 this.brokerController.getBrokerConfig().getBrokerName(),
                 messageExt.getQueueId());
 
         // 删除操作
         if (TransactionalMessageUtil.REMOVETAG.equals(opType)) {
+            // 删除 prepre 消息,并不是真正的删除，而是将 prepre 消息存储到 RMQ_SYS_TRANS_OP_HALF_TOPIC 主题中表示该事务消息以及处理了（包括提交和回滚），
+            // 为未处理的事务消息的查询提供依据
             return addRemoveTagInTransactionOp(messageExt, messageQueue);
         }
         return true;
@@ -394,6 +399,8 @@ public class TransactionalMessageBridge {
         msgInner.setBornHost(this.storeHost);
         msgInner.setStoreHost(this.storeHost);
         msgInner.setWaitStoreMsgOK(false);
+
+        // 甚至唯一ID UNIQ_KEY
         MessageClientIDSetter.setUniqID(msgInner);
         return msgInner;
     }
@@ -417,8 +424,12 @@ public class TransactionalMessageBridge {
      */
     private boolean addRemoveTagInTransactionOp(MessageExt messageExt, MessageQueue messageQueue) {
         // 创建 Op 消息
-        Message message = new Message(TransactionalMessageUtil.buildOpTopic(),
+        Message message = new Message(
+                // Op 消息专用的主题 RMQ_SYS_TRANS_OP_HALF_TOPIC
+                TransactionalMessageUtil.buildOpTopic(),
                 TransactionalMessageUtil.REMOVETAG,
+
+                // todo Op 消息存储的是 half 消息的逻辑偏移量，待验证
                 String.valueOf(messageExt.getQueueOffset()).getBytes(TransactionalMessageUtil.charset)
         );
 

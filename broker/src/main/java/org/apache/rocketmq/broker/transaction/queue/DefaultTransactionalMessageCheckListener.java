@@ -59,10 +59,19 @@ public class DefaultTransactionalMessageCheckListener extends AbstractTransactio
 
     }
 
+    /**
+     * 将回查达到阈值或过期的半消息存入到 Topic 为 RMQ_SYS_TRANS_CHECK_MAX_TIME_TOPIC 中
+     * @param msgExt
+     * @return
+     */
     private MessageExtBrokerInner toMessageExtBrokerInner(MessageExt msgExt) {
+        // 主题：TRANS_CHECK_MAX_TIME_TOPIC
+        // queueId:
         TopicConfig topicConfig = this.getBrokerController().getTopicConfigManager().createTopicOfTranCheckMaxTime(TCMT_QUEUE_NUMS, PermName.PERM_READ | PermName.PERM_WRITE);
         int queueId = Math.abs(random.nextInt() % 99999999) % TCMT_QUEUE_NUMS;
+
         MessageExtBrokerInner inner = new MessageExtBrokerInner();
+        // 指定 Topic 为 TRANS_CHECK_MAX_TIME_TOPIC
         inner.setTopic(topicConfig.getTopicName());
         inner.setBody(msgExt.getBody());
         inner.setFlag(msgExt.getFlag());

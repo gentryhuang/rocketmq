@@ -191,7 +191,8 @@ public class MappedFileQueue {
                      * todo 定位当前 offset 位于第几个物理文件
                      * 注意：这里不能直接使用 offset/this.mappedFileSize，因为 RocketMQ 可能将文件名靠前的删除了，这样的话得到的文件下标就不准确了。
                      * 比如：通过 offset/this.mappedFileSize = 2，但是 00000000000000000000 文件已经被删除了，这个时候得到的 2 就不能作为正确的下标了，
-                     *       必须通过计算：(int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize)) 得到正确文件所在的下标
+                     *       必须通过计算：(int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize)) 得到正确文件所在的下标，即
+                     *       todo (消息物理偏移量 - 第一个MappedFile 的起始偏移量）/文件固定大小 即可得到所在文件下标
                      */
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
                     MappedFile targetFile = null;

@@ -32,8 +32,13 @@ import java.util.concurrent.TimeUnit;
 
 public class TransactionProducer {
     public static void main(String[] args) throws MQClientException, InterruptedException {
+        // 1 事务监听器实现，需要消息生产方自行实现。用于执行本地事务 和 本地事务状态的回查询
         TransactionListener transactionListener = new TransactionListenerImpl();
+
+        // 2 发送事务消息的核心类
         TransactionMQProducer producer = new TransactionMQProducer("please_rename_unique_group_name");
+
+        // 3 事务消息回查线程池
         ExecutorService executorService = new ThreadPoolExecutor(2, 5, 100, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(2000), new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {
@@ -42,17 +47,25 @@ public class TransactionProducer {
                 return thread;
             }
         });
-
         producer.setExecutorService(executorService);
         producer.setTransactionListener(transactionListener);
+
+        // 4 启动
         producer.start();
 
-        String[] tags = new String[] {"TagA", "TagB", "TagC", "TagD", "TagE"};
+        String[] tags = new String[]{"TagA", "TagB", "TagC", "TagD", "TagE"};
+
+        // 发送 10 条事务消息
         for (int i = 0; i < 10; i++) {
             try {
-                Message msg =
-                    new Message("TopicTest1234", tags[i % tags.length], "KEY" + i,
-                        ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET));
+                Message msg = new Message(
+                        "TopicTest1234",
+                        tags[i % tags.length],
+                        "KEY" + i,
+                        ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET)
+                );
+
+                // 发送事务消息
                 SendResult sendResult = producer.sendMessageInTransaction(msg, null);
                 System.out.printf("%s%n", sendResult);
 

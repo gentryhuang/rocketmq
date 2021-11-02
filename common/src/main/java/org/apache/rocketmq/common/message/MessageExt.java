@@ -60,7 +60,7 @@ public class MessageExt extends Message {
     private String msgId;
 
     /**
-     * 在 CommitLog 中的偏移量
+     * 在 CommitLog 中的偏移量-物理偏移量
      */
     private long commitLogOffset;
     private int bodyCRC;

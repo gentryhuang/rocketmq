@@ -138,6 +138,7 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
                 (CheckTransactionStateRequestHeader) request.decodeCommandCustomHeader(CheckTransactionStateRequestHeader.class);
 
         final ByteBuffer byteBuffer = ByteBuffer.wrap(request.getBody());
+        // 半消息
         final MessageExt messageExt = MessageDecoder.decode(byteBuffer);
         if (messageExt != null) {
             if (StringUtils.isNotEmpty(this.mqClientFactory.getClientConfig().getNamespace())) {
@@ -155,6 +156,8 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
                 // 获取生产者组下的一个生产者
                 MQProducerInner producer = this.mqClientFactory.selectProducer(group);
                 if (producer != null) {
+
+                    // 获取远端地址，这里是 Broker 地址。因为是 Broker 向生产方发送的
                     final String addr = RemotingHelper.parseChannelRemoteAddr(ctx.channel());
 
                     // 向生产者询问本地事务状态

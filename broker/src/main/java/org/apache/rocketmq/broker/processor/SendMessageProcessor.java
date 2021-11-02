@@ -407,7 +407,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
         CompletableFuture<PutMessageResult> putMessageResult = null;
 
-        // 解析请求中的属性集合
+        // 解析请求中的附加属性集合
         Map<String, String> origProps = MessageDecoder.string2messageProperties(requestHeader.getProperties());
 
         // 判断是否是事务消息

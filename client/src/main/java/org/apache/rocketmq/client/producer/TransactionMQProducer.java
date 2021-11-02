@@ -28,13 +28,28 @@ import org.apache.rocketmq.remoting.RPCHook;
  * 说明：该类通过继承DefaultMQProducer来复用大部分发送消息相关的逻辑
  */
 public class TransactionMQProducer extends DefaultMQProducer {
+    /**
+     * 事务检查监听器，已经被 TransactionListener 代替
+     */
     private TransactionCheckListener transactionCheckListener;
+    /**
+     * 核心线程池大小
+     */
     private int checkThreadPoolMinSize = 1;
+    /**
+     * 最大线程数
+     */
     private int checkThreadPoolMaxSize = 1;
+    /**
+     * 任务等待队列大小
+     */
     private int checkRequestHoldMax = 2000;
+    /**
+     * 事务状态回查线程池
+     */
     private ExecutorService executorService;
     /**
-     * 事务监听器
+     * 事务监听器。实现本地事务状态执行结果、本地事务状态回查
      */
     private TransactionListener transactionListener;
 
@@ -63,12 +78,14 @@ public class TransactionMQProducer extends DefaultMQProducer {
 
     @Override
     public void start() throws MQClientException {
+        // 启动时，比普通消息多了个初始化事务环境的方法。其实就是创建事务状态回查线程池
         this.defaultMQProducerImpl.initTransactionEnv();
         super.start();
     }
 
     @Override
     public void shutdown() {
+        // 关闭时，同样需要关闭事务环境。其实就是关闭事务状态回查线程池
         super.shutdown();
         this.defaultMQProducerImpl.destroyTransactionEnv();
     }
@@ -99,7 +116,7 @@ public class TransactionMQProducer extends DefaultMQProducer {
     @Override
     public TransactionSendResult sendMessageInTransaction(final Message msg,
                                                           final Object arg) throws MQClientException {
-        // 判断 事务监听器是否存在
+        // 1 发送事务消息必须要实现事务监听接口
         if (null == this.transactionListener) {
             throw new MQClientException("TransactionListener is null", null);
         }

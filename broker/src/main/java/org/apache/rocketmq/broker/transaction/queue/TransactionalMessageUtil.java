@@ -29,6 +29,7 @@ public class TransactionalMessageUtil {
      * 删除操作
      */
     public static final String REMOVETAG = "d";
+
     public static Charset charset = Charset.forName("utf-8");
 
     /**

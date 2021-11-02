@@ -1040,12 +1040,21 @@ public class DefaultMessageStore implements MessageStore {
         return 0;
     }
 
+    /**
+     * 根据偏移量从 CommitLog 中查找对应的消息，具体过程：
+     * 1 根据偏移量读取对应消息的长度，因为 CommitLog 前 4 个字节存储的是消息的长度
+     * 2 知道了消息的长度，就可以获取消息了
+     *
+     * @param commitLogOffset physical offset.
+     * @return
+     */
     public MessageExt lookMessageByOffset(long commitLogOffset) {
         SelectMappedBufferResult sbr = this.commitLog.getMessage(commitLogOffset, 4);
         if (null != sbr) {
             try {
-                // 1 TOTALSIZE
+                // 1 TOTALSIZE ，消息的长度
                 int size = sbr.getByteBuffer().getInt();
+                // 根据消息大小获取消息
                 return lookMessageByOffset(commitLogOffset, size);
             } finally {
                 sbr.release();

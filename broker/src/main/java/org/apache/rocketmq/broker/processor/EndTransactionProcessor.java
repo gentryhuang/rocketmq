@@ -158,13 +158,14 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         // 如果请求是提交事务，进入事务消息提交处理流程
         if (MessageSysFlag.TRANSACTION_COMMIT_TYPE == requestHeader.getCommitOrRollback()) {
 
-            // 根据 offset 从 CommitLog 文件中查找消息
+            // 根据之前提交的半消息的 offset 从 CommitLog 文件中查找消息
             // requestHeader 中包含 commitLogOffset
             result = this.brokerController.getTransactionalMessageService().commitMessage(requestHeader);
 
             if (result.getResponseCode() == ResponseCode.SUCCESS) {
 
-                // 字段检查
+                // 字段检查：检查下这条信息是否正确，消息偏移量、生产者组什么的是否匹配，是不是查错消息了
+                // result.getPrepareMessage() 就是之前存储到 Broker 的半消息。
                 RemotingCommand res = checkPrepareMessage(result.getPrepareMessage(), requestHeader);
 
                 // 根据备份信息重新构造消息并投递
@@ -178,16 +179,18 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
                     msgInner.setQueueOffset(requestHeader.getTranStateTableOffset());
                     msgInner.setPreparedTransactionOffset(requestHeader.getCommitLogOffset());
                     msgInner.setStoreTimestamp(result.getPrepareMessage().getStoreTimestamp());
+
+                    // 清除事务消息属性
                     MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED);
 
-                    // 发送最终消息，存储，被consumer消费
+                    // todo 原始消息写入对应的topic，此时对消费端就可见了，可以正常消费了
                     RemotingCommand sendResult = sendFinalMessage(msgInner);
 
                     // 事务消息发送成功后
                     if (sendResult.getCode() == ResponseCode.SUCCESS) {
 
                         // 删除预处理消息(prepare)
-                        // 其实是将消息存储在主题为：RMQ_SYS_TRANS_OP_HALF_TOPIC 的主题中，代表这些消息已经被处理（提交或回滚）。
+                        // 其实是将消息存储在主题为 RMQ_SYS_TRANS_OP_HALF_TOPIC 的主题中，消息 tag 是 d，消息体是半消息的逻辑偏移量；代表这些消息已经被处理（提交或回滚）。
                         this.brokerController.getTransactionalMessageService().deletePrepareMessage(result.getPrepareMessage());
                     }
                     return sendResult;
@@ -214,6 +217,15 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
                 return res;
             }
         }
+
+        /**
+         * 总结一下：
+         * commit：就是先把原始消息写入到原始topic里，然后记录 op 消息对半消息打标，表示事务状态已经确定
+         * rollback: 就是直接记录 op 消息对半消息打标，表示事务状态已经确定
+         * unknown: 就是上面 两步都没做，原始消息未写入，op队列里也没有
+         */
+
+        // UNKNOW 状态，看来得回查了，其实这里返不返回都一样，客户端是one way调用
         response.setCode(result.getResponseCode());
         response.setRemark(result.getResponseRemark());
         return response;
@@ -290,7 +302,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
     }
 
     /**
-     * 发送最终的确认消息
+     * 存储最终的确认消息
      *
      * @param msgInner
      * @return

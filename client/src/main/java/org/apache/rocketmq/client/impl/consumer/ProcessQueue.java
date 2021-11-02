@@ -58,7 +58,7 @@ public class ProcessQueue {
      * 消息容器
      * <p>
      * 消息映射 - 注意是 TreeMap 结构，根据消费进度排序
-     * key: 消息队列进度 value: 消息
+     * key: 消息队列进度（逻辑偏移量） value: 消息
      */
     private final TreeMap<Long, MessageExt> msgTreeMap = new TreeMap<Long, MessageExt>();
     /**

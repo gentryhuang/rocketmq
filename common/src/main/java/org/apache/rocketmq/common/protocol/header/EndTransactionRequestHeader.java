@@ -30,10 +30,15 @@ public class EndTransactionRequestHeader implements CommandCustomHeader {
     private Long tranStateTableOffset;
     @CFNotNull
     private Long commitLogOffset;
+
+    /**
+     * TRANSACTION_COMMIT_TYPE
+     * TRANSACTION_ROLLBACK_TYPE
+     * TRANSACTION_NOT_TYPE
+     */
     @CFNotNull
-    private Integer commitOrRollback; // TRANSACTION_COMMIT_TYPE
-    // TRANSACTION_ROLLBACK_TYPE
-    // TRANSACTION_NOT_TYPE
+    private Integer commitOrRollback;
+
 
     @CFNullable
     private Boolean fromTransactionCheck = false;
@@ -119,13 +124,13 @@ public class EndTransactionRequestHeader implements CommandCustomHeader {
     @Override
     public String toString() {
         return "EndTransactionRequestHeader{" +
-            "producerGroup='" + producerGroup + '\'' +
-            ", tranStateTableOffset=" + tranStateTableOffset +
-            ", commitLogOffset=" + commitLogOffset +
-            ", commitOrRollback=" + commitOrRollback +
-            ", fromTransactionCheck=" + fromTransactionCheck +
-            ", msgId='" + msgId + '\'' +
-            ", transactionId='" + transactionId + '\'' +
-            '}';
+                "producerGroup='" + producerGroup + '\'' +
+                ", tranStateTableOffset=" + tranStateTableOffset +
+                ", commitLogOffset=" + commitLogOffset +
+                ", commitOrRollback=" + commitOrRollback +
+                ", fromTransactionCheck=" + fromTransactionCheck +
+                ", msgId='" + msgId + '\'' +
+                ", transactionId='" + transactionId + '\'' +
+                '}';
     }
 }

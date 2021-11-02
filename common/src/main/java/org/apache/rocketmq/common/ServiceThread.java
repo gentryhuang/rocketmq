@@ -140,7 +140,6 @@ public abstract class ServiceThread implements Runnable {
      */
     protected void waitForRunning(long interval) {
         if (hasNotified.compareAndSet(true, false)) {
-            // todo  每次执行完，切换读写队列
             this.onWaitEnd();
             return;
         }

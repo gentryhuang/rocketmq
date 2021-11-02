@@ -803,9 +803,13 @@ public class MQClientAPIImpl {
             }
             uniqMsgId = sb.toString();
         }
-        SendResult sendResult = new SendResult(sendStatus,
+        SendResult sendResult = new SendResult(
+                sendStatus,
                 uniqMsgId,
-                responseHeader.getMsgId(), messageQueue, responseHeader.getQueueOffset());
+                responseHeader.getMsgId(),
+                messageQueue,
+                responseHeader.getQueueOffset()
+        );
         sendResult.setTransactionId(responseHeader.getTransactionId());
         String regionId = response.getExtFields().get(MessageConst.PROPERTY_MSG_REGION);
         String traceOn = response.getExtFields().get(MessageConst.PROPERTY_TRACE_SWITCH);
@@ -1282,7 +1286,10 @@ public class MQClientAPIImpl {
             final String remark,
             final long timeoutMillis
     ) throws RemotingException, MQBrokerException, InterruptedException {
-        // 提交或回滚事务请求
+        /**
+         * 提交或回滚事务请求
+         * @see org.apache.rocketmq.broker.processor.EndTransactionProcessor#processRequest(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand)
+         */
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.END_TRANSACTION, requestHeader);
 
         request.setRemark(remark);
