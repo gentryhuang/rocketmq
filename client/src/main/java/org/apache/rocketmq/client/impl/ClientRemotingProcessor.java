@@ -153,14 +153,15 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
             // 从消息中获取生产者组
             final String group = messageExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
             if (group != null) {
-                // 获取生产者组下的一个生产者
+
+                // todo 获取生产者组下的一个生产者
                 MQProducerInner producer = this.mqClientFactory.selectProducer(group);
                 if (producer != null) {
 
-                    // 获取远端地址，这里是 Broker 地址。因为是 Broker 向生产方发送的
+                    // todo 获取远端地址，这里是 Broker 地址。因为是 Broker 向生产方发送的
                     final String addr = RemotingHelper.parseChannelRemoteAddr(ctx.channel());
 
-                    // 向生产者询问本地事务状态
+                    // todo 向生产者询问本地事务状态
                     producer.checkTransactionState(addr, messageExt, requestHeader);
                 } else {
                     log.debug("checkTransactionState, pick producer by group[{}] failed", group);

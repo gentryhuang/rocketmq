@@ -395,7 +395,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 事务检查监听器，用于查询本地事务状态（已废弃）
                 TransactionCheckListener transactionCheckListener = DefaultMQProducerImpl.this.checkListener();
 
-                // 事务监听器
+                // todo 获取生产端发送消息时设置的事务监听器
                 TransactionListener transactionListener = getCheckListener();
 
                 if (transactionCheckListener != null || transactionListener != null) {
@@ -410,6 +410,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             // 查询事务本地状态
                         } else if (transactionListener != null) {
                             log.debug("Used new check API in transaction message");
+
+                            // todo 通过事务监听器回查询本地事务状态
                             localTransactionState = transactionListener.checkLocalTransaction(message);
                         } else {
                             log.warn("CheckTransactionState, pick transactionListener by group[{}] failed", group);
@@ -419,7 +421,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         exception = e;
                     }
 
-                    // 根据本地事务状态，提交消息 COMMIT / ROLLBACK
+                    // todo 根据本地事务状态，向 Broker 提交消息 COMMIT / ROLLBACK
                     this.processTransactionState(
                             localTransactionState,
                             group,
@@ -430,7 +432,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             }
 
             /**
-             * 处理事务结果，提交消息 COMMIT / ROLLBACK
+             * 根据本地事务状态，向 Broker 提交消息 COMMIT / ROLLBACK
              *
              * @param localTransactionState 本地事务状态
              * @param producerGroup 生产者组
@@ -453,6 +455,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
                 thisHeader.setMsgId(uniqueKey);
                 thisHeader.setTransactionId(checkRequestHeader.getTransactionId());
+
+                // 根据本地事务执行状态确定事务的最终状态
                 switch (localTransactionState) {
                     case COMMIT_MESSAGE:
                         thisHeader.setCommitOrRollback(MessageSysFlag.TRANSACTION_COMMIT_TYPE);
@@ -478,7 +482,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 doExecuteEndTransactionHook(msg, uniqueKey, brokerAddr, localTransactionState, true);
 
 
-                // COMMIT 或 ROLLBACK
+                // 向 Broker 端发送 COMMIT 或 ROLLBACK
                 try {
                     DefaultMQProducerImpl.this.mQClientFactory.getMQClientAPIImpl().endTransactionOneway(brokerAddr, thisHeader, remark,
                             3000);
@@ -1640,6 +1644,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             // 执行endTransaction方法
             // - 如果半消息发送失败或本地事务执行失败告诉服务端是删除半消息，
             // - 半消息发送成功且本地事务执行成功则告诉服务端生效半消息
+            // - 如果是未知状态，等待回查即可
             this.endTransaction(msg, sendResult, localTransactionState, localException);
         } catch (Exception e) {
             log.warn("local transaction execute " + localTransactionState + ", but end broker transaction failed", e);
@@ -1669,7 +1674,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     /**
      * 结束事务
      * 1 根据事务消息发送的结果、本地事务执行情况，决定是 COMMIT 提交事务 还是 ROLLBACK 回滚事务
-     * 即：如果半消息发送失败或本地事务执行失败告诉服务端是删除半消息，半消息发送成功且本地事务执行成功则告诉服务端生效半消息
+     * 即：
+     * - 如果半消息发送失败或本地事务执行失败告诉服务端是删除半消息
+     * - 半消息发送成功且本地事务执行成功则告诉服务端生效半消息
+     * - 半消息发送成功，但本地事务状态未知，则事务的状态需要回查确定
      *
      * @param msg                   Half 消息
      * @param sendResult            Half 消息发送的结果
@@ -1696,7 +1704,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 获取事务id
         String transactionId = sendResult.getTransactionId();
-        // 半消息发到了哪个broker上，最后提交也得到这个 broker上
+        // todo 半消息发到了哪个broker上，最后提交也得到这个 broker上
         final String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(sendResult.getMessageQueue().getBrokerName());
 
         // 创建请求

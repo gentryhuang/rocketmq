@@ -171,7 +171,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
     /**
      * 事务消息回查
      * todo 总的来说：
-     * 1 一条一条拉取，如果在op队列，就是已经commit或者rollback的，不用再管了，否则就检查是否需要回查，需要的话，这条需再写回half队列
+     * 1 一条一条拉取(消费进度)，如果在op队列，就是已经commit或者rollback的，不用再管了，否则就检查是否需要回查，需要的话，这条需再写回half队列
      * 2 从 op 队列里确认事务状态，是根据 op 队列里拉取的消息的消息体（保存的是事务半消息的逻辑偏移量）来判断当前偏移的事务消息是否已经处理过了。
      *
      *
@@ -270,7 +270,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 需要回查，即当前进度的 half 消息没有对应的 op 消息
                     } else {
 
-                        // 根据消费进度 i 拉取半消息
+                        // todo 根据消费进度 i 拉取半消息
                         GetResult getResult = getHalfMsg(messageQueue, i);
                         MessageExt msgExt = getResult.getMsg();
 
@@ -298,7 +298,10 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 1 needDiscard(): 判断当前的 half 消息是否需要丢弃消息，可能已经达到最大的回查此数，默认 15 次
                         // 2 needSkip(): 判断当前的消息是否超过了系统的文件过期时间默认72小时，可broker配置文件中配置
                         if (needDiscard(msgExt, transactionCheckMax) || needSkip(msgExt)) {
-                            // 默认实现是移动到 TRANS_CHECK_MAXTIME_TOPIC 这个topic里
+                            // 默认实现是移动到 TRANS_CHECK_MAXTIME_TOPIC 这个topic里，不再管这个 half 消息
+                            // todo 不再管了是啥意思呢？
+                            // 1 把这个回查多次无结果的 half 消息存放到 TRANS_CHECK_MAXTIME_TOPIC 主题下
+                            // 2 消费进度上跳过该 half 消息，也就意味着这个 half 消息不再被消费，它对应的原消息不会再投递出去。注意消费 half 和 op 消息的消费组是内部定义的，固定为：CID_RMQ_SYS_TRANS
                             listener.resolveDiscardMsg(msgExt);
 
                             // 继续下条半消息
@@ -359,7 +362,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                             }
 
                             // todo 事务回查，确认状态，其中 msgExt 中的 CommitLog 偏移量和 ConsumeQueue 逻辑偏移量都是最新的，上面 putBackHalfMsgQueue 方法执行的结果
-                            // 因为回查的方式是 oneway 方式，因此上面的重写入 msgExt 是必要的，在写入消息的时候 TRANSACTION_CHECK_TIMES 回查次数也会写入
+                            // todo 因为回查的方式是 oneway 方式，可能会失败，因此上面的重写入 msgExt 是必要的，在写入消息的时候 TRANSACTION_CHECK_TIMES 回查次数也会写入
                             listener.resolveHalfMsg(msgExt);
 
                             // 不需要回查

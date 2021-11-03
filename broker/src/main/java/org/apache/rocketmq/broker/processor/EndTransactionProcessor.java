@@ -176,11 +176,12 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
 
                     //设置消息的相关属性，取消事务相关的系统标记
                     msgInner.setSysFlag(MessageSysFlag.resetTransactionValue(msgInner.getSysFlag(), requestHeader.getCommitOrRollback()));
+
                     msgInner.setQueueOffset(requestHeader.getTranStateTableOffset());
                     msgInner.setPreparedTransactionOffset(requestHeader.getCommitLogOffset());
                     msgInner.setStoreTimestamp(result.getPrepareMessage().getStoreTimestamp());
 
-                    // 清除事务消息属性
+                    // 清除事务消息属性 TRAN_MSG ,这样就是一个普通消息了
                     MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED);
 
                     // todo 原始消息写入对应的topic，此时对消费端就可见了，可以正常消费了

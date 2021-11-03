@@ -51,7 +51,8 @@ public class TransactionalMessageUtil {
     }
 
     /**
-     * 返回消费组
+     * 返回消费组。
+     * 注意，这个是内部消费组，专门用来消费 {@link TopicValidator.RMQ_SYS_TRANS_OP_HALF_TOPIC} 和 {@link  TopicValidator.RMQ_SYS_TRANS_HALF_TOPIC} 主题下的消息
      *
      * @return
      */

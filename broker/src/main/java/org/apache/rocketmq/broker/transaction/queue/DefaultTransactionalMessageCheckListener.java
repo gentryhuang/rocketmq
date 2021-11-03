@@ -45,8 +45,11 @@ public class DefaultTransactionalMessageCheckListener extends AbstractTransactio
         log.error("MsgExt:{} has been checked too many times, so discard it by moving it to system topic TRANS_CHECK_MAXTIME_TOPIC", msgExt);
 
         try {
+            // 封装 Broker 内部消息对象，用于将回查次数达到阈值（默认 15次）的 half 消息放入到 TRANS_CHECK_MAX_TIME_TOPIC 主题下
             MessageExtBrokerInner brokerInner = toMessageExtBrokerInner(msgExt);
+            // 将消息追加到 CommitLog 中
             PutMessageResult putMessageResult = this.getBrokerController().getMessageStore().putMessage(brokerInner);
+
             if (putMessageResult != null && putMessageResult.getPutMessageStatus() == PutMessageStatus.PUT_OK) {
                 log.info("Put checked-too-many-time half message to TRANS_CHECK_MAXTIME_TOPIC OK. Restored in queueOffset={}, " +
                         "commitLogOffset={}, real topic={}", msgExt.getQueueOffset(), msgExt.getCommitLogOffset(), msgExt.getUserProperty(MessageConst.PROPERTY_REAL_TOPIC));
@@ -61,6 +64,7 @@ public class DefaultTransactionalMessageCheckListener extends AbstractTransactio
 
     /**
      * 将回查达到阈值或过期的半消息存入到 Topic 为 RMQ_SYS_TRANS_CHECK_MAX_TIME_TOPIC 中
+     *
      * @param msgExt
      * @return
      */

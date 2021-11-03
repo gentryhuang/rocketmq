@@ -413,7 +413,6 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         // 判断是否是事务消息
         // todo 如果是事务消息，在发送消息的时候会进行打标 TRAN_MSG
         String transFlag = origProps.get(MessageConst.PROPERTY_TRANSACTION_PREPARED);
-
         // 是事务消息
         if (transFlag != null && Boolean.parseBoolean(transFlag)) {
 
@@ -427,6 +426,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             }
 
             // 存储事务消息
+            // todo 会取消事务消息的 sysFlay 标志，当作普通消息
             putMessageResult = this.brokerController.getTransactionalMessageService().asyncPrepareMessage(msgInner);
 
             // 存储普通消息

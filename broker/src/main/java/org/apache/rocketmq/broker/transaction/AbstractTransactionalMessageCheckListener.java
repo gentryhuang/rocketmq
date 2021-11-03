@@ -83,7 +83,7 @@ public abstract class AbstractTransactionalMessageCheckListener {
         msgExt.setQueueId(Integer.parseInt(msgExt.getUserProperty(MessageConst.PROPERTY_REAL_QUEUE_ID)));
         msgExt.setStoreSize(0);
 
-        // 取出发送消息时设置的生产者取
+        // todo 取出发送消息时设置的生产者组
         String groupId = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
 
         /**
@@ -104,11 +104,12 @@ public abstract class AbstractTransactionalMessageCheckListener {
      * @param msgExt
      */
     public void resolveHalfMsg(final MessageExt msgExt) {
+        // 事务回查线程池
         executorService.execute(new Runnable() {
             @Override
             public void run() {
                 try {
-                    // 发送检查消息的消息
+                    // 发送事务回查消息
                     sendCheckMessage(msgExt);
                 } catch (Exception e) {
                     LOGGER.error("Send check message error!", e);
