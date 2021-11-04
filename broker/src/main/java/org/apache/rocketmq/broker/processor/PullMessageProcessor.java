@@ -95,15 +95,18 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
     }
 
     /**
-     * 处理请求
+     * 处理拉取消息请求
      *
-     * @param channel
-     * @param request
-     * @param brokerAllowSuspend
+     * @param channel            网络通道
+     * @param request            消息拉取请求
+     * @param brokerAllowSuspend 是否允许挂起，也就是是否允许在未找到消息时暂时挂起线程。第一次调用时默认为true。
      * @return
      * @throws RemotingCommandException
      */
-    private RemotingCommand processRequest(final Channel channel, RemotingCommand request, boolean brokerAllowSuspend)
+    private RemotingCommand processRequest(
+            final Channel channel, // 网络通道
+            RemotingCommand request,
+            boolean brokerAllowSuspend)
             throws RemotingCommandException {
 
         RemotingCommand response = RemotingCommand.createResponseCommand(PullMessageResponseHeader.class);
@@ -140,13 +143,16 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 是否挂起请求，当没有消息时
+        // todo 当没有消息时是否挂起请求
         final boolean hasSuspendFlag = PullSysFlag.hasSuspendFlag(requestHeader.getSysFlag());
+
         // 是否提交消费进度
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
         // 是否过滤订阅表达式(subscription)
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
-        // 挂起请求超时时长
+
+
+        // todo 如果没有消息时挂起请求，则获取挂起请求超时时长
         final long suspendTimeoutMillisLong = hasSuspendFlag ? requestHeader.getSuspendTimeoutMillis() : 0;
 
         // 校验 topic 配置存在
@@ -468,20 +474,26 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 /**
                  * 消息拉取长轮询机制分析：
                  * 1 RocketMQ未真正实现消息推模式，而是消费者主动向消息服务器拉取消息，RocketMQ推模式是循环向消息服务端发起消息拉取请求
-                 * 2 消息未到达消费队列时，如果不启用长轮询机制，则会在服务端等待shortPollingTimeMills时间后（挂起）再去判断消息是否已经到达指定消息队列，
+                 * 2 消息未到达消费队列时，如果不启用长轮询机制，则会在服务端等待shortPollingTimeMills时间后再去判断消息是否已经到达指定消息队列，
                  *   如果消息仍未到达则提示拉取消息客户端PULL—NOT—FOUND（消息不存在）；
                  * 3 如果开启长轮询模式，RocketMQ一方面会每隔5s轮询检查一次消息是否可达，同时一有消息达到后立马通知挂起线程再次验证消息是否是自己感兴趣的消息，
                  *   如果是则从CommitLog文件中提取消息返回给消息拉取客户端，否则直到挂起超时
+                 * 4 长轮询和端轮询的区别是：长轮询等待时间更长，短轮询等待时间非常短，如 1s，可以看作连接建立/断开都很频繁
+                 *
+                 * 在拉取消息时，如果拉取结果为 PULL_NOT_FOUND，在服务端默认会挂起线程，然后根据是否启用长轮询机制，延迟一定时间后再次重试根据偏移量查找消息。
                  */
-                // 消息未查询到 && broker 允许刮起请求 && 请求允许挂起，则执行挂起请求
-                // 当没有拉取到消息时，通过长轮询方式继续拉取消息
+                // 消息未查询到 && broker 允许挂起请求 && 请求允许挂起，则执行挂起请求
                 case ResponseCode.PULL_NOT_FOUND:
 
+                    // 允许 Broker 挂起 && 没有消息时挂起请求一段时间
                     if (brokerAllowSuspend && hasSuspendFlag) {
+                        // 取挂起多久时间
                         long pollingTimeMills = suspendTimeoutMillisLong;
 
-                        // 是否开启长轮询
+                        // 没有开启长轮询，就使用短轮询时间
+                        // 默认时开启的
                         if (!this.brokerController.getBrokerConfig().isLongPollingEnable()) {
+                            // 默认为1000ms作为下一次拉取消息的等待时间。
                             pollingTimeMills = this.brokerController.getBrokerConfig().getShortPollingTimeMills();
                         }
 
@@ -491,11 +503,20 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
                         // 创建拉取请求 - 长轮询包下的
                         // 用于保存当前拉取消息的请求，后续使用定期线程扫描该请求，判断是否有消息到达
-                        PullRequest pullRequest = new PullRequest(request, channel, pollingTimeMills,
-                                this.brokerController.getMessageStore().now(), offset, subscriptionData, messageFilter);
+                        PullRequest pullRequest = new PullRequest(
+                                request,
+                                channel,
+                                pollingTimeMills,
+                                this.brokerController.getMessageStore().now(),
+                                offset, // 待拉取消息的起始位置
+                                subscriptionData,
+                                messageFilter);
 
                         // todo 添加到挂起请求队列，等待后续重新拉取
                         this.brokerController.getPullRequestHoldService().suspendPullRequest(topic, queueId, pullRequest);
+
+                        // todo 设置response=null，则此时此次调用不会向客户端输出任何字节，客户端网络请求客户端的读事件不会触发，不会触发对响应结果的处理，处于等待状态。
+                        // todo 这就是所谓的挂起请求
                         response = null;
                         break;
                     }
@@ -628,10 +649,10 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
     }
 
     /**
-     * 执行请求唤醒，即再次拉取消息。该方法调用线程池，因此，不会阻塞
+     * 进行消息拉取，结束长轮询。并返回结果到客户端。
      *
-     * @param channel
-     * @param request
+     * @param channel 连接通道
+     * @param request 请求命令
      * @throws RemotingCommandException
      */
     public void executeRequestWhenWakeup(final Channel channel,
@@ -641,13 +662,17 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             public void run() {
                 try {
 
-                    // 调用拉取请求。本次调用，设置即使请求不到消息，也不挂起请求。如果不设置，请求可能被无限挂起，被 Broker 无限循环。
+                    // 1 调用拉取请求。本次调用，设置即使请求不到消息，也不挂起请求。如果不设置，请求可能被无限挂起，被 Broker 无限循环。
+                    // todo 最后一个参数是 false ，表示 Broker 端不支持挂起
                     final RemotingCommand response = PullMessageProcessor.this.processRequest(channel, request, false);
 
+                    // 2 将拉取结果响应给消费客户端
                     if (response != null) {
                         response.setOpaque(request.getOpaque());
                         response.markResponseType();
                         try {
+
+                            // 通过通道将消息写回消费客户端
                             channel.writeAndFlush(response).addListener(new ChannelFutureListener() {
                                 @Override
                                 public void operationComplete(ChannelFuture future) throws Exception {

@@ -106,10 +106,12 @@ public class PullAPIWrapper {
             ByteBuffer byteBuffer = ByteBuffer.wrap(pullResultExt.getMessageBinary());
             List<MessageExt> msgList = MessageDecoder.decodes(byteBuffer);
 
-            // 根据订阅信息消息tagCode匹配合适消息
+            // todo 根据订阅信息消息tagCode匹配合适消息
             List<MessageExt> msgListFilterAgain = msgList;
             if (!subscriptionData.getTagsSet().isEmpty() && !subscriptionData.isClassFilterMode()) {
                 msgListFilterAgain = new ArrayList<MessageExt>(msgList.size());
+
+                // todo 遍历拉取的消息，根据订阅的 tag 过滤，留下消费方关注的 tag
                 for (MessageExt msg : msgList) {
                     if (msg.getTags() != null) {
                         // tag 过滤
@@ -193,7 +195,7 @@ public class PullAPIWrapper {
      * @param maxNums                    拉取消息数量
      * @param sysFlag                    拉取请求系统标识
      * @param commitOffset               提交的消息进度
-     * @param brokerSuspendMaxTimeMillis Broker 挂起请求最大时间
+     * @param brokerSuspendMaxTimeMillis Broker 挂起请求最大时间，默认是 15s
      * @param timeoutMillis              请求 Broker 超时时长
      * @param communicationMode          通讯模式
      * @param pullCallback               拉取回调
@@ -258,6 +260,7 @@ public class PullAPIWrapper {
             requestHeader.setMaxMsgNums(maxNums);
             requestHeader.setSysFlag(sysFlagInner);
             requestHeader.setCommitOffset(commitOffset);
+            // todo Broker 取消息时暂停时间（没有消息会等待的时间），默认 15s
             requestHeader.setSuspendTimeoutMillis(brokerSuspendMaxTimeMillis);
             requestHeader.setSubscription(subExpression);
             requestHeader.setSubVersion(subVersion);

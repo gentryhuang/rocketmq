@@ -160,7 +160,7 @@ public class TopicConfigManager extends ConfigManager {
             this.topicConfigTable.put(topicConfig.getTopicName(), topicConfig);
         }
         {
-            // 7  SCHEDULE_TOPIC_XXXX
+            // 7 todo 延时消息主题 SCHEDULE_TOPIC_XXXX
             String topic = TopicValidator.RMQ_SYS_SCHEDULE_TOPIC;
             TopicConfig topicConfig = new TopicConfig(topic);
             TopicValidator.addSystemTopic(topic);

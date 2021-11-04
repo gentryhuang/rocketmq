@@ -657,7 +657,7 @@ public class ConsumeQueue {
     /**
      * 根据 startIndex 获取消息消费队列条目
      *
-     * @param startIndex 逻辑偏移量
+     * @param startIndex 逻辑偏移量（针对 ConsumeQueue 文件组）
      * @return
      */
     public SelectMappedBufferResult getIndexBuffer(final long startIndex) {

@@ -430,6 +430,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                         pullRequest.getMessageQueue(),
                                         dispatchToConsume);
 
+                                // 准备下次拉取消息的请求
                                 // 根据拉取频率( pullInterval )，提交立即或者延迟拉取消息请求，都是放到拉取请求队列中。默认拉取频率为 0ms ，提交立即拉取消息请求。
                                 if (DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval() > 0) {
                                     DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest,
@@ -514,6 +515,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     log.warn("execute the pull request exception", e);
                 }
 
+                // 准备下次拉取消息任务
                 // 提交延迟拉取消息请求
                 DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
             }
@@ -567,7 +569,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     this.defaultMQPushConsumer.getPullBatchSize(),
                     sysFlag,
                     commitOffsetValue,
-                    BROKER_SUSPEND_MAX_TIME_MILLIS,
+                    BROKER_SUSPEND_MAX_TIME_MILLIS, // Broker 挂起请求最大时间，默认 15s
                     CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND,
                     CommunicationMode.ASYNC,
                     pullCallback

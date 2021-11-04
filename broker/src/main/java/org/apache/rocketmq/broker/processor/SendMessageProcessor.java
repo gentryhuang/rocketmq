@@ -204,7 +204,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
         }
 
-        // todo 创建重试 Topic
+        // todo 创建重试 Topic，存在则直接返回
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
                 newTopic,
                 subscriptionGroupConfig.getRetryQueueNums(),

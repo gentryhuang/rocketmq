@@ -35,7 +35,8 @@ public class NotifyMessageArrivingListener implements MessageArrivingListener {
     }
 
     /**
-     * 消息到达后，通知拉取消息请求挂起服务，消息到达了，可以重试去拉取消息
+     * 消息到达后，通知拉取消息请求挂起服务，消息到达了，可以重试去拉取消息。
+     * todo 只要待拉取偏移量小于消息消费队列的最大偏移量，既可以被唤醒进行消息拉取
      *
      * @param topic
      * @param queueId

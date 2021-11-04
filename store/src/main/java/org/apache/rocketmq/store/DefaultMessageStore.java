@@ -178,7 +178,7 @@ public class DefaultMessageStore implements MessageStore {
     private final BrokerStatsManager brokerStatsManager;
 
     /**
-     * 在消息拉取长轮询模式下的消息达到监听器
+     * todo 在消息拉取长轮询模式下的消息达到监听器
      */
     private final MessageArrivingListener messageArrivingListener;
     /**
@@ -431,6 +431,7 @@ public class DefaultMessageStore implements MessageStore {
             this.recoverTopicQueueTable();
         }
 
+        // todo 启动延时消息处理任务
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             this.haService.start();
             // 处理延迟消息
@@ -767,7 +768,7 @@ public class DefaultMessageStore implements MessageStore {
      * @param queueId       消息队列id
      * @param offset        拉取的消息队列逻辑偏移量
      * @param maxMsgNums    一次拉取消息条数，默认为 32
-     * @param messageFilter 消息过滤器
+     * @param messageFilter 消息过滤器 - 根据 tag 过滤
      * @return
      */
     public GetMessageResult getMessage(final String group,
@@ -901,7 +902,7 @@ public class DefaultMessageStore implements MessageStore {
 
                             // 15 todo 执行消息过滤，如果符合过滤条件,则直接进行消息拉取，如果不符合过滤条件，则进入继续执行逻辑，并如果最终符合条件，则将该消息添加到拉取结果中。
                             if (messageFilter != null
-                                    // 根据 tag 过滤
+                                    // todo 根据 tag 过滤
                                     && !messageFilter.isMatchedByConsumeQueue(isTagsCodeLegal ? tagsCode : null, extRet ? cqExtUnit : null)) {
                                 if (getResult.getBufferTotalSize() == 0) {
                                     status = GetMessageStatus.NO_MATCHED_MESSAGE;
@@ -2492,9 +2493,10 @@ public class DefaultMessageStore implements MessageStore {
                     break;
                 }
 
-                // 1 返回 reputFromOffset 偏移量开始的全部有效数据( reputFromOffset 对应的 一个 CommitLog 文件)，
-                // 即获取从 reputFromOffset 开始的 commitLog 对应的 MappeFile 对应的MappedByteBuffer，如果找不到，退出此次循环
+                // 1 根据 偏移量 读取 偏移量+到 commitlog文件中有效数据的最大偏移量的数据( reputFromOffset 对应的 一个 CommitLog 文件)，
                 SelectMappedBufferResult result = DefaultMessageStore.this.commitLog.getData(reputFromOffset);
+
+                // 找到数据
                 if (result != null) {
                     try {
 
@@ -2506,9 +2508,11 @@ public class DefaultMessageStore implements MessageStore {
 
                             // 2 尝试构建转发请求对象 DispatchRequest，即生成重放消息调度请求，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
                             // todo 主要是从Nio ByteBuffer中，根据 commitlog 消息存储格式，解析出消息的核心属性，其中延迟消息的时间计算也在该逻辑中
-                            // todo 注意：生成重放消息调度请求 (DispatchRequest) ，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。不太明白怎么做到只有一条的？？？
+                            // todo 注意：生成重放消息调度请求 (DispatchRequest) ，从 SelectMappedBufferResult 中读取一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。不太明白怎么做到只有一条的？？？
                             DispatchRequest dispatchRequest =
                                     DefaultMessageStore.this.commitLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
+
+
                             // 消息长度
                             int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
 
@@ -2518,14 +2522,15 @@ public class DefaultMessageStore implements MessageStore {
                                 // 解析得到的消息程度大于 0
                                 if (size > 0) {
 
-                                    // 3 todo 转发 DispatchRequest，构建 消息队列 和 IndexFile
+                                    // 3 todo 转发 DispatchRequest，根据 comitlog 文件内容实时构建 consumequeue、index文件
                                     DefaultMessageStore.this.doDispatch(dispatchRequest);
 
-                                    // todo 4 当 Broker 是主节点 && Broker 开启的是长轮询，则通知消费队列有新的消息到达，这样处理等待中拉取消息请求可以再次拉取消息
+                                    // todo 4 当 Broker 是主节点 && Broker 开启的是长轮询，则通知消费队列有新的消息到达，这样处于等待中拉取消息请求可以再次拉取消息
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
                                             && DefaultMessageStore.this.brokerConfig.isLongPollingEnable()
                                             && DefaultMessageStore.this.messageArrivingListener != null) {
 
+                                        // 在消息拉取长轮询模式下的消息达到监听器
                                         DefaultMessageStore.this.messageArrivingListener.arriving(
                                                 dispatchRequest.getTopic(),
                                                 dispatchRequest.getQueueId(),
@@ -2578,6 +2583,8 @@ public class DefaultMessageStore implements MessageStore {
                     } finally {
                         result.release();
                     }
+
+                    // 没有找到数据，结束 doReput 方法
                 } else {
                     doNext = false;
                 }
@@ -2594,7 +2601,9 @@ public class DefaultMessageStore implements MessageStore {
 
             while (!this.isStopped()) {
                 try {
+
                     Thread.sleep(1);
+
                     // 每处理一次 doReput() 方法，休眠 1 毫秒，基本上是一直在转发 commitlog 中的内容到 consumequeue、index
                     this.doReput();
                 } catch (Exception e) {

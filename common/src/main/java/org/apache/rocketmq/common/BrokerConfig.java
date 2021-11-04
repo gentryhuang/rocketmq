@@ -113,6 +113,9 @@ public class BrokerConfig {
      */
     private boolean longPollingEnable = true;
 
+    /**
+     * 短轮询时长，1s
+     */
     private long shortPollingTimeMills = 1000;
 
     private boolean notifyConsumerIdsChangedEnable = true;

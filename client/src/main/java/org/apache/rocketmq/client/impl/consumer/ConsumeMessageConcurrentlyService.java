@@ -393,7 +393,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 //  因此，消息消费要尽最大可能性实现幂等性。
                 if (!msgBackFailed.isEmpty()) {
                     consumeRequest.getMsgs().removeAll(msgBackFailed);
-                    // 提交延迟重新请求
+                    // 提交延迟消费任务
                     this.submitConsumeRequestLater(msgBackFailed, consumeRequest.getProcessQueue(), consumeRequest.getMessageQueue());
                 }
                 break;

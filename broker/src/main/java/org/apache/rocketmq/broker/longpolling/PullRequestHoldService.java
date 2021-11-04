@@ -46,6 +46,7 @@ public class PullRequestHoldService extends ServiceThread {
     /**
      * 拉取消息 remote 请求集合
      * key: topic@queueId
+     * value: 拉取消息请求集合
      */
     private ConcurrentMap<String/* topic@queueId */, ManyPullRequest> pullRequestTable = new ConcurrentHashMap<String, ManyPullRequest>(1024);
 
@@ -54,14 +55,17 @@ public class PullRequestHoldService extends ServiceThread {
     }
 
     /**
-     * 添加拉取消息挂起请求到集合( pullRequestTable )
+     * 添加拉取消息挂起请求到集合( pullRequestTable )，以 Topic + queueId 为维度，拉取消息请求都放到一个集合中
      *
      * @param topic       主题
      * @param queueId     队列编号
      * @param pullRequest 拉取消息请求
      */
     public void suspendPullRequest(final String topic, final int queueId, final PullRequest pullRequest) {
+        //  主题 + 队列编号
         String key = this.buildKey(topic, queueId);
+
+        // 没有队列的请求集合对象，则新建一个
         ManyPullRequest mpr = this.pullRequestTable.get(key);
         if (null == mpr) {
             mpr = new ManyPullRequest();
@@ -71,6 +75,7 @@ public class PullRequestHoldService extends ServiceThread {
             }
         }
 
+        // 将拉取消息请求加入到集合中
         mpr.addPullRequest(pullRequest);
     }
 
@@ -90,27 +95,41 @@ public class PullRequestHoldService extends ServiceThread {
     }
 
     /**
-     * 定时检查挂起请求是否有需要通知重新拉取消息并进行通知
+     * todo 通过不断地检查被hold住的请求，检查是否已经有数据了。具体检查那些请求：
+     * 是在 ResponseCode.PULL_NOT_FOUND 中调用的 suspendPullRequest 方法添加的
      */
     @Override
     public void run() {
         log.info("{} service started", this.getServiceName());
         while (!this.isStopped()) {
             try {
-                // 根据 长轮训 还是 短轮训 设置不同的等待时间
+                // 根据 长轮训 还是 短轮训 设置不同的等待时间ReputMessageService
                 if (this.brokerController.getBrokerConfig().isLongPollingEnable()) {
-                    // 如果开启长轮询，则每隔 5 秒判断消息是否到达
+
+                    // 如果开启了长轮询模式，则每次只挂起 5s ，然后断消息是否到达
+                    // todo 一般客户端指定的长轮询时间比这个大，默认是 15s
                     this.waitForRunning(5 * 1000);
+
                 } else {
-                    // 没有开启长轮询，每隔 1s 再次尝试
+                    /**
+                     *  todo 如果不开启长轮询模式，则只挂起一次，挂起时间为 shortPollingTimeMills，然后判断消息是否到达
+                     *  todo 因为，获取不到消息时，如果没有开启长轮询，那么设置等待时间就是 1s，这个在下次触发时候即使没有消息，也会达到超时时间。这个叫短轮询。
+                     *
+                     *             if (!this.brokerController.getBrokerConfig().isLongPollingEnable()) {
+                     *                             // 默认为1000ms作为下一次拉取消息的等待时间。
+                     *                             pollingTimeMills = this.brokerController.getBrokerConfig().getShortPollingTimeMills();
+                     *                         }
+                     *
+                     * @see PullRequestHoldService#notifyMessageArriving(java.lang.String, int, long, java.lang.Long, long, byte[], java.util.Map)
+                     */
                     this.waitForRunning(this.brokerController.getBrokerConfig().getShortPollingTimeMills());
                 }
 
-
                 long beginLockTimestamp = this.systemClock.now();
 
-                // 检查挂起请求是否有需要通知的
+                // 检查挂起请求是否有消息到达
                 this.checkHoldRequest();
+
                 long costTime = this.systemClock.now() - beginLockTimestamp;
                 if (costTime > 5 * 1000) {
                     log.info("[NOTIFYME] check hold request cost {} ms.", costTime);
@@ -129,20 +148,25 @@ public class PullRequestHoldService extends ServiceThread {
     }
 
     /**
-     * 遍历挂起的拉取消息请求，检查要消息是否到来
+     * 遍历挂起的拉取消息请求，检查要消息是否到来。
+     * <p>
+     * 原则：获取指定messageQueue下最大的offset，然后用来和 拉取任务的待拉取偏移量 来比较，来确定是否有新的消息到来。具体实现在 notifyMessageArriving 方法中。
      */
     private void checkHoldRequest() {
+        // 遍历拉取请求集合
         for (String key : this.pullRequestTable.keySet()) {
             String[] kArray = key.split(TOPIC_QUEUEID_SEPARATOR);
             if (2 == kArray.length) {
+                // topic
                 String topic = kArray[0];
+                // queueId
                 int queueId = Integer.parseInt(kArray[1]);
 
-                // 判断当前 Topic 下的 queueId 对应的队列是否有消息到达
-                // 即获取 Topic 的 queueId 最大 offset
+                // todo 根据 Topic 的 queueId 查找队列的最大逻辑偏移量
                 final long offset = this.brokerController.getMessageStore().getMaxOffsetInQueue(topic, queueId);
                 try {
-                    // 通知有消息到达
+
+                    // 根据 queueId 的最大偏移量 offset，判断是否有新的消息到达
                     this.notifyMessageArriving(topic, queueId, offset);
                 } catch (Throwable e) {
                     log.error("check hold request failed. topic={}, queueId={}", topic, queueId, e);
@@ -163,76 +187,92 @@ public class PullRequestHoldService extends ServiceThread {
     }
 
     /**
-     * 检查指定队列是否有需要通知的请求
+     * 检查指定队列是否有消息到达，判断依据：
+     * todo 比较 待拉取偏移量(pullFromThisOffset) 和 消息队列的最大有效偏移量
      *
-     * @param topic        主题
-     * @param queueId      队列编号
-     * @param maxOffset    消息队列最大 ofset
-     * @param tagsCode     tag hash 码
-     * @param msgStoreTime
-     * @param filterBitMap
-     * @param properties
+     * @param topic        主题明
+     * @param queueId      队列ID
+     * @param maxOffset    消息队列当前最大的逻辑偏移量
+     * @param tagsCode     tag hash 码（用于基于 tag 消息过滤）
+     * @param msgStoreTime 消息存储时间
+     * @param filterBitMap 过滤位图
+     * @param properties   消息属性
      */
-    public void notifyMessageArriving(final String topic, final int queueId, final long maxOffset, final Long tagsCode,
-                                      long msgStoreTime, byte[] filterBitMap, Map<String, String> properties) {
+    public void notifyMessageArriving(final String topic,
+                                      final int queueId,
+                                      final long maxOffset,
+                                      final Long tagsCode,
+                                      long msgStoreTime,
+                                      byte[] filterBitMap,
+                                      Map<String, String> properties) {
 
-        // 标志 topic 下 queue
+        // 1 标志 topic 下 queue
         String key = this.buildKey(topic, queueId);
-        // 获取具体 queue 对应的拉取消息的请求对象
+
+        // 2 获取具体 queue 对应的拉取消息的请求对象
         ManyPullRequest mpr = this.pullRequestTable.get(key);
         if (mpr != null) {
+
+            // 3 获取主题与队列的所有 PullRequest 并清除内部 pullRequest 集合，避免重复拉取
             List<PullRequest> requestList = mpr.cloneListAndClear();
             if (requestList != null) {
                 // 消息还没有到的请求数组
                 List<PullRequest> replayList = new ArrayList<PullRequest>();
 
-                // 遍历每个等待拉取消息的 请求
+                // 4 遍历每个等待拉取消息的请求
                 for (PullRequest request : requestList) {
-                    // 如果 maxOffset 过小，则重新读取一次。
+
+                    // 4.1 如果待拉取偏移量(pullFromThisOffset)大于消息队列的最大有效偏移量，则再次获取消息队列的最大有效偏移量，再给一次机会。
                     long newestOffset = maxOffset;
                     if (newestOffset <= request.getPullFromThisOffset()) {
                         newestOffset = this.brokerController.getMessageStore().getMaxOffsetInQueue(topic, queueId);
                     }
 
-                    // 1 如果拉取消息偏移大于请求偏移量，说明有新的匹配消息，唤醒请求，即再次拉取消息。
+                    // 4.2 todo 如果队列最大偏移量大于 pullFromThisOffset 说明有新的消息到达
                     if (newestOffset > request.getPullFromThisOffset()) {
 
-                        // 验证消息是否是自己感兴趣的消息，过滤
+                        // 4.3  对消息根据 tag,属性进行一次消息过滤，如果 tag,属性为空，则消息过滤器会返回true
                         boolean match = request.getMessageFilter().isMatchedByConsumeQueue(tagsCode, new ConsumeQueueExt.CqExtUnit(tagsCode, msgStoreTime, filterBitMap));
                         // match by bit map, need eval again when properties is not null.
                         if (match && properties != null) {
                             match = request.getMessageFilter().isMatchedByCommitLog(null, properties);
                         }
 
-                        // 如果是则拉取消息
+                        // todo 4.4 如果是感兴趣的消息，则拉取消息，结束长轮询
                         if (match) {
                             try {
-                                // 再次尝试去拉取消息。
+                                // 再次尝试去拉取消息，将拉取的结果响应给客户端。
                                 // 实际是丢到线程池，获取消息，不会有性能上的问题。
-                                this.brokerController.getPullMessageProcessor().executeRequestWhenWakeup(request.getClientChannel(),
+                                this.brokerController.getPullMessageProcessor().executeRequestWhenWakeup(
+                                        request.getClientChannel(),
                                         request.getRequestCommand());
                             } catch (Throwable e) {
                                 log.error("execute request when wakeup failed.", e);
                             }
 
-                            // 继续下一个拉取消息请求
+                            // 一旦处理了就把当前请求移除（不加入到 replayList），继续下一个拉取消息请求
                             continue;
                         }
                     }
 
-                    // 2 即使没有消息或没有匹配消息，如果超过挂起时间，会再次拉取消息。
+                    // todo 4.5 即使没有消息或没有匹配消息，如果超过挂起时间，会再次尝试拉取消息,结束长轮询。
                     if (System.currentTimeMillis() >= (request.getSuspendTimestamp() + request.getTimeoutMillis())) {
                         try {
-                            // 唤醒请求，再次拉取消息。实际是丢到线程池进行一步的消息拉取，不会有性能上的问题。
+                            // 再次拉取消息,将拉取的结果响应给客户端。
+                            // 实际是丢到线程池进行一步的消息拉取，不会有性能上的问题。
                             this.brokerController.getPullMessageProcessor().executeRequestWhenWakeup(request.getClientChannel(),
                                     request.getRequestCommand());
+
                         } catch (Throwable e) {
                             log.error("execute request when wakeup failed.", e);
                         }
+
+                        // 一旦处理了就把当前请求移除(不加入到 replayList),继续下一个拉取消息请求
                         continue;
                     }
 
-                    // 不符合唤醒的请求重新添加到集合(pullRequestTable)
+
+                    // 4.6 不符合唤醒的请求，则将拉取请求重新放入，待下一次检测
                     replayList.add(request);
                 }
 

@@ -71,7 +71,7 @@ public abstract class ConfigManager {
     }
 
     /**
-     * 配置文件地址
+     * 配置文件地址，由配置实现子类实现，以指定响应配置文件路径
      *
      * @return
      */

@@ -31,6 +31,9 @@ public class DemoProducer {
                     ("Hello RocketMQ " +
                             i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
             );
+
+            msg.setDelayTimeLevel(3);
+
             //Call send message to deliver message to one of brokers.
             SendResult sendResult = producer.send(msg, 50000);
             System.out.printf("%s%n", sendResult);

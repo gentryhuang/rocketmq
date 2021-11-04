@@ -72,10 +72,13 @@ public class ScheduleMessageService extends ConfigManager {
     private final ConcurrentMap<Integer /* level */, Long/* delay timeMillis */> delayLevelTable = new ConcurrentHashMap<Integer, Long>(32);
 
     /**
-     * 延迟级别到队列消费偏移量的映射
+     * 延迟级别到队列消费的偏移量的映射
      */
     private final ConcurrentMap<Integer /* level */, Long/* offset */> offsetTable = new ConcurrentHashMap<Integer, Long>(32);
 
+    /**
+     * 存储服务
+     */
     private final DefaultMessageStore defaultMessageStore;
 
     /**
@@ -84,7 +87,7 @@ public class ScheduleMessageService extends ConfigManager {
     private final AtomicBoolean started = new AtomicBoolean(false);
 
     /**
-     * 轮询延时队列的定时器
+     * 轮询延时队列的定时器 Timer
      */
     private Timer timer;
     /**
@@ -165,36 +168,37 @@ public class ScheduleMessageService extends ConfigManager {
      * 使用定时器 Timer 启动一个定时任务，把每个延时粒度封装成一个任务，然后加入到 Timer 的任务队列中
      */
     public void start() {
-        // 标记开始
+
+        // 通过AtomicBoolean 来确保有且仅有一次执行start方法
         if (started.compareAndSet(false, true)) {
+            // 加载延迟消息偏移量文件，默认：$user.home/store/config/delayOffset.json 到内存
             super.load();
 
             // 创建定时器
             // 内部通过创建并启动一个线程，不断轮询定时器中的任务队列，
             this.timer = new Timer("ScheduleMessageTimerThread", true);
 
-            // 遍历延时级别到延迟时间的映射
+            // 1 遍历延时级别到延迟时间的映射
             for (Map.Entry<Integer, Long> entry : this.delayLevelTable.entrySet()) {
                 // 延时级别
                 Integer level = entry.getKey();
                 // 延时时间
                 Long timeDelay = entry.getValue();
 
-                // 根据延时级别获取偏移量
+                // 根据延时级别获取对应的偏移量，即 level 级别对应队列的偏移量
                 Long offset = this.offsetTable.get(level);
                 if (null == offset) {
                     offset = 0L;
                 }
 
-                // 调度器调度延迟任务
-                // 定时投递消息
+                // 每个消费队列对应单独一个定时任务进行轮询，发送 到达投递时间【计划消费时间】 的消息
                 if (timeDelay != null) {
-                    // 针对 messageDelayLevel 配置，启动对应的 timer 开始秒执行 DeliverDelayedMessageTimerTask,判断消息是否延时到期
+                    // 针对 messageDelayLevel 配置，启动对应的 timer 开始每秒执行 DeliverDelayedMessageTimerTask,判断消息是否延时到期
                     this.timer.schedule(new DeliverDelayedMessageTimerTask(level, offset), FIRST_DELAY_TIME);
                 }
             }
 
-            // 定时持久化发送进度
+            // 2 定时持久化延时队列的消费进度，每 10s 执行一次
             // 刷新延时队列 topic 对应每个 queueid 的 offset 到本地磁盘。
             this.timer.scheduleAtFixedRate(new TimerTask() {
 
@@ -258,6 +262,12 @@ public class ScheduleMessageService extends ConfigManager {
         }
     }
 
+    /**
+     * 将 延迟级别到队列消费偏移量的映射 offsetTable 序列化
+     *
+     * @param prettyFormat 是否格式化
+     * @return
+     */
     public String encode(final boolean prettyFormat) {
         DelayOffsetSerializeWrapper delayOffsetSerializeWrapper = new DelayOffsetSerializeWrapper();
         delayOffsetSerializeWrapper.setOffsetTable(this.offsetTable);
@@ -315,7 +325,7 @@ public class ScheduleMessageService extends ConfigManager {
          */
         private final int delayLevel;
         /**
-         * 偏移量
+         * 逻辑偏移量
          */
         private final long offset;
 
@@ -349,8 +359,10 @@ public class ScheduleMessageService extends ConfigManager {
          */
         private long correctDeliverTimestamp(final long now, final long deliverTimestamp) {
             long result = deliverTimestamp;
+
+            // 重新计算消息投递时间
             long maxTimestamp = now + ScheduleMessageService.this.delayLevelTable.get(this.delayLevel);
-            // 如果预期的投递时间比 根据当前时间计算的预期投递时间要大，那么以当前时间为准
+            // 如果预期的投递时间比重新计算消息投递时间要大，那么以当前时间为准，因为可能延时等级对应的延时时间改变了
             if (deliverTimestamp > maxTimestamp) {
                 result = now;
             }
@@ -359,16 +371,17 @@ public class ScheduleMessageService extends ConfigManager {
         }
 
         /**
-         * 执行
+         * 执行遍历
          */
         public void executeOnTimeup() {
-            // 根据 topic（SCHEDULE_TOPIC_XXXX） 和 queueId 获取消费队列
+            // 1 根据 topic（SCHEDULE_TOPIC_XXXX） 和 queueId 获取消费队列
             ConsumeQueue cq =
                     ScheduleMessageService.this.defaultMessageStore.findConsumeQueue(TopicValidator.RMQ_SYS_SCHEDULE_TOPIC, delayLevel2QueueId(delayLevel));
 
             long failScheduleOffset = offset;
 
             if (cq != null) {
+                // 2 根据 cq 的逻辑偏移量获取消息的索引信息
                 SelectMappedBufferResult bufferCQ = cq.getIndexBuffer(this.offset);
                 if (bufferCQ != null) {
                     try {
@@ -376,7 +389,8 @@ public class ScheduleMessageService extends ConfigManager {
                         int i = 0;
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
 
-                        // 每个扫描任务主要是把队列中所有到期的消息都拿出来，并发到指定的 topic 下，并把延迟队列中的消息删除
+                        // 2.1 每个扫描任务主要是把队列中所有到期的消息索引都拿出来除
+                        // 步长是 20,结束条件是： i< bufferCQ.getSize()
                         for (; i < bufferCQ.getSize(); i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
                             // 在 Commitlog 中的偏移量
                             long offsetPy = bufferCQ.getByteBuffer().getLong();
@@ -397,34 +411,40 @@ public class ScheduleMessageService extends ConfigManager {
                                 }
                             }
 
-                            // 修正可投递时间
+                            // 2.2 todo 修正可投递时间，因为可能延时等级对应的延时时间改变了，这个时候不能以 tagsCode 中的预期消费时间为准
                             long now = System.currentTimeMillis();
                             long deliverTimestamp = this.correctDeliverTimestamp(now, tagsCode);
 
+                            // 2.3 下一个逻辑偏移量（第一次的时候 i = 0）
                             nextOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
-                            // 判断延时时间是否到达
+                            // 2.4 判断延时时间是否到达
                             long countdown = deliverTimestamp - now;
+
+                            // 到达了时间
                             if (countdown <= 0) {
-                                // 根据偏移量和消息大小，到 Commitlog 中获取消息
+
+                                // 2.5 根据偏移量和消息大小从 Commitlog 中获取对应的延时消息
                                 MessageExt msgExt =
                                         ScheduleMessageService.this.defaultMessageStore.lookMessageByOffset(offsetPy, sizePy);
 
                                 if (msgExt != null) {
                                     try {
-                                        // 还原消息真实属性
+                                        // 2.6 还原延时消息真实属性
                                         MessageExtBrokerInner msgInner = this.messageTimeup(msgExt);
+
+                                        // 这里做防御性编程，防止事务消息使用了延时消息
                                         if (TopicValidator.RMQ_SYS_TRANS_HALF_TOPIC.equals(msgInner.getTopic())) {
                                             log.error("[BUG] the real topic of schedule msg is {}, discard the msg. msg={}",
                                                     msgInner.getTopic(), msgInner);
                                             continue;
                                         }
 
-                                        // 开始发送消息，这时候 setDelayTimeLevel = 0
+                                        // todo 2.7 投递真正的消息，这时候 setDelayTimeLevel = 0
                                         PutMessageResult putMessageResult = ScheduleMessageService.this.writeMessageStore
                                                 .putMessage(msgInner);
 
-                                        // 如果发送成功
+                                        // 如果发送成功，则继续下一个消息索引的获取与判断是否到期
                                         if (putMessageResult != null
                                                 && putMessageResult.getPutMessageStatus() == PutMessageStatus.PUT_OK) {
                                             if (ScheduleMessageService.this.defaultMessageStore.getMessageStoreConfig().isEnableScheduleMessageStats()) {
@@ -461,12 +481,15 @@ public class ScheduleMessageService extends ConfigManager {
                                                         + offsetPy + ",sizePy=" + sizePy, e);
                                     }
                                 }
+
+                                // todo 没有到达预期消费时间，那么就不需要继续往下遍历了。留着下次再次从这个偏移量开启遍历与判断是否到达
                             } else {
 
                                 // 安排下一次任务
                                 ScheduleMessageService.this.timer.schedule(
                                         new DeliverDelayedMessageTimerTask(this.delayLevel, nextOffset),
-                                        countdown);
+                                        countdown);// 任务触发时间为距离消费时间差
+
                                 // 更新进度
                                 ScheduleMessageService.this.updateOffset(this.delayLevel, nextOffset);
 
@@ -474,13 +497,15 @@ public class ScheduleMessageService extends ConfigManager {
                             }
                         } // end of for
 
+                        // 遍历完了拉取的消息索引条目，安排下次任务，就绪判断
                         nextOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
                         ScheduleMessageService.this.timer.schedule(new DeliverDelayedMessageTimerTask(
-                                this.delayLevel, nextOffset), DELAY_FOR_A_WHILE);
+                                this.delayLevel, nextOffset), DELAY_FOR_A_WHILE); // 任务触发时间为 100ms
+                        // 更新消费进度
                         ScheduleMessageService.this.updateOffset(this.delayLevel, nextOffset);
                         return;
-                    } finally {
 
+                    } finally {
                         bufferCQ.release();
                     }
                 } // end of if (bufferCQ != null)
@@ -500,6 +525,12 @@ public class ScheduleMessageService extends ConfigManager {
                     failScheduleOffset), DELAY_FOR_A_WHILE);
         }
 
+        /**
+         * 构建真正的消息
+         *
+         * @param msgExt
+         * @return
+         */
         private MessageExtBrokerInner messageTimeup(MessageExt msgExt) {
             MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
             msgInner.setBody(msgExt.getBody());
