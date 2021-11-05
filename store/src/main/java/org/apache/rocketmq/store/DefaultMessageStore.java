@@ -1749,7 +1749,7 @@ public class DefaultMessageStore implements MessageStore {
                             continue;
                         }
 
-                        // 还原
+                        // todo 还原当前 queueId 对应的 ConsumeQuueue ，这是一个逻辑文件，具体由 MappedFileQueue 管理多个映射文件 MappedFile
                         // 构建 ConsumeQueue ，主要初始化：topic、queueId、storePah、mappedFileSize
                         ConsumeQueue logic = new ConsumeQueue(
                                 topic,
@@ -2463,7 +2463,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         /**
-         * 是否 CommitLog 需要重放消息
+         * 是否 CommitLog 可以重放消息
          *
          * @return
          */

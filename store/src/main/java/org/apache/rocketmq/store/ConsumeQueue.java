@@ -583,7 +583,7 @@ public class ConsumeQueue {
         final long expectLogicOffset = cqOffset * CQ_STORE_UNIT_SIZE;
 
         // 3 根据消息在 ConsumeQueue 中的物理偏移量，查找对应的 MappedFile
-        // 如果找不到，则新建一个
+        // todo 如果找不到，则新建一个 MappedFile，对应的物理文件名称就是 expectLogicOffset
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile(expectLogicOffset);
         if (mappedFile != null) {
 

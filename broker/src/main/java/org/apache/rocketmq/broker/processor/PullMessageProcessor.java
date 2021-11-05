@@ -662,7 +662,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             public void run() {
                 try {
 
-                    // 1 调用拉取请求。本次调用，设置即使请求不到消息，也不挂起请求。如果不设置，请求可能被无限挂起，被 Broker 无限循环。
+                    // 1 执行拉取请求。本次调用，设置了即使请求不到消息，也不挂起请求。如果不设置，请求可能被无限挂起，被 Broker 无限循环。
                     // todo 最后一个参数是 false ，表示 Broker 端不支持挂起
                     final RemotingCommand response = PullMessageProcessor.this.processRequest(channel, request, false);
 
@@ -674,6 +674,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
                             // 通过通道将消息写回消费客户端
                             channel.writeAndFlush(response).addListener(new ChannelFutureListener() {
+
                                 @Override
                                 public void operationComplete(ChannelFuture future) throws Exception {
                                     if (!future.isSuccess()) {

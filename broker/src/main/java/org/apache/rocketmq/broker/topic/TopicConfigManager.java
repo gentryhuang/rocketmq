@@ -227,7 +227,7 @@ public class TopicConfigManager extends ConfigManager {
                     if (defaultTopicConfig != null) {
                         // 如果默认的 topic 为 TBW102
                         if (defaultTopic.equals(TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC)) {
-                            // 如果不支持自动创建 Topic
+                            // 如果不支持自动创建 Topic，则设置权限
                             if (!this.brokerController.getBrokerConfig().isAutoCreateTopicEnable()) {
                                 defaultTopicConfig.setPerm(PermName.PERM_READ | PermName.PERM_WRITE);
                             }
@@ -239,7 +239,7 @@ public class TopicConfigManager extends ConfigManager {
                             // todo topic 是发送消息的 Topic
                             topicConfig = new TopicConfig(topic);
 
-                            // 取写队列大小，注意去传入的队列大小进行对比，二者取小，默认队列时8
+                            // 取写队列大小，注意和传入的队列大小（4）进行对比，二者取小，默认队列是 16
                             int queueNums = Math.min(clientDefaultTopicQueueNums, defaultTopicConfig.getWriteQueueNums());
                             if (queueNums < 0) {
                                 queueNums = 0;

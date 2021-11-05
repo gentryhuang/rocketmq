@@ -141,6 +141,9 @@ public class PullMessageService extends ServiceThread {
         log.info(this.getServiceName() + " service started");
 
         // 不断获取 拉取消息请求，来一个请求就立马进行消息拉取，没有就阻塞等待。
+        // 想想看，pullRequestQueue 队列中的 PullRequest 哪来的？
+        // - PullRequest 随着消费者分配到新的队列而创建，然后添加而来
+        // - 在拉取消息的逻辑中（pullMessage方法），指定下次拉取消息请求，然后添加而来
         while (!this.isStopped()) {
             try {
                 // 从拉取请求队列中不断获取拉取消息的请求

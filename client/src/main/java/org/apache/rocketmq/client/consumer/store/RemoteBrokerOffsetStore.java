@@ -153,6 +153,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
      * 持久化指定消息队列数组的消费进度到 Broker，并移除非指定消息队列
      *
      * @param mqs
+     * @see MQClientInstance#startScheduledTask() // 客户端启动定时线程
      */
     @Override
     public void persistAll(Set<MessageQueue> mqs) {

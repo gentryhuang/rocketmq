@@ -284,7 +284,7 @@ public class MappedFileQueue {
     public boolean load() {
         File dir = new File(this.storePath);
 
-        // 获取 CommitLog 文件列表
+        // 获取 CommitLog/ConsumeQueue 文件列表
         File[] files = dir.listFiles();
         if (files != null) {
             // 按照文件名进行排序

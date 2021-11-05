@@ -106,7 +106,9 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 this.consumeRequestQueue,
                 new ThreadFactoryImpl("ConsumeMessageThread_"));
 
+        // 处理消费进度线程池
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("ConsumeMessageScheduledThread_"));
+        // 清理过期消息线程池
         this.cleanExpireMsgExecutors = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("CleanExpireMsgScheduledThread_"));
     }
 

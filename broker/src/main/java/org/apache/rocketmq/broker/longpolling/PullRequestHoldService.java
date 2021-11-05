@@ -150,10 +150,13 @@ public class PullRequestHoldService extends ServiceThread {
     /**
      * 遍历挂起的拉取消息请求，检查要消息是否到来。
      * <p>
-     * 原则：获取指定messageQueue下最大的offset，然后用来和 拉取任务的待拉取偏移量 来比较，来确定是否有新的消息到来。具体实现在 notifyMessageArriving 方法中。
+     * 原则：
+     * 获取指定messageQueue下最大的offset，然后用来和 拉取任务的待拉取偏移量 来比较，来确定是否有新的消息到来。具体实现在 notifyMessageArriving 方法中。
+     * 过程：
+     * checkHoldRequest 方法属于主动检查，它是定时检查所有请求，不区分是针对哪个消息队列的拉取消息请求
      */
     private void checkHoldRequest() {
-        // 遍历拉取请求集合
+        // 遍历拉取请求集合，遍历指定的 Topic 下某个 queue 是否有消息到达
         for (String key : this.pullRequestTable.keySet()) {
             String[] kArray = key.split(TOPIC_QUEUEID_SEPARATOR);
             if (2 == kArray.length) {
@@ -219,7 +222,7 @@ public class PullRequestHoldService extends ServiceThread {
                 // 消息还没有到的请求数组
                 List<PullRequest> replayList = new ArrayList<PullRequest>();
 
-                // 4 遍历每个等待拉取消息的请求
+                // 4 遍历当前 queue 下每个等待拉取消息的请求
                 for (PullRequest request : requestList) {
 
                     // 4.1 如果待拉取偏移量(pullFromThisOffset)大于消息队列的最大有效偏移量，则再次获取消息队列的最大有效偏移量，再给一次机会。
@@ -238,7 +241,7 @@ public class PullRequestHoldService extends ServiceThread {
                             match = request.getMessageFilter().isMatchedByCommitLog(null, properties);
                         }
 
-                        // todo 4.4 如果是感兴趣的消息，则拉取消息，结束长轮询
+                        // todo 4.4 如果是感兴趣的消息，则针对该请求拉取消息，结束长轮询
                         if (match) {
                             try {
                                 // 再次尝试去拉取消息，将拉取的结果响应给客户端。

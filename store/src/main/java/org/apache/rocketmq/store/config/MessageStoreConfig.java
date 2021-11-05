@@ -35,8 +35,7 @@ public class MessageStoreConfig {
      * CommitLog 的存储目录，默认为 $user.home/store/commitlog
      */
     @ImportantField
-    private String storePathCommitLog = System.getProperty("user.home") + File.separator + "store"
-            + File.separator + "commitlog";
+    private String storePathCommitLog = System.getProperty("user.home") + File.separator + "store" + File.separator + "commitlog";
 
     /**
      * 如：每个 Commitlog 文件的大小，默认为 1G
