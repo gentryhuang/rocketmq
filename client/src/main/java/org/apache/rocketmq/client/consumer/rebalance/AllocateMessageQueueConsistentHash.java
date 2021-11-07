@@ -19,6 +19,7 @@ package org.apache.rocketmq.client.consumer.rebalance;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+
 import org.apache.rocketmq.client.consumer.AllocateMessageQueueStrategy;
 import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.common.consistenthash.ConsistentHashRouter;
@@ -28,6 +29,7 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
+ * 一致性哈希
  * Consistent Hashing queue algorithm
  */
 public class AllocateMessageQueueConsistentHash implements AllocateMessageQueueStrategy {
@@ -54,7 +56,7 @@ public class AllocateMessageQueueConsistentHash implements AllocateMessageQueueS
 
     @Override
     public List<MessageQueue> allocate(String consumerGroup, String currentCID, List<MessageQueue> mqAll,
-        List<String> cidAll) {
+                                       List<String> cidAll) {
 
         if (currentCID == null || currentCID.length() < 1) {
             throw new IllegalArgumentException("currentCID is empty");
@@ -69,9 +71,9 @@ public class AllocateMessageQueueConsistentHash implements AllocateMessageQueueS
         List<MessageQueue> result = new ArrayList<MessageQueue>();
         if (!cidAll.contains(currentCID)) {
             log.info("[BUG] ConsumerGroup: {} The consumerId: {} not in cidAll: {}",
-                consumerGroup,
-                currentCID,
-                cidAll);
+                    consumerGroup,
+                    currentCID,
+                    cidAll);
             return result;
         }
 

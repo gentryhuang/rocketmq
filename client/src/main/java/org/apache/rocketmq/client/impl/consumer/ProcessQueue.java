@@ -44,6 +44,7 @@ import org.apache.rocketmq.common.protocol.body.ProcessQueueInfo;
  * PullMessageService然后将消息提交到消费者消费线程池，消息成功消费后从ProcessQueue中移除。
  */
 public class ProcessQueue {
+    // 30s
     public final static long REBALANCE_LOCK_MAX_LIVE_TIME =
             Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockMaxLiveTime", "30000"));
     public final static long REBALANCE_LOCK_INTERVAL = Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockInterval", "20000"));
@@ -156,7 +157,10 @@ public class ProcessQueue {
             try {
                 this.treeMapLock.readLock().lockInterruptibly();
                 try {
-                    if (!msgTreeMap.isEmpty() && System.currentTimeMillis() - Long.parseLong(MessageAccessor.getConsumeStartTimeStamp(msgTreeMap.firstEntry().getValue())) > pushConsumer.getConsumeTimeout() * 60 * 1000) {
+                    if (!msgTreeMap.isEmpty() &&
+                            // 判断消息是否超过最大的消费时间
+                            System.currentTimeMillis() - Long.parseLong(MessageAccessor.getConsumeStartTimeStamp(msgTreeMap.firstEntry().getValue())) >
+                                    pushConsumer.getConsumeTimeout() * 60 * 1000) {
                         msg = msgTreeMap.firstEntry().getValue();
                     } else {
 
@@ -169,9 +173,11 @@ public class ProcessQueue {
                 log.error("getExpiredMsg exception", e);
             }
 
+
+            /* 执行到这里，说明有消息过期，需要重新投递，然后删除内存中的该消息 */
             try {
 
-                // 发回超时消息到 Broker
+                // todo 如果消息超过最大的消费时间仍然没有被消费，则发回超时消息到 Broker
                 pushConsumer.sendMessageBack(msg, 3);
                 log.info("send expire msg back. topic={}, msgId={}, storeHost={}, queueId={}, queueOffset={}", msg.getTopic(), msg.getMsgId(), msg.getStoreHost(), msg.getQueueId(), msg.getQueueOffset());
 
@@ -181,6 +187,7 @@ public class ProcessQueue {
                     try {
                         if (!msgTreeMap.isEmpty() && msg.getQueueOffset() == msgTreeMap.firstKey()) {
                             try {
+                                // todo 移除拉取到内存中超过最大消费时间的消息
                                 removeMessage(Collections.singletonList(msg));
                             } catch (Exception e) {
                                 log.error("send expired msg exception", e);

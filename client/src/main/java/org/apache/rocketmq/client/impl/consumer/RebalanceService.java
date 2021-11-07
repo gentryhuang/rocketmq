@@ -53,7 +53,8 @@ public class RebalanceService extends ServiceThread {
         log.info(this.getServiceName() + " service started");
 
         while (!this.isStopped()) {
-            // 等待一定时间，默认 20s 执行一次负载均衡为消费者分配队列
+
+            // todo 等待一定时间，默认 20s 执行一次负载均衡为消费者分配队列
             this.waitForRunning(waitInterval);
 
             // 为 Consumer 分配消息队列

@@ -16,9 +16,22 @@
  */
 package org.apache.rocketmq.client.impl;
 
+/**
+ * 查找 Broker 的结果
+ * 说明：在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
+ */
 public class FindBrokerResult {
+    /**
+     * Broker 地址
+     */
     private final String brokerAddr;
+    /**
+     * 是否是从节点
+     */
     private final boolean slave;
+    /**
+     * Broker 版本
+     */
     private final int brokerVersion;
 
     public FindBrokerResult(String brokerAddr, boolean slave) {

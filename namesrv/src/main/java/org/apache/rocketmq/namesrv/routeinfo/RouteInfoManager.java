@@ -53,8 +53,7 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
  * <p>
  * todo 特别说明：
  * 1 RocketMQ 中的路由消息是持久化在 Broker 中的，NameSrv 中的路由信息来自 Broker 的心跳包，是存储在内存中的
- * 2 RocketMQ 中的路由消息是基本的 Topic 和其队列配置信息，而 NameSrv 中的路由信息是 Broker 和 Topic 即队列的集合，
- * 毕竟上报信息是某个 Broker 的
+ * 2 Broker 中的路由消息是基本的 Topic 和其队列配置信息，而 NameSrv 中的路由信息是 Broker 和 Topic 即队列的集合，毕竟上报信息是某个 Broker 的
  * 3 客户端（包括发送端和消费端）缓存的路由发布信息格式 <Topic,List<MessageQueue>>，每个 MessageQueue 包含队列的基本信息，如下：
  * - topic
  * - brokerName
@@ -483,7 +482,7 @@ public class RouteInfoManager {
                 // 先从缓存中找 Topic 对应的队列信息
                 List<QueueData> queueDataList = this.topicQueueTable.get(topic);
                 if (queueDataList != null) {
-                    //设置 队列信息
+                    // 1 设置 队列信息
                     topicRouteData.setQueueDatas(queueDataList);
                     foundQueueData = true;
 
@@ -498,10 +497,11 @@ public class RouteInfoManager {
                     for (String brokerName : brokerNameSet) {
                         BrokerData brokerData = this.brokerAddrTable.get(brokerName);
                         if (null != brokerData) {
-                            BrokerData brokerDataClone = new BrokerData(brokerData.getCluster(), brokerData.getBrokerName(), (HashMap<Long, String>) brokerData
-                                    .getBrokerAddrs().clone());
+                            BrokerData brokerDataClone = new BrokerData(brokerData.getCluster(),
+                                    brokerData.getBrokerName(),
+                                    (HashMap<Long, String>) brokerData.getBrokerAddrs().clone());
 
-                            // 设置 Topic 相关的 Broker 信息（是通过 Topic 对应的队列相关的）
+                            // 2 todo 设置 Topic 相关的 Broker 信息（是通过 Topic 对应的队列相关的）
                             brokerDataList.add(brokerDataClone);
 
                             foundBrokerData = true;

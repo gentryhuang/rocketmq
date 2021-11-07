@@ -199,10 +199,10 @@ public class MQClientInstance {
 
         this.mQAdminImpl = new MQAdminImpl(this);
 
-        // 创建拉取消息任务
+        // todo 创建拉取消息任务
         this.pullMessageService = new PullMessageService(this);
         /**
-         * 创建均衡消息队列任务
+         * todo 创建均衡消息队列任务
          */
         this.rebalanceService = new RebalanceService(this);
 
@@ -880,7 +880,7 @@ public class MQClientInstance {
                                     Entry<String, MQConsumerInner> entry = it.next();
                                     MQConsumerInner impl = entry.getValue();
                                     if (impl != null) {
-                                        // todo 更新消费者实例缓存的 topic 订阅队列信息，注意其中是读队列
+                                        // todo 更新消费者实例缓存的 topic 订阅信息到本地，注意其中是读队列
                                         impl.updateTopicSubscribeInfo(topic, subscribeInfo);
                                     }
                                 }

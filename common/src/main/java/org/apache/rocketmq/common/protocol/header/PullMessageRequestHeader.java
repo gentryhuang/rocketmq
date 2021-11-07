@@ -79,6 +79,10 @@ public class PullMessageRequestHeader implements CommandCustomHeader {
      */
     @CFNotNull
     private Long subVersion;
+
+    /**
+     * 订阅过滤类型，如 TAG
+     */
     private String expressionType;
 
     @Override

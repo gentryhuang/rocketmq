@@ -146,7 +146,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         // todo 当没有消息时是否挂起请求
         final boolean hasSuspendFlag = PullSysFlag.hasSuspendFlag(requestHeader.getSysFlag());
 
-        // 是否提交消费进度
+        // 是否提交消费进度（即消费端上报本地的消费进度过来了）
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
         // 是否过滤订阅表达式(subscription)
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
@@ -187,9 +187,11 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         // 是否过滤订阅表达式
         if (hasSubscriptionFlag) {
             try {
+                // 根据拉取消息请求中的 topic、subscription、expressionType ，构建 SubscriptionData
                 subscriptionData = FilterAPI.build(requestHeader.getTopic(), requestHeader.getSubscription(), requestHeader.getExpressionType());
                 // 是否是 Tag 过滤
                 if (!ExpressionType.isTagType(subscriptionData.getExpressionType())) {
+                    // 构建 Tag 过滤数据
                     consumerFilterData = ConsumerFilterManager.build(
                             requestHeader.getTopic(), requestHeader.getConsumerGroup(), requestHeader.getSubscription(),
                             requestHeader.getExpressionType(), requestHeader.getSubVersion()
@@ -207,6 +209,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         } else {
             // 校验 消费分组信息 是否存在
+            // todo 客户端，包括消息生产者和消息消费者都会定时向 Broker 心跳
             ConsumerGroupInfo consumerGroupInfo = this.brokerController.getConsumerManager().getConsumerGroupInfo(requestHeader.getConsumerGroup());
             if (null == consumerGroupInfo) {
                 log.warn("the consumer's group info not exist, group: {}", requestHeader.getConsumerGroup());
@@ -240,6 +243,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 response.setRemark("the consumer's subscription not latest");
                 return response;
             }
+
             if (!ExpressionType.isTagType(subscriptionData.getExpressionType())) {
                 consumerFilterData = this.brokerController.getConsumerFilterManager().get(requestHeader.getTopic(),
                         requestHeader.getConsumerGroup());
@@ -265,16 +269,19 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
+        // 构建消息过滤器
         MessageFilter messageFilter;
         if (this.brokerController.getBrokerConfig().isFilterSupportRetry()) {
             messageFilter = new ExpressionForRetryMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());
+
         } else {
             messageFilter = new ExpressionMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());
         }
 
-        // todo 调用 MessageStore 获取消息的方法，拉取消息
+        // todo 调用 MessageStore 获取消息的方法，查找消息
+        // todo 根据多种情况，返回不同的状态
         final GetMessageResult getMessageResult = this.brokerController.getMessageStore().getMessage(
                 requestHeader.getConsumerGroup(),
                 requestHeader.getTopic(),
@@ -286,11 +293,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         // 根据拉取结果填充 response
         if (getMessageResult != null) {
+            // 设置响应结果
             response.setRemark(getMessageResult.getStatus().name());
             responseHeader.setNextBeginOffset(getMessageResult.getNextBeginOffset());
             responseHeader.setMinOffset(getMessageResult.getMinOffset());
             responseHeader.setMaxOffset(getMessageResult.getMaxOffset());
 
+            // todo 根据是否建议从 slave 拉取消息，设置 BrokerId
             if (getMessageResult.isSuggestPullingFromSlave()) {
                 responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getWhichBrokerWhenConsumeSlowly());
             } else {
@@ -323,7 +332,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
             }
 
-            // 根据查询到的消息状态设置响应状态
+            // todo 根据查询到的消息状态设置 响应状态
             switch (getMessageResult.getStatus()) {
                 // 成功
                 case FOUND:
@@ -560,15 +569,22 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             response.setRemark("store getMessage return null");
         }
 
-        // todo 如果CommitLog标记可用,并且当前Broker为主节点,则更新消息消费进度
+        // todo 如果消费端提交消费进度,并且当前Broker为主节点,则更新消息消费进度
         boolean storeOffsetEnable = brokerAllowSuspend;
         storeOffsetEnable = storeOffsetEnable && hasCommitOffsetFlag;
         storeOffsetEnable = storeOffsetEnable
                 && this.brokerController.getMessageStoreConfig().getBrokerRole() != BrokerRole.SLAVE;
+
+        // todo 消费端提交消费进度过来了
         if (storeOffsetEnable) {
             // 提交消费进度
-            this.brokerController.getConsumerOffsetManager().commitOffset(RemotingHelper.parseChannelRemoteAddr(channel),
-                    requestHeader.getConsumerGroup(), requestHeader.getTopic(), requestHeader.getQueueId(), requestHeader.getCommitOffset());
+            this.brokerController.getConsumerOffsetManager().commitOffset(
+                    RemotingHelper.parseChannelRemoteAddr(channel),
+                    requestHeader.getConsumerGroup(),
+                    requestHeader.getTopic(),
+                    requestHeader.getQueueId(),
+                    requestHeader.getCommitOffset()
+            );
         }
         return response;
     }

@@ -801,6 +801,7 @@ public class DefaultMessageStore implements MessageStore {
         // 3 获取 commitlog 文件中的最大物理偏移量
         final long maxOffsetPy = this.commitLog.getMaxOffset();
 
+
         // 4 根据 topic、queueId 获取消息队列（ConsumeQueue）
         ConsumeQueue consumeQueue = findConsumeQueue(topic, queueId);
         if (consumeQueue != null) {
@@ -809,29 +810,32 @@ public class DefaultMessageStore implements MessageStore {
             //  选中的消息队列，最大编号，todo 最大逻辑偏移量
             maxOffset = consumeQueue.getMaxOffsetInQueue();
 
-            // 6 根据需要拉取消息的偏移量 与 队列最小，最大偏移量进行对比
+            // 6 todo 根据需要拉取消息的偏移量 与 队列最小，最大偏移量进行对比，并修正拉取消息偏移量
 
             // 队列中没有消息
-            // 1）如果是主节点，或者是从节点但开启了offsetCheckSlave的话，下次从头开始拉取。
+            // 1）如果是主节点，或者是从节点但开启了offsetCheckSlave的话，下次从头开始拉取，即 0。
             // 2）如果是从节点，并不开启 offsetCheckSlave,则使用原先的 offset,因为考虑到主从同步延迟的因素，导致从节点consumequeue并没有同步到数据。offsetCheckInSlave设置为false保险点，当然默认该值为false。返回状态码： NO_MESSAGE_IN_QUEUE。
             if (maxOffset == 0) {
                 status = GetMessageStatus.NO_MESSAGE_IN_QUEUE;
                 nextBeginOffset = nextOffsetCorrection(offset, 0);
 
                 // 表示要拉取的偏移量小于队列最小的偏移量
-                // 如果是主节点，或开启了offsetCheckSlave的话，设置下一次拉取的偏移量为minOffset，如果是从节点，并且没有开启offsetCheckSlave,则保持原先的offset,这样的处理应该不合适，因为总是无法满足这个要求 ，返回status : OFFSET_TOO_SMALL,估计会在消息消费拉取端重新从消费进度处获取偏移量，重新拉取。
+                // 如果是主节点，或开启了offsetCheckSlave的话，设置下一次拉取的偏移量为minOffset
+                // 如果是从节点，并且没有开启offsetCheckSlave,则保持原先的offset,这样的处理应该不合适，因为总是无法满足这个要求 ，返回status : OFFSET_TOO_SMALL,估计会在消息消费拉取端重新从消费进度处获取偏移量，重新拉取。
             } else if (offset < minOffset) {
                 status = GetMessageStatus.OFFSET_TOO_SMALL;
                 nextBeginOffset = nextOffsetCorrection(offset, minOffset);
 
-                // 待拉取偏移量为队列最大偏移量，表示超出一个，返回状态：OFFSET_OVERFLOW_ONE，offset 保持不变。
+                // 待拉取偏移量为队列最大偏移量，表示超出一个，返回状态：OFFSET_OVERFLOW_ONE，
+                // 下次 拉取偏移量依然为 offset 保持不变。
             } else if (offset == maxOffset) {
                 status = GetMessageStatus.OFFSET_OVERFLOW_ONE;
                 nextBeginOffset = nextOffsetCorrection(offset, offset);
 
                 // 偏移量越界，返回状态：OFFSET_OVERFLOW_BADLY
-                // 如果为从节点并未开启 offsetCheckSlave,则使用原偏移量，这个是正常的，等待消息到达从服务器。如果是主节点：表示offset是一个非法的偏移量，如果minOffset=0,则设置下一个拉取偏移量为0,否则设置为最大，我感觉设置为0，重新拉取，有可能消息重复，
-                // 设置为最大可能消息会丢失？什么时候会offset > maxOffset(在主节点）拉取完消息，进行第二次拉取时，重点看一下这些状态下，应该还有第二次修正消息的处理。
+                // 如果为从节点并未开启 offsetCheckSlave,则使用原偏移量，这个是正常的，等待消息到达从服务器。
+                // 如果是主节点：表示offset是一个非法的偏移量，如果minOffset=0,则设置下一个拉取偏移量为0,否则设置为最大。
+                // todo 疑问：设置为0，重新拉取，有可能消息重复吧？？？，设置为最大可能消息会丢失？什么时候会offset > maxOffset(在主节点）拉取完消息，进行第二次拉取时，重点看一下这些状态下，应该还有第二次修正消息的处理。
             } else if (offset > maxOffset) {
                 status = GetMessageStatus.OFFSET_OVERFLOW_BADLY;
                 if (0 == minOffset) {
@@ -1541,7 +1545,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 下一个获取队列offset修正
+     * 下一个获取队列 offset 修正
      * 修正条件：主节点 或者 从节点开启校验offset开关
      *
      * @param oldOffset 老队列 offset
@@ -1550,6 +1554,8 @@ public class DefaultMessageStore implements MessageStore {
      */
     private long nextOffsetCorrection(long oldOffset, long newOffset) {
         long nextOffset = oldOffset;
+
+        // 主节点 或者 从节点开启校验offset开关
         if (this.getMessageStoreConfig().getBrokerRole() != BrokerRole.SLAVE || this.getMessageStoreConfig().isOffsetCheckInSlave()) {
             nextOffset = newOffset;
         }

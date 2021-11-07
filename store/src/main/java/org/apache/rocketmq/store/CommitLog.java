@@ -1254,10 +1254,13 @@ public class CommitLog {
         // todo 二、 异步刷盘
         // Asynchronous flush
         else {
-            // 是否开启 内存级别的读写分离机制
+            // 是否开启 内存级别的读写分离机制。
+            // 么有开启
             if (!this.defaultMessageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
                 // 唤醒异步刷盘线程，因为可能此时正处于等待的状态，让它立即醒来处理刷盘
                 flushCommitLogService.wakeup();
+
+                // 开启了
             } else {
                 // 唤醒提交线程，因为可能此时正处于等待的状态，让它立即醒来提交堆外内存到物理文件的内存映射
                 // todo 注意，提交线程提交后也会立即唤醒刷盘线程，可能是同步刷盘的，也可能是异步刷盘的
@@ -1578,7 +1581,7 @@ public class CommitLog {
     /**
      * 提交到物理文件的内存映射中，相当于：
      * 异步刷盘 && 开启内存字节缓冲区
-     * 说明：消息插入成功时，异步刷盘时使用，和 FlushRealTimeService 类似，性能更好
+     * 说明：消息插入成功时，刷盘时使用，和 FlushRealTimeService 类似，性能更好
      */
     class CommitRealTimeService extends FlushCommitLogService {
 
@@ -1626,12 +1629,12 @@ public class CommitLog {
                     boolean result = CommitLog.this.mappedFileQueue.commit(commitDataLeastPages);
                     long end = System.currentTimeMillis();
 
-                    // todo 有数据提交成功，立即唤醒刷盘线程执行刷盘操作
+                    // todo 有数据提交成功，立即唤醒刷盘线程执行刷盘操作。没有等待忽略本次通知即可
                     if (!result) {
                         this.lastCommitTimestamp = end; // result = false means some data committed.
 
                         //now wake up flush thread.
-                        // 如果刷盘线程现在在等待，则立即唤醒它，去刷盘
+                        // 如果刷盘线程现在在等待，则立即唤醒它，去刷盘。
                         flushCommitLogService.wakeup();
                     }
 

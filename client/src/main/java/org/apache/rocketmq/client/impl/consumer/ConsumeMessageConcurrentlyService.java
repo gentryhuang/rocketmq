@@ -124,6 +124,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 cleanExpireMsg();
             }
 
+
+            // todo 以消息消费超时时间为周期时间
         }, this.defaultMQPushConsumer.getConsumeTimeout(), this.defaultMQPushConsumer.getConsumeTimeout(), TimeUnit.MINUTES);
     }
 
@@ -313,7 +315,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
      * 1 RocketMQ为了保证高可用，如果Consumer消费消息失败（只要 回调函数没有返回 CONSUME_SUCCESS）就需要重新让消费者消费该条消息。
      * 2 消息重试的策略是什么？Broker 端采用延迟消息的方式，供Consumer再次消费。
      * 3 更新消费进度
-     * 3.1 LocalFileOffsetStore模式下，将offset信息转化成json保存到本地文件中；RemoteBrokerOffsetStore则offsetTable将需要提交的MessageQueue的offset信息通过MQClientAPIImpl提供的接口updateConsumerOffsetOneway()提交到broker进行持久化存储。
+     * 3.1 LocalFileOffsetStore模式下，将offset信息转化成json保存到本地文件中；RemoteBrokerOffsetStore，offsetTable 需要提交的MessageQueue的offset信息通过MQClientAPIImpl提供的接口updateConsumerOffsetOneway()提交到broker进行持久化存储。
      * 3.2 由于是先消费再更新offset，因此存在消费完成后更新offset失败，但这种情况出现的概率比较低，更新offset只是写到缓存中，是一个简单的内存操作，出错的可能性较低。
      * 3.3 由于offset先存到内存中，再由定时任务每隔10s提交一次，存在丢失的风险，比如当前client宕机等，从而导致更新后的offset没有提交到broker，再次负载时会重复消费。因此consumer的消费业务逻辑需要保证幂等性。
      *
@@ -374,7 +376,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             case CLUSTERING:
                 List<MessageExt> msgBackFailed = new ArrayList<MessageExt>(consumeRequest.getMsgs().size());
 
-                // RECONSUME_LATER 时，ackIndex 为-1，执行循环。CONSUME_SUCCESS 时不会执行循环
+                // RECONSUME_LATER 时，ackIndex 为-1，执行循环。CONSUME_SUCCESS 是不会执行循环
                 for (int i = ackIndex + 1; i < consumeRequest.getMsgs().size(); i++) {
                     MessageExt msg = consumeRequest.getMsgs().get(i);
 
@@ -403,10 +405,21 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 break;
         }
 
+        /**
+         * todo 可能出现消息重复消费的风险。比如如下场景（线程池提交消费进度）：
+         * 1 假设某一个时间点，线程池有 3 个线程在消费消息，它们消费的消息对应在 ConsumeQueue 中的偏移量关系为：t1 < t2 < t3 。由于支持并发消费，如果 t3 先于 t1、t2 完成处理，
+         * 那么 t3 在提交消费进度时是提交 t3 消费的消息 msg3  的消费进度吗？
+         * 2 试想下，如果提交 msg3 的消费进度，此时消费端重启，在 t1、t2 没有消费对应的 msg1,msg2 的情况下，msg1 和 msg2 就不会再被消费了，因为消费进度记录的是 msg3 的，
+         * 这样就会造成 "消息丢失"。
+         * 3 为了避免消息丢失，提交消费进度时不能以哪个消息先被消息就提交它对应的进度，而是提交线程池中偏移量最小的消息的偏移量。这里也就是 t3 并不会提交 msg3 对应的消费进度，而是
+         *   提交线程池中偏移量最小的消息的偏移量，也就是提交的是 mgs1 的偏移量。本质上是利用 ConsumeQueue 对应的 ProcessQueue 中 msgTreeMap 属性，该属性存储的是从 ConsumeQueue 中拉取的消息，针对每个消费
+         *   进度都对应的消息，并且 msgTreeMap 是个 TreeMap 结构，根据消息进度对存储的消息进行了排序。
+         * 4 这种提交策略虽然能避免消息丢失，但同样有消息重复消费的风险。
+         *
+         * todo 顺序消费不会存在这个问题，因为不是并发消费
+         */
+
         // 消息完成消费（消费成功 和 消费失败但发回Broker成功），需要将其从消息处理队列中移除，同时返回ProcessQueue中最小的offset，使用这个offset值更新消费进度
-        // 1 一是已经没有消息了，返回 ProcessQueue最大offset+1
-        // 2 二是还有消息，则返回未消费消息的最小offset
-        // 例子：ProcessQueue中有offset为101-110的10条消息，如果全部消费完了，返回的offset为111；如果101未消费完成，102-110消费完成，则返回的offset为101，这种情况下如果消费者异常退出，会出现重复消费的风险，所以要求消费逻辑幂等。
         long offset = consumeRequest.getProcessQueue().removeMessage(consumeRequest.getMsgs());
 
         // 更新当前消费端的 OffsetStore 中维护的 offsetTable 中的消费位移，offsetTable 记录每个 messageQueue 的消费进度。
@@ -434,6 +447,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         // 1、注意这里：默认为0，其实一直都是0，其它地方没有修改。这表示RocketMQ延迟消息的 延迟级别
         int delayLevel = context.getDelayLevelWhenNextConsume();
 
+        // todo 注意，这里没有对 重试主题 进行处理，在 Broker 端才会进行处理
         // Wrap topic with namespace before sending back message.
         msg.setTopic(this.defaultMQPushConsumer.withNamespace(msg.getTopic()));
         try {
@@ -520,6 +534,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
          */
         @Override
         public void run() {
+            // todo 消费之前先判断消息处理队列是否被废弃。被废弃的场景挺多的，如拉取消息异常（消费偏移量违法、拉取消息超时、队列负载时消息队列被分配给其他的消费者，等等）
             // 废弃处理队列不进行消费
             if (this.processQueue.isDropped()) {
                 log.info("the message queue not be able to consume, because it's dropped. group={} {}", ConsumeMessageConcurrentlyService.this.consumerGroup, this.messageQueue);
@@ -559,6 +574,11 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 // 设置开始消费时间
                 if (msgs != null && !msgs.isEmpty()) {
                     for (MessageExt msg : msgs) {
+                        /**
+                         * todo 给拉取的每条消息在消费前都设置 PROPERTY_CONSUME_START_TIMESTAMP 属性，表示开始消费的时间。用于判断 消息消费是否超时
+                         *
+                         * @see ProcessQueue#cleanExpiredMsg(org.apache.rocketmq.client.consumer.DefaultMQPushConsumer)
+                         */
                         MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
                     }
                 }
@@ -595,7 +615,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                     returnType = ConsumeReturnType.RETURNNULL;
                 }
 
-                // 如果消费时长 >= 15min
+                // 如果消费时长 >= 15min，说明超时
             } else if (consumeRT >= defaultMQPushConsumer.getConsumeTimeout() * 60 * 1000) {
                 returnType = ConsumeReturnType.TIME_OUT;
 
@@ -635,8 +655,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                     .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
             // 处理消费结果
-
-            // 如果消费处理队列被置为无效，恰好消息被消费，则可能导致消息重复消费
+            // 如果消费处理队列被置为无效，恰好消息被消费（此时消费进度不会更新），则可能导致消息重复消费
             // 因此，消息消费要尽最大可能性实现幂等性
 
             // todo 处理消费结果

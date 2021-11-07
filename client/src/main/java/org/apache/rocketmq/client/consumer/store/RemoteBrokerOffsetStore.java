@@ -38,7 +38,10 @@ import org.apache.rocketmq.common.protocol.header.UpdateConsumerOffsetRequestHea
 import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
- * 集群模式消费进度存储，即 Consumer 消费进度管理，负责从 Broker 获取消费进度，同步消费进度到 Broker
+ * 集群模式消费进度存储，即 Consumer 消费进度管理，负责从 Broker 获取消费进度，同步消费进度到 Broker。
+ * - 获取某个 MessageQueue 的消费进度，可以从内存中获取，也可以从 Broker 获取（获取后更新客户端缓存）
+ * - 定期将本地缓存的消费进度上报到 Broker ，Broker 会每 5s 将消息消费偏移量持久化到磁盘文件。
+ * <p>
  * Remote storage implementation
  */
 public class RemoteBrokerOffsetStore implements OffsetStore {
@@ -47,10 +50,12 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
      * MQ 客户端实例，该实例被同一个客户端的消费者、生产者共用
      */
     private final MQClientInstance mQClientFactory;
+
     /**
      * MQ 消费组
      */
     private final String groupName;
+
     /**
      * 内存中的消费进度
      * todo 说明：是针对消息队列的逻辑偏移量
@@ -128,6 +133,8 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
                         // todo 代码逻辑是逻辑偏移量
                         long brokerOffset = this.fetchConsumeOffsetFromBroker(mq);
                         AtomicLong offset = new AtomicLong(brokerOffset);
+
+                        // todo 以 Broker 消费进度为准
                         this.updateOffset(mq, offset.get(), false);
                         return brokerOffset;
                     }

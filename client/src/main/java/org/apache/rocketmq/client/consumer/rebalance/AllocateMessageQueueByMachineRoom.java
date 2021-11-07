@@ -24,7 +24,7 @@ import org.apache.rocketmq.client.consumer.AllocateMessageQueueStrategy;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
- * 平均分配可消费的 Broker 对应的消息队列
+ * 根据 Broker 部署机房名，对每个消费者负载不同的 Broker 上的队列
  * <p>
  * Computer room Hashing queue algorithm, such as Alipay logic room
  */
@@ -42,7 +42,9 @@ public class AllocateMessageQueueByMachineRoom implements AllocateMessageQueueSt
      * @return
      */
     @Override
-    public List<MessageQueue> allocate(String consumerGroup, String currentCID, List<MessageQueue> mqAll,
+    public List<MessageQueue> allocate(String consumerGroup,
+                                       String currentCID,
+                                       List<MessageQueue> mqAll,
                                        List<String> cidAll) {
         List<MessageQueue> result = new ArrayList<MessageQueue>();
         int currentIndex = cidAll.indexOf(currentCID);

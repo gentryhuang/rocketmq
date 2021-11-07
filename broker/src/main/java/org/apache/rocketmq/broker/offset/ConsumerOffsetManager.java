@@ -43,7 +43,7 @@ public class ConsumerOffsetManager extends ConfigManager {
 
     /**
      * todo 消费进度集合，通过该属性就可以对各个 topic 下不同消费组的消费位移进行获取与管理
-     * todo key1: topic@group  以 Topic 和 消费组方式维护的，每个topic下不同消费组的消费进度
+     * todo key1: topic@group  以 Topic 和 消费组方式维护的，即 每个topic下不同消费组的消费进度
      * key2: queueId
      * value: value为消费位移（这里不是offset而是逻辑偏移量）
      */

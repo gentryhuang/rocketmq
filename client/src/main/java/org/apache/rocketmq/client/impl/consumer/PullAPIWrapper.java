@@ -194,7 +194,7 @@ public class PullAPIWrapper {
      * @param offset                     拉取队列开始位置
      * @param maxNums                    拉取消息数量
      * @param sysFlag                    拉取请求系统标识
-     * @param commitOffset               提交的消息进度
+     * @param commitOffset               提交到 Broker 的消费进度
      * @param brokerSuspendMaxTimeMillis Broker 挂起请求最大时间，默认是 15s
      * @param timeoutMillis              请求 Broker 超时时长
      * @param communicationMode          通讯模式
@@ -223,7 +223,8 @@ public class PullAPIWrapper {
         // 获取 Broker 信息
         FindBrokerResult findBrokerResult =
 
-                // 获取 Broker 信息
+                // 根据 brokerName 和 brokerId 获取 Broker 信息
+                // 在整个 RocketMQ Broker 的部署结构中，相同名称的 Broker 构成主从结构，其 BrokerId 会不一样。在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
                 this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(),
                         // 获取 mq 拉取消息对应的 Broker 编号
                         this.recalculatePullFromWhichNode(mq), false);
@@ -259,6 +260,8 @@ public class PullAPIWrapper {
             requestHeader.setQueueOffset(offset);
             requestHeader.setMaxMsgNums(maxNums);
             requestHeader.setSysFlag(sysFlagInner);
+
+            // 提交到 Broker 的消费进度
             requestHeader.setCommitOffset(commitOffset);
             // todo Broker 取消息时暂停时间（没有消息会等待的时间），默认 15s
             requestHeader.setSuspendTimeoutMillis(brokerSuspendMaxTimeMillis);
@@ -266,7 +269,11 @@ public class PullAPIWrapper {
             requestHeader.setSubVersion(subVersion);
             requestHeader.setExpressionType(expressionType);
 
+            // 获取 Broker 地址
             String brokerAddr = findBrokerResult.getBrokerAddr();
+
+            // 如果消息过滤模式为 类过滤，则需要根据主题名称、Broker 地址找到注册在 Broker 上的 FilterServer 地址，
+            // 从 FilterServer 上拉取消息，否则从 Broker 上拉取消息
             if (PullSysFlag.hasClassFilterFlag(sysFlagInner)) {
                 brokerAddr = computePullFromWhichFilterServer(mq.getTopic(), brokerAddr);
             }

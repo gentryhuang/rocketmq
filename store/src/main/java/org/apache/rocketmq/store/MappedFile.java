@@ -494,7 +494,7 @@ public class MappedFile extends ReferenceResource {
             this.writeBuffer = null;
         }
 
-        // 返回写入位置
+        // 返回提交位置
         return this.committedPosition.get();
     }
 

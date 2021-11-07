@@ -335,7 +335,7 @@ public abstract class RebalanceImpl {
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
 
         if (subTable != null) {
-            // todo 遍历消费者订阅数据，以订阅数据为基准，进行队列的分配
+            // todo 遍历消费者订阅数据对每个主题的队列进行负载。 以订阅数据为基准，进行队列的分配
             for (final Map.Entry<String, SubscriptionData> entry : subTable.entrySet()) {
                 // 获取 Topic
                 final String topic = entry.getKey();
@@ -381,6 +381,8 @@ public abstract class RebalanceImpl {
                 Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
 
                 if (mqSet != null) {
+
+                    // todo 传入的是所有队列
                     // 更新该 Topic 下的队列，并返回是否改变
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, mqSet, isOrder);
                     if (changed) {
@@ -451,6 +453,7 @@ public abstract class RebalanceImpl {
                         allocateResultSet.addAll(allocateResult);
                     }
 
+                    // todo 传入的是通过队列分配算法为当前消费者分配的队列集合
                     // todo 更新消息队列
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
                     if (changed) {
@@ -491,7 +494,8 @@ public abstract class RebalanceImpl {
     }
 
     /**
-     * todo 当负载均衡时，更新当前消费客户端的消息队列，并返回是否变更
+     * todo 当负载均衡时，更新当前消费客户端的消息队列。判断该消费者的队列是否发生变化
+     * 遍历 processQueueTable 当前负载队列缓存集合
      * - 移除在processQueueTable && 不存在于 mqSet 里的 消息队列 - 以新的为准
      * - 增加不在processQueueTable && 存在于mqSet 里的 消息队列 - 以新的为准
      * - 即 以 mqSet 为准，
@@ -500,7 +504,7 @@ public abstract class RebalanceImpl {
      * 1 该方法本质是更新当前消费端 分配到的消息队列 与消息处理队列的映射
      * 2 对于当前消费端来说，如果是一个新的消费队列，那么会创建一个拉取消息的请求 PullRequest 对象，用于后续从 Broker 中不断拉取消息队列中消息；以最新分配的队列为准，删除最新队列外的缓存队列。
      * 3 todo 是不是消费端的 消息处理队列缓存大小（当前分配到的消息队列） <= 消息队列大小（消息队列缓存是针对 Topic 初始化的所有消息队列集合）
-     *
+     * <p>
      * todo 关键一点：
      * 消息消费队列在同一消费组不同消费者之间的负载均衡，其核心设计理念是在一个消息消费队列在同一时间只允许被同一消费组内的一个消费者消费，一个消息消费者能同时消费多个消息队列。
      *
@@ -512,7 +516,8 @@ public abstract class RebalanceImpl {
     private boolean updateProcessQueueTableInRebalance(final String topic, final Set<MessageQueue> mqSet, final boolean isOrder) {
         boolean changed = false;
 
-        // 1 移除在 processQueueTable 但 不存在于 maSet 中的消息队列 todo 毕竟要以新的为准
+        // 1 移除在 processQueueTable 但 不存在于 mqSet 中的消息队列 todo 毕竟要以新的为准
+        // todo 这种情况说明，不在 mqSet 集合中的 mq ，经过本次消息队列负载后，被分配给其他消费者了，需要暂停该消息队列消息的消费。
         Iterator<Entry<MessageQueue, ProcessQueue>> it = this.processQueueTable.entrySet().iterator();
         while (it.hasNext()) {
             Entry<MessageQueue, ProcessQueue> next = it.next();
@@ -526,12 +531,14 @@ public abstract class RebalanceImpl {
 
                 // 该 Topic 分配的消息队列不包含 mq，说明该 mq 对应的消息处理队列不可用，废弃它
                 if (!mqSet.contains(mq)) {
+
+                    // todo 废弃 ProcessQueue
                     pq.setDropped(true);
 
-                    // 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息
+                    // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息
                     if (this.removeUnnecessaryMessageQueue(mq, pq)) {
 
-                        // 移除缓存中的该消息队列到消息处理队列的映射关系
+                        // todo 移除缓存中的该消息队列到消息处理队列的映射关系
                         it.remove();
 
                         // 标记当前 topic 下队列分配需要发生变化
@@ -542,6 +549,7 @@ public abstract class RebalanceImpl {
                     // 分配到的消息队列集合包含缓存中的消息队列，需要判断缓存中的消息处理队列是否过期
                     // 队列拉取超时，进行清理
                     // 队列拉取超时，即 当前时间 - 最后一次拉取消息时间 > 120s ( 120s 可配置)，判定发生 BUG，过久未进行消息拉取，移除消息队列
+                    // todo 最后一次拉取消息时间的更新，是在 pullMessage 方法中更新的，主要用来判断 PullMessageService 是否空闲
                 } else if (pq.isPullExpired()) {
                     switch (this.consumeType()) {
                         // 在 Pull 模式下不用管
@@ -589,7 +597,8 @@ public abstract class RebalanceImpl {
                     continue;
                 }
 
-                // 移除消费队列进度缓存，即删除 messageQueue 旧的 offset 信息
+                // todo 移除消费队列进度缓存，即删除 messageQueue 旧的 offset 信息
+                // todo 防御性编程？
                 this.removeDirtyOffset(mq);
 
                 // 创建消息处理队列
@@ -598,7 +607,7 @@ public abstract class RebalanceImpl {
                 long nextOffset = -1L;
                 try {
 
-                    // 获取队列消费进度
+                    // todo 从 Broker 获取队列消费进度，并更新到内存中
                     nextOffset = this.computePullFromWhereWithException(mq);
                 } catch (MQClientException e) {
                     log.info("doRebalance, {}, compute offset failed, {}", consumerGroup, mq);
@@ -606,6 +615,7 @@ public abstract class RebalanceImpl {
                 }
 
 
+                // todo 只有消费进度 >= 0 才认为消费进度正常，等于 -1 就不正常，此时就不能拉取消息
                 if (nextOffset >= 0) {
                     // 添加新消费处理队列
                     ProcessQueue pre = this.processQueueTable.putIfAbsent(mq, pq);

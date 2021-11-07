@@ -1341,7 +1341,7 @@ public class MQClientAPIImpl {
             final int maxConsumeRetryTimes
     ) throws RemotingException, MQBrokerException, InterruptedException {
 
-        // 创建消费重发请求对象，请求码 CONSUMER_SEND_MSG_BACK
+        // todo 创建消费重发请求对象，请求码 CONSUMER_SEND_MSG_BACK
         ConsumerSendMsgBackRequestHeader requestHeader = new ConsumerSendMsgBackRequestHeader();
         /**
          * 具体处理看：

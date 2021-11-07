@@ -81,7 +81,7 @@ public class PullMessageService extends ServiceThread {
     }
 
     /**
-     * 将拉取消息请求放入队列中。有后台线程阻塞等待任务。
+     * 将拉取消息请求立即放入队列中。有后台线程阻塞等待任务。
      *
      * @param pullRequest 拉取消息请求
      */

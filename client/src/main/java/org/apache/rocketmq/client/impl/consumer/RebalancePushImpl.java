@@ -181,7 +181,7 @@ public class RebalancePushImpl extends RebalanceImpl {
     }
 
     /**
-     * 计算消息队列开始消费位置
+     * 计算消息队列开始消费位置，返回 -1 说明，消费进度有问题。
      *
      * @param mq 消息队列
      * @return
@@ -218,6 +218,7 @@ public class RebalancePushImpl extends RebalanceImpl {
                 }
                 // First start,no offset
                 else if (-1 == lastOffset) {
+                    // 如果是重试主题，则按照从头开始消费，即返回 0
                     if (mq.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                         result = 0L;
                     } else {
@@ -251,13 +252,19 @@ public class RebalancePushImpl extends RebalanceImpl {
                 break;
             }
 
-            // 一个新的消费集群第一次启动从指定时间点开始消费。后续再启动接着上次消费的进度开始消费。
+            // 从消费者启动时间戳对应的消费进度开始消费。后续再启动接着上次消费的进度开始消费。
             case CONSUME_FROM_TIMESTAMP: {
                 // 查询当前消费队列消费进度
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
+
+                // >= 0 直接返回
                 if (lastOffset >= 0) {
                     result = lastOffset;
+
+                    // -1 说明消息队列刚创建
                 } else if (-1 == lastOffset) {
+
+                    // 重试队列，从最新位置消费
                     if (mq.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                         try {
                             result = this.mQClientFactory.getMQAdminImpl().maxOffset(mq);
@@ -265,6 +272,9 @@ public class RebalancePushImpl extends RebalanceImpl {
                             log.warn("Compute consume offset from last offset exception, mq={}, exception={}", mq, e);
                             throw e;
                         }
+
+
+                        // 根据消费者启动时间获取消费进度
                     } else {
                         try {
 

@@ -611,7 +611,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
             // 根据消息队列获得消息队列的 锁对象
             // 顺序消息一个消息消费队列同一时刻只会被一个消费线程池处理
-            // 1 第一把锁
+            // todo 1 第一把锁
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
 
             // JVM 加锁（这里加 JVM 锁就够了，因为每个消费方都有自己的队列）
@@ -619,7 +619,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
                 // todo (广播模式) 或者 (集群模式 && 消息处理队列锁有效)
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
-                        // 2 todo 第二把锁
+                        // 2 todo 第二把锁，其实就是 Broker 分布式锁的提现
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
                     // 记录开始时间

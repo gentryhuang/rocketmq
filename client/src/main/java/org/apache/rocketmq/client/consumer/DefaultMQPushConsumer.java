@@ -30,6 +30,7 @@ import org.apache.rocketmq.client.consumer.store.OffsetStore;
 import org.apache.rocketmq.client.exception.MQBrokerException;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.impl.consumer.DefaultMQPushConsumerImpl;
+import org.apache.rocketmq.client.impl.consumer.RebalancePushImpl;
 import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.client.trace.AsyncTraceDispatcher;
 import org.apache.rocketmq.client.trace.TraceDispatcher;
@@ -87,6 +88,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     /**
      * 消费点，即指定消费开始偏移量（最大偏移量、最小偏移量、启动时间戳）开始消费
      * todo 默认为 从消息队列尾部，即跳过历史消息
+     * @see RebalancePushImpl#computePullFromWhereWithException(org.apache.rocketmq.common.message.MessageQueue)
      */
     private ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET;
 
