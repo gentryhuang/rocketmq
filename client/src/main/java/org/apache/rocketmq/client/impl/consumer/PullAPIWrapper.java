@@ -189,7 +189,7 @@ public class PullAPIWrapper {
      *
      * @param mq                         消息队列
      * @param subExpression              订阅表达式
-     * @param expressionType
+     * @param expressionType             过滤类型
      * @param subVersion                 订阅版本号
      * @param offset                     拉取队列开始位置
      * @param maxNums                    拉取消息数量

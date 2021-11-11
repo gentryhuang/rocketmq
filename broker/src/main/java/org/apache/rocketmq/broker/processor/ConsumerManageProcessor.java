@@ -118,8 +118,13 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                         .decodeCommandCustomHeader(UpdateConsumerOffsetRequestHeader.class);
 
         // 处理消费方上报的自己的消费进度
-        this.brokerController.getConsumerOffsetManager().commitOffset(RemotingHelper.parseChannelRemoteAddr(ctx.channel()), requestHeader.getConsumerGroup(),
-                requestHeader.getTopic(), requestHeader.getQueueId(), requestHeader.getCommitOffset());
+        this.brokerController.getConsumerOffsetManager().commitOffset(
+                RemotingHelper.parseChannelRemoteAddr(ctx.channel()),
+                requestHeader.getConsumerGroup(),
+                requestHeader.getTopic(),
+                requestHeader.getQueueId(),
+                requestHeader.getCommitOffset()
+        );
         response.setCode(ResponseCode.SUCCESS);
         response.setRemark(null);
         return response;

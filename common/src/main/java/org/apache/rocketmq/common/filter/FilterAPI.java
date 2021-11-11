@@ -63,7 +63,9 @@ public class FilterAPI {
                     if (tag.length() > 0) {
                         String trimString = tag.trim();
                         if (trimString.length() > 0) {
+                            // todo 保存 tag
                             subscriptionData.getTagsSet().add(trimString);
+                            // todo 保存 tagHashCode
                             subscriptionData.getCodeSet().add(trimString.hashCode());
                         }
                     }

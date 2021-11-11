@@ -85,7 +85,8 @@ import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
- * 消息客户端实例，封装对 Namesrv，Broker 的 API调用，提供给 Producer、Consumer 使用
+ * 1 是 RocketMQ 客户端中的顶层类，大多数情况下，可以简单理解为每个客户端对应一个 MQClientInstance 实例
+ * 2 消息客户端实例，封装对 Namesrv，Broker 的 API调用，提供给 Producer、Consumer 使用
  */
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
@@ -116,6 +117,7 @@ public class MQClientInstance {
      * 网络通信客户端封装类
      */
     private final MQClientAPIImpl mQClientAPIImpl;
+
     private final MQAdminImpl mQAdminImpl;
 
     /**
@@ -254,7 +256,9 @@ public class MQClientInstance {
 
 
         } else {
-            // 从路由信息中获取队列信息
+
+            // todo 从路由信息中获取队列信息
+            // todo 注意，这是 topic 下所有的队列信息，可能这些队列分布在不同的 Broker 上
             List<QueueData> qds = route.getQueueDatas();
             Collections.sort(qds);
 
@@ -287,7 +291,7 @@ public class MQClientInstance {
                         continue;
                     }
 
-                    // todo 根据当前队列的写队列数，创建对应个数的 MessageQueue
+                    // todo 根据当前队列的写队列数，创建对应个数的 MessageQueue。这些队列都分布在 qd.getBrokerName 上
                     // todo 新版支持 16 个，具体多少看路由信息中的值
                     for (int i = 0; i < qd.getWriteQueueNums(); i++) {
                         // 1 对应所属的 Topic
@@ -296,6 +300,7 @@ public class MQClientInstance {
                         MessageQueue mq = new MessageQueue(topic, qd.getBrokerName(), i);
                         info.getMessageQueueList().add(mq);
                     }
+
                 }
             }
             // 非有序消息
@@ -350,7 +355,7 @@ public class MQClientInstance {
                         this.mQClientAPIImpl.fetchNameServerAddr();
                     }
 
-                    // 建立请求-响应通道，链接服务器端
+                    // 建立请求-响应通道，连接服务器端
                     // Start request-response channel
                     this.mQClientAPIImpl.start();
 
@@ -370,10 +375,12 @@ public class MQClientInstance {
                     this.rebalanceService.start();
 
 
-                    // 启动内部默认的生产者，用于消费者 SendMessageBack ，但不会执行 MQClientInstance.start()
+                    // todo 启动内部默认的生产者，用于消费者 SendMessageBack ，但不会执行 MQClientInstance.start()
                     // Start push service
                     this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
                     log.info("the client factory [{}] start OK", this.clientId);
+
+                    // 启动成功
                     this.serviceState = ServiceState.RUNNING;
                     break;
                 case START_FAILED:
@@ -793,7 +800,8 @@ public class MQClientInstance {
      * @param defaultMQProducer
      * @return
      */
-    public boolean updateTopicRouteInfoFromNameServer(final String topic, boolean isDefault,
+    public boolean updateTopicRouteInfoFromNameServer(final String topic,
+                                                      boolean isDefault,
                                                       DefaultMQProducer defaultMQProducer) {
         try {
             // 避免重复从 NameServer 获取配置信息，在这里使用了 ReentrantLock
@@ -812,7 +820,8 @@ public class MQClientInstance {
                         if (topicRouteData != null) {
                             // 获取队列信息
                             for (QueueData data : topicRouteData.getQueueDatas()) {
-                                // 根据生产者默认队列数，即读写队列最大值，默认 4 个 更新队列数目信息
+
+                                // todo 根据生产者默认队列数，即读写队列最大值，默认 4 个 更新队列数目信息
                                 int queueNums = Math.min(defaultMQProducer.getDefaultTopicQueueNums(), data.getReadQueueNums());
                                 data.setReadQueueNums(queueNums);
                                 data.setWriteQueueNums(queueNums);

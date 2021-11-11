@@ -145,10 +145,9 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         // todo 当没有消息时是否挂起请求
         final boolean hasSuspendFlag = PullSysFlag.hasSuspendFlag(requestHeader.getSysFlag());
-
-        // 是否提交消费进度（即消费端上报本地的消费进度过来了）
+        // todo 是否提交消费进度（即消费端上报本地的消费进度过来了）
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
-        // 是否过滤订阅表达式(subscription)
+        // todo 是否过滤订阅表达式(subscription)
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
 
 
@@ -184,17 +183,23 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         // 校验 订阅关系
         SubscriptionData subscriptionData = null;
         ConsumerFilterData consumerFilterData = null;
-        // 是否过滤订阅表达式
+
+        // todo 是否要过滤订阅表达式
         if (hasSubscriptionFlag) {
             try {
-                // 根据拉取消息请求中的 topic、subscription、expressionType ，构建 SubscriptionData
+                // todo 根据拉取消息请求中的 topic、subscription、expressionType ，构建 SubscriptionData
                 subscriptionData = FilterAPI.build(requestHeader.getTopic(), requestHeader.getSubscription(), requestHeader.getExpressionType());
-                // 是否是 Tag 过滤
+
+                // 判断是否是 Tag 过滤
                 if (!ExpressionType.isTagType(subscriptionData.getExpressionType())) {
-                    // 构建 Tag 过滤数据
+
+                    // todo 不是 Tag 模式，则 构建 ConsumerFilterData  过滤对象
                     consumerFilterData = ConsumerFilterManager.build(
-                            requestHeader.getTopic(), requestHeader.getConsumerGroup(), requestHeader.getSubscription(),
-                            requestHeader.getExpressionType(), requestHeader.getSubVersion()
+                            requestHeader.getTopic(),
+                            requestHeader.getConsumerGroup(),
+                            requestHeader.getSubscription(),
+                            requestHeader.getExpressionType(),
+                            requestHeader.getSubVersion()
                     );
                     assert consumerFilterData != null;
                 }
@@ -269,12 +274,15 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 构建消息过滤器
+        // todo 构建消息过滤器
         MessageFilter messageFilter;
+
+        // 支持对重试主题的过滤
         if (this.brokerController.getBrokerConfig().isFilterSupportRetry()) {
             messageFilter = new ExpressionForRetryMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());
 
+            // 不支持对重试主题的过滤
         } else {
             messageFilter = new ExpressionMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());
@@ -288,7 +296,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 requestHeader.getQueueId(),
                 requestHeader.getQueueOffset(),
                 requestHeader.getMaxMsgNums(),
-                messageFilter);
+                messageFilter // 消息过滤器
+        );
 
 
         // 根据拉取结果填充 response

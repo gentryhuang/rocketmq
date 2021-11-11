@@ -88,6 +88,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     /**
      * 消费点，即指定消费开始偏移量（最大偏移量、最小偏移量、启动时间戳）开始消费
      * todo 默认为 从消息队列尾部，即跳过历史消息
+     *
      * @see RebalancePushImpl#computePullFromWhereWithException(org.apache.rocketmq.common.message.MessageQueue)
      */
     private ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET;
@@ -184,7 +185,7 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
     private int pullThresholdSizeForTopic = -1;
 
     /**
-     * 拉模式下任务间隔时间
+     * todo 拉模式下拉取消息的间隔，可以针对消费方消费负担过大的情况进行缓解
      * Message pull Interval
      */
     private long pullInterval = 0;

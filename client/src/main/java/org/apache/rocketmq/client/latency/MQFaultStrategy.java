@@ -139,6 +139,7 @@ public class MQFaultStrategy {
                 // 获取写队列数量
                 int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
                 if (writeQueueNums > 0) {
+
                     // 递增取模算法，选择一个消息队列
                     final MessageQueue mq = tpInfo.selectOneMessageQueue();
 
@@ -156,7 +157,7 @@ public class MQFaultStrategy {
             }
 
             /*  返回任意broker的一个队列 */
-            // 从 Topic 的路由信息中选择一个消息队列，不考虑队列的可用性
+            // todo 基于随机递增取模算法从 Topic 的路由信息中选择一个消息队列，不考虑队列的可用性
             return tpInfo.selectOneMessageQueue();
         }
 

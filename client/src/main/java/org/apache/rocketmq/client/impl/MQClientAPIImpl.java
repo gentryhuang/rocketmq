@@ -166,7 +166,8 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
 /**
- * RocketMQ 网络通信客户端封装类
+ * RocketMQ 网络通信客户端封装类。
+ * todo 即该类封装了客户端服务端的 RPC ，对调用者隐藏了真正网络通信部分的具体实现。
  */
 public class MQClientAPIImpl {
 
@@ -468,6 +469,7 @@ public class MQClientAPIImpl {
 
     /**
      * 发送消息
+     * 说明：消息发送，完成后续序列化和网络传输等步骤。
      *
      * @param addr                     Broker 地址
      * @param brokerName               Broker 名称

@@ -19,23 +19,47 @@ package org.apache.rocketmq.common.subscription;
 
 import org.apache.rocketmq.common.MixAll;
 
+/**
+ * 消费组订阅配置信息
+ */
 public class SubscriptionGroupConfig {
 
+    /**
+     * 消费组
+     */
     private String groupName;
-
+    /**
+     * 是否可以消费
+     */
     private boolean consumeEnable = true;
+    /**
+     * 是否允许允许从队列最小偏移量开始消费
+     */
     private boolean consumeFromMinEnable = true;
-
+    /**
+     * 该消费组是否能以广播模式消费，如果为 false ，表示只能以集群模式消费
+     */
     private boolean consumeBroadcastEnable = true;
-
+    /**
+     * 重试队列个数
+     */
     private int retryQueueNums = 1;
-
+    /**
+     * 消息最大重试次数，默认 16 次
+     */
     private int retryMaxTimes = 16;
 
+    /**
+     * 主节点 ID
+     */
     private long brokerId = MixAll.MASTER_ID;
-
+    /**
+     * 当消费缓慢，将转向 brokerId 的服务器上拉取消息，默认为 1
+     */
     private long whichBrokerWhenConsumeSlowly = 1;
-
+    /**
+     * 当消费发生变化时，是否立即进行消息队列重新负载
+     */
     private boolean notifyConsumerIdsChangedEnable = true;
 
     public String getGroupName() {
@@ -123,7 +147,7 @@ public class SubscriptionGroupConfig {
         result = prime * result + retryMaxTimes;
         result = prime * result + retryQueueNums;
         result =
-            prime * result + (int) (whichBrokerWhenConsumeSlowly ^ (whichBrokerWhenConsumeSlowly >>> 32));
+                prime * result + (int) (whichBrokerWhenConsumeSlowly ^ (whichBrokerWhenConsumeSlowly >>> 32));
         return result;
     }
 
@@ -163,10 +187,10 @@ public class SubscriptionGroupConfig {
     @Override
     public String toString() {
         return "SubscriptionGroupConfig [groupName=" + groupName + ", consumeEnable=" + consumeEnable
-            + ", consumeFromMinEnable=" + consumeFromMinEnable + ", consumeBroadcastEnable="
-            + consumeBroadcastEnable + ", retryQueueNums=" + retryQueueNums + ", retryMaxTimes="
-            + retryMaxTimes + ", brokerId=" + brokerId + ", whichBrokerWhenConsumeSlowly="
-            + whichBrokerWhenConsumeSlowly + ", notifyConsumerIdsChangedEnable="
-            + notifyConsumerIdsChangedEnable + "]";
+                + ", consumeFromMinEnable=" + consumeFromMinEnable + ", consumeBroadcastEnable="
+                + consumeBroadcastEnable + ", retryQueueNums=" + retryQueueNums + ", retryMaxTimes="
+                + retryMaxTimes + ", brokerId=" + brokerId + ", whichBrokerWhenConsumeSlowly="
+                + whichBrokerWhenConsumeSlowly + ", notifyConsumerIdsChangedEnable="
+                + notifyConsumerIdsChangedEnable + "]";
     }
 }

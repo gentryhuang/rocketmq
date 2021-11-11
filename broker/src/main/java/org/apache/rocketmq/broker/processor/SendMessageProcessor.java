@@ -174,14 +174,18 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             this.executeConsumeMessageHookAfter(context);
         }
 
+        // 获取消费组的订阅配置信息
         SubscriptionGroupConfig subscriptionGroupConfig =
                 this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getGroup());
+        // 如果订阅配置信息不存在，则返回订阅配置不存在的错误
         if (null == subscriptionGroupConfig) {
             response.setCode(ResponseCode.SUBSCRIPTION_GROUP_NOT_EXIST);
             response.setRemark("subscription group not exist, " + requestHeader.getGroup() + " "
                     + FAQUrl.suggestTodo(FAQUrl.SUBSCRIPTION_GROUP_NOT_EXIST));
             return CompletableFuture.completedFuture(response);
         }
+
+
         if (!PermName.isWriteable(this.brokerController.getBrokerConfig().getBrokerPermission())) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark("the broker[" + this.brokerController.getBrokerConfig().getBrokerIP1() + "] sending message is forbidden");
@@ -207,7 +211,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         // todo 创建重试 Topic，存在则直接返回
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
                 newTopic,
-                subscriptionGroupConfig.getRetryQueueNums(),
+                subscriptionGroupConfig.getRetryQueueNums(), // 重试队列个数 为1
                 PermName.PERM_WRITE | PermName.PERM_READ, topicSysFlag);
         if (null == topicConfig) {
             response.setCode(ResponseCode.SYSTEM_ERROR);
@@ -230,7 +234,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             return CompletableFuture.completedFuture(response);
         }
 
-        // todo 将原始 Topic 保存到消息的属性中。注意，第一次重试消息 这里为 null
+        // todo 将原始 Topic 保存到消息的 RETRY_TOPIC 属性中。注意，第一次重试消息 这里为 null
         final String retryTopic = msgExt.getProperty(MessageConst.PROPERTY_RETRY_TOPIC);
         if (null == retryTopic) {
             // RETRY_TOPIC 属性保存 Topic
@@ -260,8 +264,9 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
             // todo 创建死信 Topic
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(newTopic,
-                    DLQ_NUMS_PER_GROUP,
-                    PermName.PERM_WRITE, 0);
+                    DLQ_NUMS_PER_GROUP, // 死信队列数为 1
+                    PermName.PERM_WRITE, // 只写权限
+                    0);
 
             if (null == topicConfig) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);

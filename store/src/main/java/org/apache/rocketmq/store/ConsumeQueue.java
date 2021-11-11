@@ -677,8 +677,7 @@ public class ConsumeQueue {
             // 获取对应的数据
             if (mappedFile != null) {
 
-                // todo 通过将该偏移量与物理文件大小取模获取在该文件的偏移量，
-                //  从偏移量开始连续读取 20 字节即可 ？？？ 再看看是否正确
+                // todo 通过将该偏移量与物理文件大小取模获取在该文件的偏移量，从偏移量开始读取该文件所有数据
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer((int) (offset % mappedFileSize));
 
                 return result;

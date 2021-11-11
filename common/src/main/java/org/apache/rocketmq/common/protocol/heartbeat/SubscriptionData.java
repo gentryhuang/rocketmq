@@ -27,29 +27,39 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 订阅数据
+ * 订阅数据信息
  */
 public class SubscriptionData implements Comparable<SubscriptionData> {
+    /**
+     * 过滤模式，默认全匹配
+     */
     public final static String SUB_ALL = "*";
+    /**
+     * 是否是类过滤模式，默认 false
+     */
     private boolean classFilterMode = false;
     /**
      * 订阅的 Topic
      */
     private String topic;
     /**
-     * 订阅表达式原始信息
+     * 消息过滤表达式，多个用 || 隔开，如 tagA||tagB
      */
     private String subString;
     /**
-     * 订阅表达式中分离的 tag
+     * 消息过滤达式中分离的 tag
+     * todo 是消费端过滤时进行消息过滤的依据
      */
     private Set<String> tagsSet = new HashSet<String>();
-
+    /**
+     * 消息过滤达式中分离的 tag 的哈希码
+     * todo 是 Broker 端过滤时的依据
+     */
     private Set<Integer> codeSet = new HashSet<Integer>();
     private long subVersion = System.currentTimeMillis();
 
     /**
-     * 表达式类型
+     * 过滤类型，默认是 TAG。支持 Tag 或 SQL92
      */
     private String expressionType = ExpressionType.TAG;
 

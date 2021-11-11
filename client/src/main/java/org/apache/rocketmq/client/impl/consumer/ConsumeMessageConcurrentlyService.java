@@ -73,7 +73,14 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
      */
     private final String consumerGroup;
 
+    /**
+     * 添加消费任务到 消费线程池 的定时线程池
+     */
     private final ScheduledExecutorService scheduledExecutorService;
+
+    /**
+     * 定时执行过期消息清理的线程池
+     */
     private final ScheduledExecutorService cleanExpireMsgExecutors;
 
     /**
@@ -249,7 +256,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             final MessageQueue messageQueue,
             final boolean dispatchToConsume) {
 
-        // 批量消息的数量
+        // 批量消费的消息数，默认为 1
+        // msgs 默认最多为 32 条消息
         final int consumeBatchSize = this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 
         // 提交消息数小于等于批量消息数，直接提交消费请求
@@ -319,7 +327,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
      * 3.2 由于是先消费再更新offset，因此存在消费完成后更新offset失败，但这种情况出现的概率比较低，更新offset只是写到缓存中，是一个简单的内存操作，出错的可能性较低。
      * 3.3 由于offset先存到内存中，再由定时任务每隔10s提交一次，存在丢失的风险，比如当前client宕机等，从而导致更新后的offset没有提交到broker，再次负载时会重复消费。因此consumer的消费业务逻辑需要保证幂等性。
      *
-     * @param status         消费结果状态
+     * @param status         消费结果状态，成功或消费失败待会重试
      * @param context        上下文
      * @param consumeRequest 消费请求
      */
@@ -332,6 +340,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         int ackIndex = context.getAckIndex();
 
         // 消息为空，直接返回
+        // todo 注意 consumeRequest.getMsgs 默认只会是一条消息。这个集合表示一次消费多少消息，当消费失败时，说明对应的集合中的消息失败了
         if (consumeRequest.getMsgs().isEmpty())
             return;
 
@@ -340,6 +349,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             // 消费成功
             case CONSUME_SUCCESS:
                 if (ackIndex >= consumeRequest.getMsgs().size()) {
+                    // 计算 ackIndex
                     ackIndex = consumeRequest.getMsgs().size() - 1;
                 }
 
@@ -352,6 +362,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
 
             // 消费延迟
             case RECONSUME_LATER:
+                // 设置 ackIndex = -1 ，为下文发送 msg back（ACK）消息做的准备
                 ackIndex = -1;
                 // 统计成功/失败数量
                 this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(),
@@ -396,6 +407,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 // todo 如果发回 Broker 成功，结果因为例如网络异常，导致 Consumer以为发回失败，判定消费发回失败，会导致消息重复消费，
                 //  因此，消息消费要尽最大可能性实现幂等性。
                 if (!msgBackFailed.isEmpty()) {
+                    // 移除发回 Broker 失败的消息，然后继续尝试消费它
                     consumeRequest.getMsgs().removeAll(msgBackFailed);
                     // 提交延迟消费任务
                     this.submitConsumeRequestLater(msgBackFailed, consumeRequest.getProcessQueue(), consumeRequest.getMessageQueue());
@@ -404,6 +416,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             default:
                 break;
         }
+
+        /*---------- 无论消费是成功、还是失败（失败会重发到 Broker 或 发送回 Broker 失败会尝试重新消费该消息），都会尝试更新消费进度 */
 
         /**
          * todo 可能出现消息重复消费的风险。比如如下场景（线程池提交消费进度）：
@@ -546,6 +560,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
 
             // 消费 Context
             ConsumeConcurrentlyContext context = new ConsumeConcurrentlyContext(messageQueue);
+
+
             // 消费结果状态
             ConsumeConcurrentlyStatus status = null;
 
@@ -600,7 +616,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             }
 
 
-            // 消费时间
+            // todo 消费时间
             long consumeRT = System.currentTimeMillis() - beginTimestamp;
 
             // 解析消费返回结果类型
@@ -633,7 +649,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());
             }
 
-            // 消费结果状态为空时(可能出现异常了)则设置为稍后重新消费
+            // todo 消费结果状态为空时(可能出现异常了)也则设置为稍后重新消费
             if (null == status) {
                 log.warn("consumeMessage return null, Group: {} Msgs: {} MQ: {}",
                         ConsumeMessageConcurrentlyService.this.consumerGroup,

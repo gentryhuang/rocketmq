@@ -21,10 +21,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
+
 import org.apache.rocketmq.common.MixAll;
 
 /**
  * Broker 信息
+ * 1 BrokerData 中保存了集群名称 cluster，brokerName 和一个保存 Broker 物理地址的 Map
+ * 2 brokerName 并不真正是某个 Broker 的物理地址，它对应的一组 Broker 节点，包括一个主节点和若干个从节点，
+ * 因此使用一个 brokerAddrs 保存具体的 Broker 物理地址
  */
 public class BrokerData implements Comparable<BrokerData> {
     /**

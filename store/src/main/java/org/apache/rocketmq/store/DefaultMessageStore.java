@@ -891,6 +891,8 @@ public class DefaultMessageStore implements MessageStore {
                                 break;
                             }
 
+
+                            // todo 根据偏移量拉取消息后，根据 ConsuneQueue 条目进行消息过滤。如果不匹配则直接跳过该条消息，继续拉取下一条消息。
                             boolean extRet = false, isTagsCodeLegal = true;
                             if (consumeQueue.isExtAddr(tagsCode)) {
                                 extRet = consumeQueue.getExt(tagsCode, cqExtUnit);
@@ -906,7 +908,7 @@ public class DefaultMessageStore implements MessageStore {
 
                             // 15 todo 执行消息过滤，如果符合过滤条件,则直接进行消息拉取，如果不符合过滤条件，则进入继续执行逻辑，并如果最终符合条件，则将该消息添加到拉取结果中。
                             if (messageFilter != null
-                                    // todo 根据 tag 过滤
+                                    // todo 根据 tag 哈希码 过滤
                                     && !messageFilter.isMatchedByConsumeQueue(isTagsCodeLegal ? tagsCode : null, extRet ? cqExtUnit : null)) {
                                 if (getResult.getBufferTotalSize() == 0) {
                                     status = GetMessageStatus.NO_MATCHED_MESSAGE;
@@ -929,7 +931,7 @@ public class DefaultMessageStore implements MessageStore {
                                 continue;
                             }
 
-                            // 18 从commitlog（全量消息）再次过滤，consumeque 中只能处理 TAG 模式的过滤
+                            // 18 todo 从commitlog（全量消息）再次过滤，consumeque 中只能处理 TAG 模式的过滤
                             if (messageFilter != null
                                     && !messageFilter.isMatchedByCommitLog(selectResult.getByteBuffer().slice(), null)) {
 

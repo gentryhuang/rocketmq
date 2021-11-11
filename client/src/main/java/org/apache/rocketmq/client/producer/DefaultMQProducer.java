@@ -53,6 +53,10 @@ import java.util.concurrent.ExecutorService;
  */
 
 /**
+ * 说明：
+ * 1 DefaultMQProducer 实现了接口 MQProducer，它里面的方法实现大多没有任何的业务逻辑，只是封装了对其他实现类的方法调用，也可以理解为是门面的一部分。
+ * 2 Producer 的大部分业务逻辑的实现都在类 DefaultMQProducerImpl 中
+ * 3 Producer 是一个有状态的服务，在发送消息前需要先启动 Producer
  * 简介：
  * 1 该类是应用用来投递消息的入口，开箱即用，可通过无参构造方法快速创建一个生产者。
  * 2 主要负责消息的发送，支持同步/异步/oneway 的发送方式，这些发送方式均支持批量发送，可以通过该类提供的getter/setter方法，调整发送者的参数。
@@ -65,23 +69,14 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     /*------------------- 字段摘要 -----------------*/
 
     /**
-     * 生产者的内部默认实现：
+     * todo 生产者的内部默认实现：
      * 生产者的内部默认实现，在构造生产者时内部自动初始化，提供了大部分方法的内部实现
-     * <p>
-     * Wrapping internal implementations for virtually all methods presented in this class.
      */
     protected final transient DefaultMQProducerImpl defaultMQProducerImpl;
 
     /**
      * 生产者组：
      * 生产者的分组名称。相同的分组名称表明生产者实例在概念上归属于同一分组。这对事务消息十分重要，如果原始生产者在事务之后崩溃，那么broker可以联系同一生产者分组的不同生产者实例来提交或回滚事务。
-     * <p>
-     * Producer group conceptually aggregates all producer instances of exactly same role, which is particularly
-     * important when transactional messages are involved. </p>
-     * <p>
-     * For non-transactional messages, it does not matter as long as it's unique per process. </p>
-     * <p>
-     * See {@linktourl http://rocketmq.apache.org/docs/core-concept/} for more discussion.
      */
     private String producerGroup;
 
@@ -96,23 +91,23 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     private String createTopicKey = TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC;
 
     /**
-     * 消息生产者对于每个默认主题创建队列的个数
-     * <p>
-     * Number of queues to create per default topic.
+     * todo 这个参数是控制客户端在生产/消费的时候会访问同一个主题的队列数量，主要用于获取默认主题 TBW102 的路由信息时。
+     * 如：TBW102 主题有 100 个队列，对于客户端来说，可能没必要 100 个队列都访问，只需要使用其中的几个队列就行了。
+     * todo 附加：
+     * writeQueueNums 和 readQueueNums 是在服务端来控制每个客户端在生产和消费的时候，分别访问多少个队列。
+     * 这两个参数是服务端参数，优先级是高于客户端控制的参数defaultTopicQueueNums的。一般用于非自动创建主题的情况，
+     * 非自动创建主题，可以在手动创建 Topic 时指定读写队列个数。如果允许自动创建主题，则基于默认主题主题 TBW102 创建
+     * 队列时，队列个数取 Max.min(defaultTopicQueueNums,TBW102主题下队列数（默认8个,todo 这个是系统固定的，启动后不允许在 Consol 上修改))
      */
     private volatile int defaultTopicQueueNums = 4;
 
     /**
      * 发送消息的超时时间，默认值：3000，单位：毫秒
-     * <p>
-     * Timeout for sending messages.
      */
     private int sendMsgTimeout = 3000;
 
     /**
      * 压缩消息体的阈值。大于4K的消息体将默认进行压缩。
-     * <p>
-     * Compress message body threshold, namely, message body larger than 4k will be compressed on default.
      */
     private int compressMsgBodyOverHowmuch = 1024 * 4;
 
@@ -120,10 +115,6 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * 同步模式下内部尝试发送消息的最大次数：
      * 在返回发送失败之前，内部尝试重新发送消息的最大次数。默认值：2，即：默认情况下一条消息最多会被投递3次。
      * 注意：在极端情况下，这可能会导致消息的重复。
-     * <p>
-     * Maximum number of retry to perform internally before claiming sending failure in synchronous mode. </p>
-     * <p>
-     * This may potentially cause message duplication which is up to application developers to resolve.
      */
     private int retryTimesWhenSendFailed = 2;
 
@@ -131,10 +122,6 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * 异步模式下内部尝试发送消息的最大次数：
      * 异步模式下，在发送失败之前，内部尝试重新发送消息的最大次数。默认值：2，即：默认情况下一条消息最多会被投递3次。
      * 注意：在极端情况下，这可能会导致消息的重复。
-     * <p>
-     * Maximum number of retry to perform internally before claiming sending failure in asynchronous mode. </p>
-     * <p>
-     * This may potentially cause message duplication which is up to application developers to resolve.
      */
     private int retryTimesWhenSendAsyncFailed = 2;
 
@@ -142,24 +129,18 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * 是否在内部发送失败时重试另一个broker：
      * 同步模式下，消息保存失败时是否重试其他broker。默认值：false
      * 注意：此配置关闭时，非投递时产生异常情况下，会忽略retryTimesWhenSendFailed配置。
-     * <p>
-     * Indicate whether to retry another broker on sending failure internally.
      */
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 
     /**
      * 消息的最大长度：
      * 消息的最大大小。当消息题的字节数超过maxMessageSize就发送失败。默认值：1024 * 1024 * 4，单位：字节
-     * <p>
-     * Maximum allowed message size in bytes.
      */
     private int maxMessageSize = 1024 * 1024 * 4; // 4M
 
     /**
      * 消息追踪器。使用rcpHook来追踪消息：
      * 在开启消息追踪后，该类通过hook的方式把消息生产者，消息存储的broker和消费者消费消息的信息像链路一样记录下来。在构造生产者时根据构造入参enableMsgTrace来决定是否创建该对象。
-     * <p>
-     * Interface of asynchronous transfer data
      */
     private TraceDispatcher traceDispatcher = null;
 
@@ -331,6 +312,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     @Override
     public void start() throws MQClientException {
         this.setProducerGroup(withNamespace(this.producerGroup));
+        // 调用内部持有的 DefaultMQProducerImpl#start() 方法
         this.defaultMQProducerImpl.start();
         if (null != traceDispatcher) {
             try {

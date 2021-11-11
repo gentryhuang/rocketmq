@@ -369,7 +369,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             }
         }
 
-        // 获取 Topic 对应的订阅信息。若不存在，则延迟拉取消息
+        // todo 获取 Topic 对应的订阅信息。若不存在，则延迟拉取消息
         final SubscriptionData subscriptionData = this.rebalanceImpl.getSubscriptionInner().get(pullRequest.getMessageQueue().getTopic());
         if (null == subscriptionData) {
             this.executePullRequestLater(pullRequest, pullTimeDelayMillsWhenException);
@@ -440,10 +440,13 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                         dispatchToConsume);
 
                                 // 准备下次拉取消息的请求
-                                // 根据拉取频率( pullInterval )，立即提交 或者 延迟拉取消息请求，都是放到拉取请求队列中。默认拉取频率为 0ms ，提交立即拉取消息请求。
+                                // todo 根据拉取频率( pullInterval )，决定是就绪立即拉取还是延迟拉取消息请求
+                                // 如果 默认拉取频率为 0ms ，则提交立即拉取消息请求，否休息一会再拉取。这里可以缓解消费方消费消息的压力
                                 if (DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval() > 0) {
                                     DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest,
                                             DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval());
+
+                                    // 立即拉取
                                 } else {
                                     DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
                                 }
@@ -547,7 +550,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         }
 
 
-        // 计算请求的 订阅表达式 和 是否进行filtersrv过滤消息
+        // todo 计算请求的 订阅表达式 和 是否进行类过滤消息
         String subExpression = null;
         boolean classFilter = false;
 
@@ -562,7 +565,11 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             classFilter = sd.isClassFilterMode();
         }
 
-        // 设置系统标识
+        // todo 设置拉取消息时的系统标识
+        // 1 是否要提交消费进度
+        // 2 是否 suspend
+        // 3 是否进行订阅过滤
+        // 4 是否进行类过滤
         int sysFlag = PullSysFlag.buildSysFlag(
                 commitOffsetEnable, // commitOffsetEnable 提交消费进度到 Broker
                 true, // suspend
@@ -576,13 +583,13 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             // todo 执行消息拉取异步请求，注意，这里是异步。拉取后会将结果传给 pullCallback 的回调中
             this.pullAPIWrapper.pullKernelImpl(
                     pullRequest.getMessageQueue(),
-                    subExpression,
-                    subscriptionData.getExpressionType(),
+                    subExpression, // 订阅表达式
+                    subscriptionData.getExpressionType(), // 过滤类型，默认 Tag
                     subscriptionData.getSubVersion(),
                     pullRequest.getNextOffset(),
                     // Consumer 从 Broker 拉取的待消费消息数量，默认时 32
                     this.defaultMQPushConsumer.getPullBatchSize(),
-                    sysFlag,
+                    sysFlag, // 系统标识
                     commitOffsetValue,
                     BROKER_SUSPEND_MAX_TIME_MILLIS, // Broker 挂起请求最大时间，默认 15s
                     CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND,
@@ -1156,7 +1163,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             // 存储 topic 订阅数据
             this.rebalanceImpl.getSubscriptionInner().put(topic, subscriptionData);
 
-            // 通过心跳同步 Consumer 信息到 Broker
+            // todo 通过心跳同步 Consumer 信息到 Broker
             if (this.mQClientFactory != null) {
                 this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
             }

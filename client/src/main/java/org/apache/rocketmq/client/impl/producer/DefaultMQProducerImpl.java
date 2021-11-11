@@ -120,13 +120,16 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     protected BlockingQueue<Runnable> checkRequestQueue;
     protected ExecutorService checkExecutor;
     /**
-     * 服务状态
+     * 服务状态:
+     * todo RocketMQ 使用一个成员变量 serviceState 来记录和管理自身的服务状态，这实际上是状态模式 (State Pattern) 这种设计模式的变种实现。
      */
     private ServiceState serviceState = ServiceState.CREATE_JUST;
     /**
-     * 客户端实例
+     * 客户端实例。
+     * todo 封装了客户端一些通用的业务逻辑，无论是 Producer 还是 Consumer，最终需要与服务端交互时，都需要调用这个类中的方法
      */
     private MQClientInstance mQClientFactory;
+
     private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>();
     private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5"));
     private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy();
@@ -211,8 +214,18 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      * @throws MQClientException
      */
     public void start(final boolean startFactory) throws MQClientException {
+
+        /**
+         * 与标准的状态模式不同的是，它没有使用状态子类，而是使用分支流程（switch-case）来实现不同状态下的不同行为，在管理比较简单的状态时，使用这种设计会让代码更加简洁.
+         * 说明：
+         *  1 在设计状态的时候，有两个要点是需要注意的，第一是，不仅要设计正常的状态，还要设计中间状态和异常状态，否则，一旦系统出现异常，你的状态就不准确了，你也就很难处理这种异常状态。
+         *  比如在这段代码中，RUNNING 和 SHUTDOWN_ALREADY 是正常状态，CREATE_JUST 是一个中间状态，START_FAILED 是一个异常状态。
+         *  2 将这些状态之间的转换路径考虑清楚，并在进行状态转换的时候，检查上一个状态是否能转换到下一个状态。比如，在这里，只有处于 CREATE_JUST 状态才能转换为 RUNNING 状态，这样就可
+         *    以确保这个服务是一次性的，只能启动一次。从而避免了多次启动服务而导致的各种问题。
+         */
         switch (this.serviceState) {
             case CREATE_JUST:
+                // 临时标记启动失败
                 this.serviceState = ServiceState.START_FAILED;
 
                 // 配置检查
@@ -224,10 +237,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
 
-                // 创建客户端实例
+                // todo 通过一个单例模式的 MQClientManager 获取客户端实例 MQClientInstance
+                // 创建客户端实例 MQClientInstance
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
-                // 向 MQClientInstance 注册消息生产者，将当前生产者加入客户端管理
+                // 向 MQClientInstance 注册消息生产者自己，将当前生产者加入客户端管理
                 // 其实消息生产者的智能是交给 客户端实例完成的
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
 
@@ -244,7 +258,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
 
 
-                // 启动客户端实例
+                // 启动客户端实例 mQClientFactory
                 if (startFactory) {
                     // 启动 mqclient
                     mQClientFactory.start();
@@ -252,6 +266,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
                 log.info("the producer [{}] start OK. sendMessageWithVIPChannel={}", this.defaultMQProducer.getProducerGroup(),
                         this.defaultMQProducer.isSendMessageWithVIPChannel());
+                // 启动成功
                 this.serviceState = ServiceState.RUNNING;
                 break;
             case RUNNING:
@@ -265,7 +280,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 break;
         }
 
-        // 同步发送心跳检测请求向所有的 broker
+        // 同步向所有 Broker 发送心跳检测请求
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         this.timer.scheduleAtFixedRate(new TimerTask() {
@@ -585,8 +600,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     /**
+     * 异步发送消息
      * It will be removed at 4.4.0 cause for exception handling and the wrong Semantics of timeout. A new one will be
      * provided in next version
+     *
+     * todo 异步发送已经废弃，原因如下：
+     *  1 超时时间的计算不准确
+     *  2 异步方法还有改进的空间，其实可以直接结合Netty做到不需要Executor。
      *
      * @param msg
      * @param sendCallback
@@ -596,15 +616,23 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     @Deprecated
     public void send(final Message msg, final SendCallback sendCallback, final long timeout)
             throws MQClientException, RemotingException, InterruptedException {
+
+        // 记录开始时间
         final long beginStartTime = System.currentTimeMillis();
+
+        // 获取异步发送消息执行的线程池
         ExecutorService executor = this.getAsyncSenderExecutor();
+
         try {
+
+            // 当前线程将发送消息任务提交到 executor 就可以返回了
             executor.submit(new Runnable() {
                 @Override
                 public void run() {
                     long costTime = System.currentTimeMillis() - beginStartTime;
                     if (timeout > costTime) {
                         try {
+                            // 异步发送消息
                             sendDefaultImpl(msg, CommunicationMode.ASYNC, sendCallback, timeout - costTime);
                         } catch (Exception e) {
                             sendCallback.onException(e);
@@ -666,7 +694,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             final SendCallback sendCallback,
             final long timeout
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        // 确认 Producer 服务是否正常
+
+        // 确认 Producer 服务状态，只有运行状态才可以执行后续的发送消息流程
         this.makeSureStateOK();
 
         // 检查消息是否合法，topic 以及消息格式和大小
@@ -687,12 +716,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
             // 最后选择消息要发送到的队列
             MessageQueue mq = null;
-
             Exception exception = null;
 
             // 最后一次发送结果
             SendResult sendResult = null;
-            // 同步重试 3 次，异步 1 次
+            // todo 同步重试 3 次，异步 1 次
             int timesTotal = communicationMode == CommunicationMode.SYNC ? 1 + this.defaultMQProducer.getRetryTimesWhenSendFailed() : 1;
             // 第几次发送
             int times = 0;
@@ -700,14 +728,16 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             // 存储每次发送消息选择的 Broker 的名
             String[] brokersSent = new String[timesTotal];
 
-            // 循环发送消息，直到成功
+            // 循环重试发送消息，直到成功或超时
             for (; times < timesTotal; times++) {
 
                 // lastBrokerName 就是上一次选择的执行发送消息失败的 Broker
                 String lastBrokerName = null == mq ? null : mq.getBrokerName();
 
                 // 2 根据负载均衡算法选择一个MessageQueue，即选择消息要发送到的队列
-                // todo 这里没有指定队列选择器，使用的是默认的队列选择器
+                // todo 这里没有指定队列选择器，使用的是默认的选择队列逻辑。结合是否开启延迟规避策略，使用随机递增取模选择队列
+                // todo 其实 RocketMQ 提供了很多 MessageQueueSelector 的实现，例如随机选择策略，哈希选择策略和同机房选择策略，如果需要，你也可以自己实现选择策略
+                // todo 注意和消费端 MessageQueue 负载算法的区别，两者一个是消息生产端，一个是消费端
                 MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
                 if (mqSelected != null) {
                     mq = mqSelected;
@@ -726,8 +756,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             break;
                         }
 
-                        // 向选中的 MessageQueue 发送消息
-                        // 通过 Producer 与Broker的长连接将消息发送给Broker,然后Broker将消息存储，并对发送结果进行封装返回。
+                        // todo 向选中的 MessageQueue 发送消息
+                        // 通过 Producer 与 Broker的长连接将消息发送给Broker,然后Broker将消息存储，并对发送结果进行封装返回。
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
                         endTimestamp = System.currentTimeMillis();
 
@@ -811,11 +841,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 }
             }
 
-            // 返回发送结果
+            // 发送消息是否成功
             if (sendResult != null) {
                 return sendResult;
             }
 
+            /*------------- 执行到这里，说明消息发送失败了，下面逻辑是判断什么原因到的失败 ------------- */
 
             // 根据不同情况，抛出不同的异常
             String info = String.format("Send [%d] times, still failed, cost [%d]ms, Topic: %s, BrokersSent: %s",
@@ -827,6 +858,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             info += FAQUrl.suggestTodo(FAQUrl.SEND_MSG_FAILED);
 
             MQClientException mqClientException = new MQClientException(info, exception);
+
+            // todo 判断消息发送是否超时
             if (callTimeout) {
                 throw new RemotingTooMuchRequestException("sendDefaultImpl call timeout");
             }
@@ -927,7 +960,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         }
 
-
+        // 上下文
         SendMessageContext context = null;
         if (brokerAddr != null) {
             // 是否使用broker vip通道。broker会开启两个端口对外服务。
@@ -1006,15 +1039,15 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeSendMessageHookBefore(context);
                 }
 
-                // todo 构建消息发送请求包 SendMessageRequestHeader
+                // todo 构建消息发送请求头 SendMessageRequestHeader
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
                 // 生产者组
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
                 // 主题
                 requestHeader.setTopic(msg.getTopic());
-                // 默认主题：TBW102
+                // todo 默认主题：TBW102
                 requestHeader.setDefaultTopic(this.defaultMQProducer.getCreateTopicKey());
-                // 主题在单个 Broker 上的默认队列数，默认为 4
+                // todo 主题在单个 Broker 上的默认队列数，默认为 4
                 requestHeader.setDefaultTopicQueueNums(this.defaultMQProducer.getDefaultTopicQueueNums());
                 // 队列 ID（队列序号）
                 requestHeader.setQueueId(mq.getQueueId());
@@ -1024,10 +1057,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 requestHeader.setBornTimestamp(System.currentTimeMillis());
                 // 消息标记（RocketMQ 对消息中的标记不做任何处理，供应用程序使用）
                 requestHeader.setFlag(msg.getFlag());
+
+
                 // 消息扩展属性
+                // todo 包含很多重要的附加功能，如 Topic、queueId 替换套路、tag 存储
                 requestHeader.setProperties(MessageDecoder.messageProperties2String(msg.getProperties()));
 
-                // 消息重试次数
+                // todo 消息重试次数，如果是第一次发送的时候为 0
                 requestHeader.setReconsumeTimes(0);
                 requestHeader.setUnitMode(this.isUnitMode());
                 // 是否是批量消息
@@ -1054,10 +1090,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     }
                 }
 
-
                 // todo 根据消息发送方式（同步、异步、单向）进行网络传输
                 SendResult sendResult = null;
                 switch (communicationMode) {
+                    // 异步
                     case ASYNC:
                         Message tmpMessage = msg;
                         boolean messageCloned = false;
@@ -1083,7 +1119,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                             throw new RemotingTooMuchRequestException("sendKernelImpl call timeout");
                         }
 
-                        // 发送消息
+                        // todo 将消息发送给队列所在的 Broker
                         sendResult = this.mQClientFactory.getMQClientAPIImpl().sendMessage(
                                 brokerAddr,
                                 mq.getBrokerName(),

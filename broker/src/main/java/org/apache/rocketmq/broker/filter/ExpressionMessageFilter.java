@@ -31,17 +31,24 @@ import org.apache.rocketmq.store.MessageFilter;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
+/**
+ * 表达式模式过滤
+ */
 public class ExpressionMessageFilter implements MessageFilter {
 
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.FILTER_LOGGER_NAME);
 
+    /**
+     * 基于消费端拉取消息请求构建的 订阅数据信息
+     */
     protected final SubscriptionData subscriptionData;
     protected final ConsumerFilterData consumerFilterData;
     protected final ConsumerFilterManager consumerFilterManager;
     protected final boolean bloomDataValid;
 
     public ExpressionMessageFilter(SubscriptionData subscriptionData, ConsumerFilterData consumerFilterData,
-        ConsumerFilterManager consumerFilterManager) {
+                                   ConsumerFilterManager consumerFilterManager) {
+
         this.subscriptionData = subscriptionData;
         this.consumerFilterData = consumerFilterData;
         this.consumerFilterManager = consumerFilterManager;
@@ -82,7 +89,7 @@ public class ExpressionMessageFilter implements MessageFilter {
         } else {
             // no expression or no bloom
             if (consumerFilterData == null || consumerFilterData.getExpression() == null
-                || consumerFilterData.getCompiledExpression() == null || consumerFilterData.getBloomFilterData() == null) {
+                    || consumerFilterData.getCompiledExpression() == null || consumerFilterData.getBloomFilterData() == null) {
                 return true;
             }
 
@@ -95,7 +102,7 @@ public class ExpressionMessageFilter implements MessageFilter {
             byte[] filterBitMap = cqExtUnit.getFilterBitMap();
             BloomFilter bloomFilter = this.consumerFilterManager.getBloomFilter();
             if (filterBitMap == null || !this.bloomDataValid
-                || filterBitMap.length * Byte.SIZE != consumerFilterData.getBloomFilterData().getBitNum()) {
+                    || filterBitMap.length * Byte.SIZE != consumerFilterData.getBloomFilterData().getBitNum()) {
                 return true;
             }
 
@@ -107,7 +114,7 @@ public class ExpressionMessageFilter implements MessageFilter {
                 return ret;
             } catch (Throwable e) {
                 log.error("bloom filter error, sub=" + subscriptionData
-                    + ", filter=" + consumerFilterData + ", bitMap=" + bitsArray, e);
+                        + ", filter=" + consumerFilterData + ", bitMap=" + bitsArray, e);
             }
         }
 
@@ -120,10 +127,12 @@ public class ExpressionMessageFilter implements MessageFilter {
             return true;
         }
 
+        // 如果是类过滤模式，则直接返回 true
         if (subscriptionData.isClassFilterMode()) {
             return true;
         }
 
+        // 如果是 Tag ，则直接返回 true
         if (ExpressionType.isTagType(subscriptionData.getExpressionType())) {
             return true;
         }
@@ -133,7 +142,7 @@ public class ExpressionMessageFilter implements MessageFilter {
 
         // no expression
         if (realFilterData == null || realFilterData.getExpression() == null
-            || realFilterData.getCompiledExpression() == null) {
+                || realFilterData.getCompiledExpression() == null) {
             return true;
         }
 

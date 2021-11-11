@@ -63,7 +63,7 @@ public abstract class RebalanceImpl {
     protected final ConcurrentMap<String/* topic */, Set<MessageQueue>> topicSubscribeInfoTable = new ConcurrentHashMap<String, Set<MessageQueue>>();
 
     /**
-     * 订阅数据
+     * 订阅数据信息
      * todo 注意：每个 Topic 都对应一个重试的 Topic。也就是，消费者在订阅时，会自动自订阅 Topic 对应的重试主题
      *
      * @see DefaultMQPushConsumerImpl#copySubscription()

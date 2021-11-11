@@ -904,7 +904,7 @@ public class BrokerController {
     public void start() throws Exception {
 
         /**
-         * 启动存储服务，该服务会启动多个任务，如 CommitLog 重放任务、CommitLog 文件刷盘任务、Consumequeue 刷盘任务、清理过期文件任务等等
+         * todo 启动存储服务，该服务会启动多个任务，如 CommitLog 重放任务、CommitLog 文件刷盘任务、Consumequeue 刷盘任务、清理过期文件任务等等
          */
         if (this.messageStore != null) {
             // DefaultMessageStore.start()

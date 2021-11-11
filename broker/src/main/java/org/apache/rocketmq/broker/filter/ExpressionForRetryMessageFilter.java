@@ -27,12 +27,13 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 
 /**
+ * 对重试主题的过滤
  * Support filter to retry topic.
  * <br>It will decode properties first in order to get real topic.
  */
 public class ExpressionForRetryMessageFilter extends ExpressionMessageFilter {
     public ExpressionForRetryMessageFilter(SubscriptionData subscriptionData, ConsumerFilterData consumerFilterData,
-        ConsumerFilterManager consumerFilterManager) {
+                                           ConsumerFilterManager consumerFilterManager) {
         super(subscriptionData, consumerFilterData, consumerFilterManager);
     }
 
@@ -69,7 +70,7 @@ public class ExpressionForRetryMessageFilter extends ExpressionMessageFilter {
 
         // no expression
         if (realFilterData == null || realFilterData.getExpression() == null
-            || realFilterData.getCompiledExpression() == null) {
+                || realFilterData.getCompiledExpression() == null) {
             return true;
         }
 

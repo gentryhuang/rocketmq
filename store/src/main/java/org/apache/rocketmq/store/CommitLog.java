@@ -243,7 +243,7 @@ public class CommitLog {
             // 计算 offset 在 MappedFile 中的偏移量
             int pos = (int) (offset % mappedFileSize);
 
-            // 获取当前 MappedFile 从传入偏移量到写入范围内容数据 todo 好像不对?
+            // 获取当前 MappedFile 从传入偏移量到写入范围内容数据
             SelectMappedBufferResult result = mappedFile.selectMappedBuffer(pos);
             return result;
         }
@@ -420,15 +420,26 @@ public class CommitLog {
             String keys = "";
             String uniqKey = null;
 
+
+            // todo 处理附加属性
             short propertiesLength = byteBuffer.getShort();
             Map<String, String> propertiesMap = null;
             if (propertiesLength > 0) {
                 byteBuffer.get(bytesContent, 0, propertiesLength);
                 String properties = new String(bytesContent, 0, propertiesLength, MessageDecoder.CHARSET_UTF8);
+
+                // 解析出附加属性
                 propertiesMap = MessageDecoder.string2messageProperties(properties);
+
+                // 取出 KEYS
                 keys = propertiesMap.get(MessageConst.PROPERTY_KEYS);
+
+                // 取出 UNIQ_KEY
                 uniqKey = propertiesMap.get(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
+
+                // 取出 TAGS
                 String tags = propertiesMap.get(MessageConst.PROPERTY_TAGS);
+                // todo 计算 tag 的 hashCode
                 if (tags != null && tags.length() > 0) {
                     tagsCode = MessageExtBrokerInner.tagsString2tagsCode(MessageExt.parseTopicFilterType(sysFlag), tags);
                 }
@@ -447,7 +458,7 @@ public class CommitLog {
                             delayLevel = this.defaultMessageStore.getScheduleMessageService().getMaxDelayLevel();
                         }
 
-                        // 如果是延迟消息
+                        // todo 如果是延迟消息，tagsCode 存储计划消费时间
                         if (delayLevel > 0) {
                             // 计算消息的计划消费时间，延迟级别对应的延迟时间 + 消息存储时间
                             tagsCode = this.defaultMessageStore.getScheduleMessageService().computeDeliverTimestamp(delayLevel, storeTimestamp);
@@ -1223,6 +1234,7 @@ public class CommitLog {
                 service.putRequest(request);
 
 
+                // todo 每个 GroupCommitRequest 对象都包含一个 CompletableFuture
                 // 3 等待同步刷盘任务完成，如果超时则返回 FLUSH_DISK_TIMEOUT 错误
                 CompletableFuture<PutMessageStatus> flushOkFuture = request.future();
                 PutMessageStatus flushStatus = null;

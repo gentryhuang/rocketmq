@@ -263,9 +263,14 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
         if (findBrokerResult != null) {
             // 组装好更新消费进度的 RPC 请求头
             UpdateConsumerOffsetRequestHeader requestHeader = new UpdateConsumerOffsetRequestHeader();
+
+            // topic
             requestHeader.setTopic(mq.getTopic());
+            // 消费组
             requestHeader.setConsumerGroup(this.groupName);
+            // queueId
             requestHeader.setQueueId(mq.getQueueId());
+            // queue 的偏移量
             requestHeader.setCommitOffset(offset);
 
             if (isOneway) {

@@ -48,8 +48,8 @@ import org.apache.rocketmq.common.sysflag.TopicSysFlag;
 import org.apache.rocketmq.remoting.common.RemotingUtil;
 
 /**
- * NameServer 数据的载体，记录 Broker 、Topic 等信息
- * 即：主要的两个功能，Broker 管理和路由信息管理
+ * NameServer 数据的载体，记录 Broker 、Topic 等信息。注意，这些信息都是保存在内存中，并且没有持久化。
+ * 即：主要的两个功能，Broker 管理和路由信息管理，即保存了集群所有的 Broker 和主题的路由信息
  * <p>
  * todo 特别说明：
  * 1 RocketMQ 中的路由消息是持久化在 Broker 中的，NameSrv 中的路由信息来自 Broker 的心跳包，是存储在内存中的
@@ -58,6 +58,7 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
  * - topic
  * - brokerName
  * - queueId
+ * 4 在 NameServer 的 RouteInfoManager 中，主要的路由信息就是由 topicQueueTable 和 brokerAddrTable 这两个 Map 来保存的。
  */
 public class RouteInfoManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
@@ -71,14 +72,18 @@ public class RouteInfoManager {
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
     /**
      * 存放 Topic 的队列信息
-     * 主题与队列关系，记录一个主题的队列分布在哪些 Broker 上，每个 Broker 上存在该主题的队列个数
+     * 1 主题与队列关系，记录一个主题的队列分布在哪些 Broker 上，每个 Broker 上存在该主题的队列个数
+     * 2 todo 每个队列信息对应的类 QueueData 中，还保存了 brokerName。需要注意的是，这个 brokerName 并不真正是某个 Broker 的物理地址，
+     * 它对应的一组 Broker 节点，包括一个主节点和若干个从节点。
      */
     private final HashMap<String/* topic */, List<QueueData>> topicQueueTable;
     /**
-     * 存放 Broker 们的信息
+     * 存放集群中 Broker 们的信息
      * 所有 Broker 信息，使用 brokerName 作为 key，BrokerData 信息描述每个 Broker 信息
      */
     private final HashMap<String/* brokerName */, BrokerData> brokerAddrTable;
+
+
     /**
      * Broker 集群信息，每个集群包含哪些 Broker
      */
@@ -88,6 +93,10 @@ public class RouteInfoManager {
      * 该机制也是导致当一个 Broker 进程假死后，消息生产者无法立即感知，可能继续向其发送消息，导致失败（非高可用）
      */
     private final HashMap<String/* brokerAddr */, BrokerLiveInfo> brokerLiveTable;
+
+    /**
+     * 保存了每个 Broker 对应的消息过滤服务的地址，用于服务端消息过滤。
+     */
     private final HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;
 
     public RouteInfoManager() {
@@ -318,7 +327,7 @@ public class RouteInfoManager {
                 if (qd.getBrokerName().equals(brokerName)) {
 
                     // 队列也相同，则不需要新增
-                    // todo 即 NameSrv 中只要存在一个相同的队列，就不需要新增
+                    // todo 即 NameSrv 中缓存的 Topic 队列信息，一个 Broker 下对应部分队列。
                     if (qd.equals(queueData)) {
                         addNewOne = false;
 

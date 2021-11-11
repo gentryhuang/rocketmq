@@ -185,7 +185,7 @@ public class ScheduleMessageService extends ConfigManager {
                 // 延时时间
                 Long timeDelay = entry.getValue();
 
-                // 根据延时级别获取对应的偏移量，即 level 级别对应队列的偏移量
+                // todo 根据延时级别获取对应的偏移量，即 level 级别对应队列的偏移量
                 Long offset = this.offsetTable.get(level);
                 if (null == offset) {
                     offset = 0L;
@@ -389,7 +389,7 @@ public class ScheduleMessageService extends ConfigManager {
                         int i = 0;
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
 
-                        // 2.1 每个扫描任务主要是把队列中所有到期的消息索引都拿出来除
+                        // 2.1 每个扫描任务主要是把队列中所有到期的消息索引都拿出来
                         // 步长是 20,结束条件是： i< bufferCQ.getSize()
                         for (; i < bufferCQ.getSize(); i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
                             // 在 Commitlog 中的偏移量
@@ -514,6 +514,7 @@ public class ScheduleMessageService extends ConfigManager {
                     // 消费队列已经被删除部分，跳转到最小的消费进度
                     long cqMinOffset = cq.getMinOffsetInQueue();
                     if (offset < cqMinOffset) {
+                        // todo 下次拉取从最小偏移量开始
                         failScheduleOffset = cqMinOffset;
                         log.error("schedule CQ offset invalid. offset=" + offset + ", cqMinOffset="
                                 + cqMinOffset + ", queueId=" + cq.getQueueId());
@@ -521,6 +522,7 @@ public class ScheduleMessageService extends ConfigManager {
                 }
             } // end of if (cq != null)
 
+            // 下次拉取任务，注意消费进度起始位置
             ScheduleMessageService.this.timer.schedule(new DeliverDelayedMessageTimerTask(this.delayLevel,
                     failScheduleOffset), DELAY_FOR_A_WHILE);
         }
@@ -547,6 +549,8 @@ public class ScheduleMessageService extends ConfigManager {
             msgInner.setBornTimestamp(msgExt.getBornTimestamp());
             msgInner.setBornHost(msgExt.getBornHost());
             msgInner.setStoreHost(msgExt.getStoreHost());
+
+            // todo 重试次数
             msgInner.setReconsumeTimes(msgExt.getReconsumeTimes());
 
             msgInner.setWaitStoreMsgOK(false);

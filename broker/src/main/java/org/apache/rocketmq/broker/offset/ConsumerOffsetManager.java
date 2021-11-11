@@ -42,7 +42,7 @@ public class ConsumerOffsetManager extends ConfigManager {
     private static final String TOPIC_GROUP_SEPARATOR = "@";
 
     /**
-     * todo 消费进度集合，通过该属性就可以对各个 topic 下不同消费组的消费位移进行获取与管理
+     * todo 消费进度集合。针对某个 topic 为不同消费组 维护消费进度
      * todo key1: topic@group  以 Topic 和 消费组方式维护的，即 每个topic下不同消费组的消费进度
      * key2: queueId
      * value: value为消费位移（这里不是offset而是逻辑偏移量）
@@ -129,6 +129,7 @@ public class ConsumerOffsetManager extends ConfigManager {
 
     /**
      * 提交消费进度
+     * todo 基于某个 topic 为每个消费组维护一份消费进度。消费进度基于 queue
      *
      * @param clientHost 提交client地址
      * @param group      消费分组
@@ -136,10 +137,15 @@ public class ConsumerOffsetManager extends ConfigManager {
      * @param queueId    队列编号
      * @param offset     进度（队列位置）
      */
-    public void commitOffset(final String clientHost, final String group, final String topic, final int queueId,
+    public void commitOffset(final String clientHost,
+                             final String group,
+                             final String topic,
+                             final int queueId,
                              final long offset) {
-        // topic@group
+        // 1 todo  topic@group，为每个消费组维护一份消费进度
         String key = topic + TOPIC_GROUP_SEPARATOR + group;
+
+        // 2 保存消费进度
         this.commitOffset(clientHost, key, queueId, offset);
     }
 

@@ -32,6 +32,13 @@ public class DefaultMessageFilter implements MessageFilter {
         this.subscriptionData = subscriptionData;
     }
 
+    /**
+     * 根据 ConsumeQueue 判断消息是否匹配
+     *
+     * @param tagsCode  tagsCode 消息标志的 哈希码
+     * @param cqExtUnit extend unit of consume queue ConsumeQueue 条目扩展属性
+     * @return
+     */
     @Override
     public boolean isMatchedByConsumeQueue(Long tagsCode, ConsumeQueueExt.CqExtUnit cqExtUnit) {
         // 消息tagsCode 空
@@ -48,6 +55,13 @@ public class DefaultMessageFilter implements MessageFilter {
                 || subscriptionData.getCodeSet().contains(tagsCode.intValue());
     }
 
+    /**
+     * 根据存储在 CommitLog 文件中的内存判断消息是否匹配
+     *
+     * @param msgBuffer  message buffer in commit log, may be null if not invoked in store. 消息内从，如果为空，该方法返回 true
+     * @param properties message properties, should decode from buffer if null by yourself.
+     * @return
+     */
     @Override
     public boolean isMatchedByCommitLog(ByteBuffer msgBuffer, Map<String, String> properties) {
         return true;

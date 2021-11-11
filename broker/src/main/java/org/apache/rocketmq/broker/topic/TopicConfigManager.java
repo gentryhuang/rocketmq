@@ -41,6 +41,9 @@ import org.apache.rocketmq.common.topic.TopicValidator;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
+/**
+ * Topic 配置管理，会定时持久化并上报到 NameServer
+ */
 public class TopicConfigManager extends ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private static final long LOCK_TIMEOUT_MILLIS = 3000;
@@ -233,13 +236,14 @@ public class TopicConfigManager extends ConfigManager {
                             }
                         }
 
-                        // 如果topic允许继承，此处假设默认topic是 TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC ，那么是允许可继承，即此处为true
+                        // todo 如果topic允许继承，此处假设默认topic是 TBW102 ，那么是允许可继承，即此处为true
                         // 基于 TBW102 构建目标 Topic
                         if (PermName.isInherited(defaultTopicConfig.getPerm())) {
                             // todo topic 是发送消息的 Topic
                             topicConfig = new TopicConfig(topic);
 
-                            // 取写队列大小，注意和传入的队列大小（4）进行对比，二者取小，默认队列是 16
+                            // 取写队列大小，
+                            // todo 默认 Topic 的写队列大小 和传入的队列大小（是 DefaultMQProducer.defaultTopicQueueNums 的值 4）进行对比，二者取小，默认主题队列数为 8
                             int queueNums = Math.min(clientDefaultTopicQueueNums, defaultTopicConfig.getWriteQueueNums());
                             if (queueNums < 0) {
                                 queueNums = 0;

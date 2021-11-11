@@ -30,7 +30,7 @@ public class DemoPushConsumer {
 
         // Subscribe one more more topics to consume.
         // 订阅主题
-        consumer.subscribe("TopicTest", "*");
+        consumer.subscribe("hlb_topic", "*");
 
         // Register callback to execute on arrival of messages fetched from brokers.
         // 注册要在从代理获取的消息到达时执行的回调，即注册消息监听器

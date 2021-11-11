@@ -136,6 +136,11 @@ public class Message implements Serializable {
         return this.getProperty(MessageConst.PROPERTY_TAGS);
     }
 
+    /**
+     * TAGS 属性
+     *
+     * @param tags
+     */
     public void setTags(String tags) {
         this.putProperty(MessageConst.PROPERTY_TAGS, tags);
     }

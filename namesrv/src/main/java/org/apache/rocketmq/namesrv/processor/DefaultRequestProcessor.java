@@ -61,7 +61,7 @@ import org.apache.rocketmq.remoting.netty.NettyRequestProcessor;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
- * NameSrv 端 默认请求处理器
+ * NameSrv 端 负责处理客户端和 Broker 发送过来的 RPC 请求的处理器。
  */
 public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implements NettyRequestProcessor {
     private static InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);

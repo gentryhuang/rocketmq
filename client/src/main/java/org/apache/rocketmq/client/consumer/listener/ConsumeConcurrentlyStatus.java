@@ -16,6 +16,9 @@
  */
 package org.apache.rocketmq.client.consumer.listener;
 
+/**
+ * 并发消费状态，成功或失败待会重试
+ */
 public enum ConsumeConcurrentlyStatus {
     /**
      * Success consumption
