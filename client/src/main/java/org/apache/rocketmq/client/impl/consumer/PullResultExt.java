@@ -26,6 +26,9 @@ import org.apache.rocketmq.common.message.MessageExt;
  * 拉取消息结果
  */
 public class PullResultExt extends PullResult {
+    /**
+     * 下次拉取消息建议拉取的 BrokerID
+     */
     private final long suggestWhichBrokerId;
     private byte[] messageBinary;
 

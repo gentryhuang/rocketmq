@@ -173,6 +173,8 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
         for (Map.Entry<MessageQueue, AtomicLong> entry : this.offsetTable.entrySet()) {
             MessageQueue mq = entry.getKey();
             AtomicLong offset = entry.getValue();
+
+            // todo offset != null 才会更新
             if (offset != null) {
                 if (mqs.contains(mq)) {
                     try {
@@ -254,7 +256,11 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
     @Override
     public void updateConsumeOffsetToBroker(MessageQueue mq, long offset, boolean isOneway) throws RemotingException,
             MQBrokerException, InterruptedException, MQClientException {
+
+        // 根据消息队列所在的 Broker 的名称，获取 Broker 地址
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInAdmin(mq.getBrokerName());
+
+        // 如果没有找到，则从 NameServer 上重新拉取 Topic 的路由信息
         if (null == findBrokerResult) {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(mq.getTopic());
             findBrokerResult = this.mQClientFactory.findBrokerAddressInAdmin(mq.getBrokerName());
@@ -275,10 +281,14 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
 
             if (isOneway) {
                 this.mQClientFactory.getMQClientAPIImpl().updateConsumerOffsetOneway(
-                        findBrokerResult.getBrokerAddr(), requestHeader, 1000 * 5);
+                        findBrokerResult.getBrokerAddr(),
+                        requestHeader,
+                        1000 * 5);
             } else {
                 this.mQClientFactory.getMQClientAPIImpl().updateConsumerOffset(
-                        findBrokerResult.getBrokerAddr(), requestHeader, 1000 * 5);
+                        findBrokerResult.getBrokerAddr(),
+                        requestHeader,
+                        1000 * 5);
             }
         } else {
             throw new MQClientException("The broker[" + mq.getBrokerName() + "] not exist", null);

@@ -117,6 +117,7 @@ public class MessageStoreConfig {
     // When to delete,default is at 4 am
     @ImportantField
     private String deleteWhen = "04";
+
     // 磁盘空间占用率
     private int diskMaxUsedSpaceRatio = 75;
 
@@ -182,6 +183,10 @@ public class MessageStoreConfig {
     @ImportantField
     private boolean messageIndexSafe = false;
     private int haListenPort = 10912;
+
+    /**
+     * 主服务器与从服务器的高可用心跳发送时间间隔默认为 5s
+     */
     private int haSendHeartbeatInterval = 1000 * 5;
     private int haHousekeepingInterval = 1000 * 20;
     private int haTransferBatchSize = 1024 * 32;
@@ -205,6 +210,8 @@ public class MessageStoreConfig {
     private long flushDelayOffsetInterval = 1000 * 10;
     @ImportantField
     private boolean cleanFileForciblyEnable = true;
+
+
     private boolean warmMapedFileEnable = false;
     private boolean offsetCheckInSlave = false;
     private boolean debugLockEnable = false;
@@ -384,6 +391,11 @@ public class MessageStoreConfig {
         this.deleteWhen = deleteWhen;
     }
 
+    /**
+     * 获取 CommitLog、ConsumeQueue 文件所在磁盘分区的最大使用量
+     *
+     * @return
+     */
     public int getDiskMaxUsedSpaceRatio() {
         if (this.diskMaxUsedSpaceRatio < 10)
             return 10;

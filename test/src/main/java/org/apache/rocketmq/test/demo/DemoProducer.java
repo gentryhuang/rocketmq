@@ -24,7 +24,7 @@ public class DemoProducer {
         producer.setNamesrvAddr("localhost:9876");
         //Launch the instance.
         producer.start();
-        for (int i = 0; i < 1; i++) {
+        for (int i = 0; i < 5; i++) {
             //Create a message instance, specifying topic, tag and message body.
 
             // TopicTest

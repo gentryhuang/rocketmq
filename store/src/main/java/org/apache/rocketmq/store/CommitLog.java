@@ -206,12 +206,20 @@ public class CommitLog {
         return this.mappedFileQueue.remainHowManyDataToFlush();
     }
 
+    /**
+     * 删除过期文件
+     *
+     * @param expiredTime         过期时间戳
+     * @param deleteFilesInterval 删除文件间的间隔时间
+     * @param intervalForcibly    第一次拒绝删除之后能保留文件的最大时间
+     * @param cleanImmediately    是否立即删除
+     * @return
+     */
     public int deleteExpiredFile(
             final long expiredTime,
             final int deleteFilesInterval,
             final long intervalForcibly,
-            final boolean cleanImmediately
-    ) {
+            final boolean cleanImmediately) {
         return this.mappedFileQueue.deleteExpiredFileByTime(expiredTime, deleteFilesInterval, intervalForcibly, cleanImmediately);
     }
 
@@ -467,6 +475,7 @@ public class CommitLog {
                 }
             }
 
+            // 计算消息长度
             int readLength = calMsgLength(sysFlag, bodyLen, topicLen, propertiesLength);
             if (totalSize != readLength) {
                 doNothingForDeadCode(reconsumeTimes);
@@ -812,9 +821,9 @@ public class CommitLog {
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).incrementAndGet();
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).addAndGet(result.getWroteBytes());
 
-        // 提交刷盘请求
+        // todo 提交刷盘请求
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, msg);
-        // 提交复制请求
+        // todo 提交复制请求
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, msg);
 
 
@@ -1129,7 +1138,7 @@ public class CommitLog {
         // 7 根据刷盘策略刷盘，即持久化到文件。前面的流程实际未存储到硬盘。
         handleDiskFlush(result, putMessageResult, msg);
 
-        // 8 执行 HA 主从同步复制
+        // 8 todo 执行 HA 主从同步复制
         handleHA(result, putMessageResult, msg);
 
         return putMessageResult;
@@ -1143,20 +1152,36 @@ public class CommitLog {
      * @return
      */
     public CompletableFuture<PutMessageStatus> submitFlushRequest(AppendMessageResult result, MessageExt messageExt) {
-        // Synchronization flush
+
+        // Synchronization flush 同步刷盘
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
+
+            // 是否等待存储消息成功
             if (messageExt.isWaitStoreMsgOK()) {
-                GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes(),
+
+                // 创建刷盘请求对象
+                // 提交的刷盘点(就是预计刷到哪里)：result.getWroteOffset() + result.getWroteBytes()
+                // 刷盘超时时间
+                GroupCommitRequest request = new GroupCommitRequest(
+                        result.getWroteOffset() + result.getWroteBytes(),
                         this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
+
+                // 加入到刷盘任务队列
                 service.putRequest(request);
+
+                // 返回刷盘结果 CompletableFuture
                 return request.future();
+
+
+                // 无需等待存储消息结果
             } else {
                 service.wakeup();
                 return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
             }
         }
-        // Asynchronous flush
+
+        // Asynchronous flush 异步刷盘
         else {
             if (!this.defaultMessageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
                 flushCommitLogService.wakeup();
@@ -1168,32 +1193,34 @@ public class CommitLog {
     }
 
     /**
-     * 提交复制请求
+     * 提交复制请求 - 异步
      *
      * @param result
      * @param messageExt
      * @return
      */
     public CompletableFuture<PutMessageStatus> submitReplicaRequest(AppendMessageResult result, MessageExt messageExt) {
-        // 当前 Broker 是同步 Master
+        // 当前 Broker 是 Master 才会处理复制请求
         if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
 
             // 获取 HA 服务，主从同步实现服务
             HAService service = this.defaultMessageStore.getHaService();
 
-            // 是否是等待存储后返回
+            // 是否等待存储后返回 - 是否等待复制完成
             if (messageExt.isWaitStoreMsgOK()) {
+
                 if (service.isSlaveOK(result.getWroteBytes() + result.getWroteOffset())) {
 
                     // 创建同步刷盘请求对象
+                    // todo 提交的复制点: result.getWroteOffset() + result.getWroteBytes()
                     GroupCommitRequest request = new GroupCommitRequest(
                             result.getWroteOffset() + result.getWroteBytes(),
                             this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
 
-                    // 向 HAService 提交同步刷盘请求
+                    // todo 向 HAService 提交同步刷盘请求
                     service.putRequest(request);
 
-                    // 唤醒，执行刷盘
+                    // todo 唤醒，执行刷盘
                     service.getWaitNotifyObject().wakeupAll();
 
                     // 注意，这里返回的不是同步结果，而是一个 CompletableFuture，该 complete 方法会在消息被复制到从节点后被调用
@@ -1203,7 +1230,67 @@ public class CommitLog {
                 }
             }
         }
+
+        // 当前 Broker 非 Master
         return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
+    }
+
+
+    /**
+     * 同步阻塞等待复制结果
+     *
+     * @param result
+     * @param putMessageResult
+     * @param messageExt
+     */
+    public void handleHA(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
+        // 当前 Broker 是 Master
+        if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
+
+            // 获取主从同步核心实现对象
+            HAService service = this.defaultMessageStore.getHaService();
+
+            // 是否等待复制完成
+            if (messageExt.isWaitStoreMsgOK()) {
+                // Determine whether to wait
+                if (service.isSlaveOK(result.getWroteOffset() + result.getWroteBytes())) {
+
+                    // 创建同步复制请求，并将同步复制请求加入到任务队列中
+                    // todo 会有同步复制任务判断复制是否完成，判断的依据是： result.getWroteOffset() + result.getWroteBytes()
+                    // todo 注意：同步复制任务处理 GroupCommitRequest 请求并不是执行复制，而是判断复制是否完成。复制工作不是通过同步复制任务来完成的，而是通过主服务器和从服务器通信完成的。
+                    GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes());
+                    service.putRequest(request);
+
+                    // 唤醒任务，去判断复制是否成功
+                    service.getWaitNotifyObject().wakeupAll();
+                    PutMessageStatus replicaStatus = null;
+                    try {
+
+                        // 同步等待复制结果，直到有结果返回或超时。
+                        // 注意，这里等待复制结果超时时间和同步刷盘超时时间一致
+                        replicaStatus = request.future().get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
+                                TimeUnit.MILLISECONDS);
+
+                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                    }
+
+                    // 如果同步失败，则返回失败
+                    if (replicaStatus != PutMessageStatus.PUT_OK) {
+                        log.error("do sync transfer other node, wait return, but failed, topic: " + messageExt.getTopic() + " tags: "
+                                + messageExt.getTags() + " client address: " + messageExt.getBornHostNameString());
+                        putMessageResult.setPutMessageStatus(PutMessageStatus.FLUSH_SLAVE_TIMEOUT);
+                    }
+                }
+
+                // 从服务器异常
+                // Slave problem
+                else {
+                    // Tell the producer, slave not available
+                    putMessageResult.setPutMessageStatus(PutMessageStatus.SLAVE_NOT_AVAILABLE);
+                }
+            }
+        }
+
     }
 
     /**
@@ -1281,46 +1368,6 @@ public class CommitLog {
         }
     }
 
-    /**
-     * 同步阻塞等待复制结果
-     *
-     * @param result
-     * @param putMessageResult
-     * @param messageExt
-     */
-    public void handleHA(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
-        if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
-            HAService service = this.defaultMessageStore.getHaService();
-            if (messageExt.isWaitStoreMsgOK()) {
-                // Determine whether to wait
-                if (service.isSlaveOK(result.getWroteOffset() + result.getWroteBytes())) {
-                    GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes());
-                    service.putRequest(request);
-                    service.getWaitNotifyObject().wakeupAll();
-                    PutMessageStatus replicaStatus = null;
-                    try {
-
-                        // 同步等待复制结果，阻塞的
-                        replicaStatus = request.future().get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
-                                TimeUnit.MILLISECONDS);
-
-                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                    }
-                    if (replicaStatus != PutMessageStatus.PUT_OK) {
-                        log.error("do sync transfer other node, wait return, but failed, topic: " + messageExt.getTopic() + " tags: "
-                                + messageExt.getTags() + " client address: " + messageExt.getBornHostNameString());
-                        putMessageResult.setPutMessageStatus(PutMessageStatus.FLUSH_SLAVE_TIMEOUT);
-                    }
-                }
-                // Slave problem
-                else {
-                    // Tell the producer, slave not available
-                    putMessageResult.setPutMessageStatus(PutMessageStatus.SLAVE_NOT_AVAILABLE);
-                }
-            }
-        }
-
-    }
 
     public PutMessageResult putMessages(final MessageExtBatch messageExtBatch) {
         messageExtBatch.setStoreTimestamp(System.currentTimeMillis());
@@ -1685,6 +1732,9 @@ public class CommitLog {
         private long lastFlushTimestamp = 0;
         private long printTimes = 0;
 
+        /**
+         * 休眠等待 或 超时等待唤醒 进行刷盘
+         */
         public void run() {
             CommitLog.log.info(this.getServiceName() + " service started");
 
@@ -1719,6 +1769,7 @@ public class CommitLog {
                 }
 
                 try {
+
                     // 根据 flushCommitLogTimed 参数，可以选择每次循环是固定周期还是等待唤醒。
                     // 默认配置是后者，所以，每次写入消息完成，会去调用 commitLogService.wakeup()
                     if (flushCommitLogTimed) {
@@ -1730,6 +1781,7 @@ public class CommitLog {
                     if (printFlushProgress) {
                         this.printFlushProgress();
                     }
+
 
                     // todo 调用 MappedFile 进行 flush
                     long begin = System.currentTimeMillis();
@@ -1745,6 +1797,7 @@ public class CommitLog {
                     if (past > 500) {
                         log.info("Flush data to disk costs {} ms", past);
                     }
+
                 } catch (Throwable e) {
                     CommitLog.log.warn(this.getServiceName() + " service has exception. ", e);
                     this.printFlushProgress();
@@ -1868,6 +1921,8 @@ public class CommitLog {
          * 刷盘
          */
         private void doCommit() {
+
+            // 上锁 requestsRead
             synchronized (this.requestsRead) {
 
                 // 循环队列，进行 flush

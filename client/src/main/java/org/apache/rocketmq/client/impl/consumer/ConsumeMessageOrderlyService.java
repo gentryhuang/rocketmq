@@ -65,33 +65,41 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
  */
 public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
+
+    // 消费任务一次运行的最大时间，默认为 60s
     private final static long MAX_TIME_CONSUME_CONTINUOUSLY =
             Long.parseLong(System.getProperty("rocketmq.client.maxTimeConsumeContinuously", "60000"));
 
     /**
-     * 消费者类
+     * 消息消费者实现类
      */
     private final DefaultMQPushConsumerImpl defaultMQPushConsumerImpl;
     /**
-     * 消费者对外暴露类
+     * 消息消费者（消费者对外暴露类）
      */
     private final DefaultMQPushConsumer defaultMQPushConsumer;
 
     /**
-     * 监听器
+     * 顺序消息消费监听器
      */
     private final MessageListenerOrderly messageListener;
+    /**
+     * 消息消费任务
+     */
     private final BlockingQueue<Runnable> consumeRequestQueue;
+    /**
+     * 消息消费线程池
+     */
     private final ThreadPoolExecutor consumeExecutor;
-
     /**
      * 消费组
      */
     private final String consumerGroup;
     /**
-     * 消息队列锁
+     * 消息消费队列锁
      */
     private final MessageQueueLock messageQueueLock = new MessageQueueLock();
+
     private final ScheduledExecutorService scheduledExecutorService;
     private volatile boolean stopped = false;
 
@@ -105,6 +113,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
         // 消息消费线程池
+        // todo 由于使用的是无界队列，因此线程池中最大线程数是无效的，故有效线程数是核心线程 consumeThreadMin
         this.consumeExecutor = new ThreadPoolExecutor(
                 // 核心线程数
                 this.defaultMQPushConsumer.getConsumeThreadMin(),
@@ -128,7 +137,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         // 集群消费
         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())) {
             // 消费方需要不断向 Broker 刷新该锁过期时间，默认配置 20s 刷新一次
-            // 默认每隔 20s 执行一次锁定分配给自己的消息消费队列
+            // todo 默认每隔 20s 执行一次锁定分配给自己的消息消费队列
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -250,7 +259,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     /**
      * 提交消息请求
      *
-     * @param msgs             消息 ，顺序消息用不到
+     * @param msgs             消息 ，todo 顺序消息用不到,而是从消息队列中顺序去获取
      * @param processQueue     消息处理队列
      * @param messageQueue     消息队列
      * @param dispathToConsume 派发到消费
@@ -398,20 +407,24 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     // 统计
                     this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
 
-                    // 计算是否暂时挂起（暂停）消费N毫秒，默认：10ms
+                    // todo 检查消息的重试次数，计算是否暂时挂起（暂停）消费N毫秒，默认：10ms，然后继续消费
                     if (checkReconsumeTimes(msgs)) {
+                        /*------------- 消息消费重试 ---------*/
 
-                        // todo 设置消息重新消费，存储消息时会根据消费进度排序
+                        // todo 将该批消息重新放入到 ProcessQueue 的 msgTreeMap，然后清除consumingMsgOrderlyTreeMap，默认延迟1s再加入到消费队列中，并结束此次消息消费。
+                        // todo 注意，存储消息时会根据消费进度排序
                         consumeRequest.getProcessQueue().makeMessageToConsumeAgain(msgs);
 
                         // 提交延迟消费请求
+                        // todo 如果执行消息重试，因为消息消费进度并未向前推进，故本地视为无效消费，将不更新消息消费进度
                         this.submitConsumeRequestLater(
                                 consumeRequest.getProcessQueue(),
                                 consumeRequest.getMessageQueue(),
                                 context.getSuspendCurrentQueueTimeMillis());
                         continueConsume = false;
 
-                        // 消息放入 DLQ （死信队列），提交该批消息
+                        // 消息重试次数 >= 允许的最大重试次数，则将消息发送到 Broker，该消息最终会放入 DLQ （死信队列）。
+                        // 这种情况，提交该批消息，表示消息消费成功
                     } else {
 
                         // 返回待保存的消息消费进度
@@ -610,7 +623,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             }
 
             // 根据消息队列获得消息队列的 锁对象
-            // 顺序消息一个消息消费队列同一时刻只会被一个消费线程池处理
+            // 意味着一个消费者内消费线程池中的线程并发度是消息消费队列级别，同一个消费队列在同一时刻只会被一个线程消费，其他线程排队消费。
             // todo 1 第一把锁
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
 
@@ -653,7 +666,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             break;
                         }
 
-                        // 当前周期消费时间超过连续时长，默认：60s，提交延迟消费请求。
+                        // todo 当前周期消费时间超过连续时长，默认：60s，提交延迟消费请求。每一个ConsumeRequest消费任务不是以消费消息条数来计算，而是根据消费时间，默认当消费时长大于MAX_TIME_CONSUME_CONTINUOUSLY，默认60s后，本次消费任务结束，由消费组内其他线程继续消费。
                         // 默认情况下，每消费1分钟休息10ms
                         long interval = System.currentTimeMillis() - beginTime;
                         if (interval > MAX_TIME_CONSUME_CONTINUOUSLY) {
@@ -665,7 +678,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         final int consumeBatchSize =
                                 ConsumeMessageOrderlyService.this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 
-                        // 获取指定大小的消息
+                        // 从消息处理队列 ProcessQueue 中获取指定大小的消息
+                        // todo 注意，从ProceessQueue中取出的消息，会临时存储在 ProceeQueue的consumingMsgOrderlyTreeMap 属性中
                         List<MessageExt> msgs = this.processQueue.takeMessages(consumeBatchSize);
 
                         // todo 处理消息的 Topic，还原 Topic,针对重试 Topic
@@ -705,6 +719,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                                 // todo 锁定队列消费锁
                                 // todo 说明：相比 MessageQueue 锁，其粒度较小。这也是为什么有了 MessageQueue 锁还需要消息处理队列 ProcessQueue 锁的原因
                                 this.processQueue.getConsumeLock().lock();
+
+                                // 消息处理队列被丢弃，则直接结束本次消息消费
                                 if (this.processQueue.isDropped()) {
                                     log.warn("consumeMessage, the message queue not be able to consume, because it's dropped. {}",
                                             this.messageQueue);

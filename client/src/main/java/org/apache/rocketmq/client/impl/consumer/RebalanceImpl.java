@@ -274,10 +274,10 @@ public abstract class RebalanceImpl {
             if (mqs.isEmpty())
                 continue;
 
-            // 根据 BrokerName 获取 Broker 的地址信息
+            // 根据 BrokerName 获取 Broker 主节点的地址信息
             FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(brokerName, MixAll.MASTER_ID, true);
 
-            // 向对应的 Broker 刷新锁消息队列的过期时间
+            // 向对应的 Broker 发送锁定消息队列的请求
             if (findBrokerResult != null) {
                 LockBatchRequestBody requestBody = new LockBatchRequestBody();
                 requestBody.setConsumerGroup(this.consumerGroup);
@@ -287,11 +287,11 @@ public abstract class RebalanceImpl {
                 requestBody.setMqSet(mqs);
 
                 try {
-                    // todo 向 Broker 请求锁定 mqs 队列
+                    // todo 向 Broker 请求锁定 mqs 队列，该方法会返回本次成功锁定的消息消费队列
                     Set<MessageQueue> lockOKMQSet =
                             this.mQClientFactory.getMQClientAPIImpl().lockBatchMQ(findBrokerResult.getBrokerAddr(), requestBody, 1000);
 
-                    // 遍历 Broker 锁定后的结果
+                    // 遍历 Broker 锁定后的结果，用于更新当前消费者缓存的 ProcessQueue 的 locked 状态
                     for (MessageQueue mq : lockOKMQSet) {
                         // 消息处理队列映射中包含该锁定的消息队列，则锁定消息队列
                         ProcessQueue processQueue = this.processQueueTable.get(mq);

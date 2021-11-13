@@ -128,6 +128,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             @Override
             public void run() {
                 // 清理过期的消息
+                // todo 注意，不是删除过期的消息文件
                 cleanExpireMsg();
             }
 
@@ -244,7 +245,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
     /**
      * 提交立即消费请求
      *
-     * @param msgs              消息列表
+     * @param msgs              消息
      * @param processQueue      消息处理队列
      * @param messageQueue      消息队列
      * @param dispatchToConsume
@@ -427,20 +428,20 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
          * 这样就会造成 "消息丢失"。
          * 3 为了避免消息丢失，提交消费进度时不能以哪个消息先被消息就提交它对应的进度，而是提交线程池中偏移量最小的消息的偏移量。这里也就是 t3 并不会提交 msg3 对应的消费进度，而是
          *   提交线程池中偏移量最小的消息的偏移量，也就是提交的是 mgs1 的偏移量。本质上是利用 ConsumeQueue 对应的 ProcessQueue 中 msgTreeMap 属性，该属性存储的是从 ConsumeQueue 中拉取的消息，针对每个消费
-         *   进度都对应的消息，并且 msgTreeMap 是个 TreeMap 结构，根据消息进度对存储的消息进行了排序。
-         * 4 这种提交策略虽然能避免消息丢失，但同样有消息重复消费的风险。
+         *   进度都对应的消息，并且 msgTreeMap 是个 TreeMap 结构，根据消息进度对存储的消息进行了排序。也就是此时返回的偏移量有可能不是消息本身的偏移量，而是处理队列中最小的偏移量。
+         * 4 todo 这种提交策略避免了消息丢失，但有消息重复消费的风险。
          *
          * todo 顺序消费不会存在这个问题，因为不是并发消费
          */
 
-        // 消息完成消费（消费成功 和 消费失败但发回Broker成功），需要将其从消息处理队列中移除，同时返回ProcessQueue中最小的offset，使用这个offset值更新消费进度
+        // todo 消息完成消费（消费成功 和 消费失败但发回Broker成功），需要将其从消息处理队列中移除，同时返回ProcessQueue中最小的offset，使用这个offset值更新消费进度
         long offset = consumeRequest.getProcessQueue().removeMessage(consumeRequest.getMsgs());
 
         // 更新当前消费端的 OffsetStore 中维护的 offsetTable 中的消费位移，offsetTable 记录每个 messageQueue 的消费进度。
         // 这里只是更新内存数据，而将offset上传到broker是由定时任务执行的。MQClientInstance.start()会启动客户端相关的定时任务。
         // updateOffset()的最后一个参数increaseOnly为true，表示单调增加，新值要大于旧值
         if (offset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
-            // 更新 Consumer 的偏移量
+            // 更新 ConsumeQueue 的消费进度
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), offset, true);
         }
     }

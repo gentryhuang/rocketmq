@@ -32,14 +32,18 @@ public class RebalanceLockManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.REBALANCE_LOCK_LOGGER_NAME);
 
     /**
-     * 锁定持续时间，默认 60s
+     * 锁最大存活时间，默认 60s
      */
     private final static long REBALANCE_LOCK_MAX_LIVE_TIME = Long.parseLong(System.getProperty("rocketmq.broker.rebalance.lockMaxLiveTime", "60000"));
 
     private final Lock lock = new ReentrantLock();
 
     /**
-     * 消费组下 MessageQueue 的锁定映射表
+     * 消费组下 MessageQueue 的锁定映射表，按消费组分组。
+     * todo
+     * 1 不同消费组的消费者可以同时锁定同一个消息消费队列
+     * 2 集群模式下同一个消费组内只能被一个消费者锁定
+     * todo 本质上是同一消费组中的消费者锁定 MessageQueue ，
      */
     private final ConcurrentMap<String/* group */, ConcurrentHashMap<MessageQueue, LockEntry>> mqLockTable = new ConcurrentHashMap<String, ConcurrentHashMap<MessageQueue, LockEntry>>(1024);
 
@@ -122,12 +126,14 @@ public class RebalanceLockManager {
     /**
      * 判断消费组 group 下的消息队列 mq 是否被锁定
      *
-     * @param group
-     * @param mq
-     * @param clientId
+     * @param group    消费组
+     * @param mq       消息队列
+     * @param clientId 消费组下某个消费端ID
      * @return
      */
-    private boolean isLocked(final String group, final MessageQueue mq, final String clientId) {
+    private boolean isLocked(final String group,
+                             final MessageQueue mq,
+                             final String clientId) {
         // 取出当前 Broker 上指定消费组 group 下的消息队列锁定表
         ConcurrentHashMap<MessageQueue, LockEntry> groupValue = this.mqLockTable.get(group);
         if (groupValue != null) {
@@ -155,7 +161,8 @@ public class RebalanceLockManager {
      * @param clientId 消费者ID
      * @return
      */
-    public Set<MessageQueue> tryLockBatch(final String group, final Set<MessageQueue> mqs,
+    public Set<MessageQueue> tryLockBatch(final String group,
+                                          final Set<MessageQueue> mqs,
                                           final String clientId) {
 
         // 锁定成功的 MessageQueue 集合结果集

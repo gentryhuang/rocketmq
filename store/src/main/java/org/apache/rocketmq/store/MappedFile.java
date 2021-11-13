@@ -82,7 +82,9 @@ public class MappedFile extends ReferenceResource {
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
     /**
      * 当前 MappedFile 对象 已提交位置（提交指针）
-     * 注意：如果开启 transientStorePoolEnable ，则数据会存储在 TransientStorePool 中，然后通过 commit 线程将数据提交到 FileChannel 中，最后通过 Flush 线程将数据持久化到磁盘。
+     * 注意：
+     * 1 如果开启 transientStorePoolEnable ，则数据会存储在 TransientStorePool 中
+     * 2 通过 commit 线程将数据提交到 FileChannel 中，最后通过 Flush 线程将数据持久化到磁盘。
      */
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
     /**
@@ -334,7 +336,7 @@ public class MappedFile extends ReferenceResource {
             // 为什么会有 writeBuffer != null 的判断后，使用不同的字节缓冲区，见：FlushCommitLogService。
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
 
-            // 设置 cuurentPos 为当前指针
+            // 设置 currentPos 为当前指针
             byteBuffer.position(currentPos);
             AppendMessageResult result;
 
@@ -351,7 +353,9 @@ public class MappedFile extends ReferenceResource {
             }
 
             // 3 todo 更新写入指针
-            // 注意，无论使用的是堆外内存，还是物理文件的内存映射，数据写入后，写入指针都是移动
+            // todo 注意，无论使用的是堆外内存，还是物理文件的内存映射，数据写入后，写入指针都是移动。
+            // todo 注意在使用堆外内存的情况下，committedPosition 这个提交指针的意义，他并不是指写入到内存的指针，而是指提交到堆内存的指针。
+            // todo 因此，在写入的时候 committedPosition < wrotePosition ，在提交的时候 committedPosition 才会追赶 wrotePosition
             this.wrotePosition.addAndGet(result.getWroteBytes());
 
             // 4 更新消息写入的时间
@@ -429,8 +433,11 @@ public class MappedFile extends ReferenceResource {
             if (this.hold()) {
 
                 /**
+                 * todo 刷盘
                  * 1 如果 writeBuffer 不为空，说明开启了使用堆外内存，那么对于刷盘来说，刷盘 flushedPosition 应该等于上一次提交指针 committedPosition，
-                 * 因为上一次提交的数据就是进入 MappedByteBuffer(FileChannel) 中
+                 * 因为上一次提交的数据就是进入 MappedByteBuffer(FileChannel) 中。注意，其实提交后 committedPosition 指针会更为为 wrotePosition。
+                 * todo 只是刷盘的时候只能刷提交到堆内存的数据，因此不能直接使用 wrotePosition，在未提交之前 wrotePosition > committedPosition 的
+                 *
                  * 2 如果 writeBuffer 为空，说明数据是直接进入 MappedByteBuffer(FileChannel)的，wrotePosition 代表的是 MappedByteBuffer 中的指针
                  */
                 int value = getReadPosition();
@@ -448,6 +455,9 @@ public class MappedFile extends ReferenceResource {
                 }
 
                 // 更新刷盘位置为 value
+                // todo
+                //  1 对于使用堆外内存，刷盘位置更新为 committedPosition
+                //  2 对于使用堆内存，刷盘位置更新为 wrotePosition
                 this.flushedPosition.set(value);
                 this.release();
             } else {
@@ -505,6 +515,7 @@ public class MappedFile extends ReferenceResource {
      */
     protected void commit0(final int commitLeastPages) {
         // 写入位置
+        // todo 消息在写入成功后会更新 wrotePosition ，对于使用堆外内存的情况，在写入成功后，committedPosition < wrotePosition
         int writePos = this.wrotePosition.get();
 
         // 上次提交位置
@@ -518,7 +529,7 @@ public class MappedFile extends ReferenceResource {
                 ByteBuffer byteBuffer = writeBuffer.slice();
                 // 回退到上一次提交的位置 lastCommittedPosition
                 byteBuffer.position(lastCommittedPosition);
-                // 设置当前最大有效数据指针，即范围 lastCommittedPosition ～ writePos
+                // todo 设置当前最大有效数据指针，即范围 lastCommittedPosition ～ writePos
                 byteBuffer.limit(writePos);
 
 
@@ -527,7 +538,7 @@ public class MappedFile extends ReferenceResource {
                 this.fileChannel.position(lastCommittedPosition);
                 this.fileChannel.write(byteBuffer);
 
-                // 更新 committedPosition 的位置，即写入到 FileChannel 后，更新提交位置
+                // todo 更新 committedPosition 的位置，即写入到 FileChannel 后，更新提交指针 committedPosition 为 wrotePosition
                 this.committedPosition.set(writePos);
 
             } catch (Throwable e) {

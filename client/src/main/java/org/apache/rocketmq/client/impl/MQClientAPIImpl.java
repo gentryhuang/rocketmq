@@ -1611,19 +1611,57 @@ public class MQClientAPIImpl {
         throw new MQBrokerException(response.getCode(), response.getRemark());
     }
 
+    /**
+     * 从 NameServer 获取默认主题的路由信息
+     *
+     * @param topic
+     * @param timeoutMillis
+     * @return
+     * @throws RemotingException
+     * @throws MQClientException
+     * @throws InterruptedException
+     */
     public TopicRouteData getDefaultTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis)
             throws RemotingException, MQClientException, InterruptedException {
 
         return getTopicRouteInfoFromNameServer(topic, timeoutMillis, false);
     }
 
+    /**
+     * 从 NameServer 获取指定主题的路由信息
+     *
+     * @param topic
+     * @param timeoutMillis
+     * @return
+     * @throws RemotingException
+     * @throws MQClientException
+     * @throws InterruptedException
+     */
     public TopicRouteData getTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis)
             throws RemotingException, MQClientException, InterruptedException {
 
         return getTopicRouteInfoFromNameServer(topic, timeoutMillis, true);
     }
 
-    public TopicRouteData getTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis,
+    /**
+     * 从 NameServer 获取 Topic 的路由信息。
+     * todo NameServer 如何帮助客户端来找到对应的 Broker：
+     * 1 原则上对于客户端来说，无论是生产者还是消费者，通过主题来寻找 Broker（每个队列对应一个 BrokerName） 的流程是一样的，使用的也是同一份实现。
+     * 2 客户端在启动后，会启动一个定时器，定期从 NameServer 上拉取相关主题的路由信息，然后缓存在本地内存中，在需要的时候使用。
+     * 3 每个主题的路由信息用一个 TopicRouteData 表示，里面包括主题的 队列集合 和 该队列集合分布的 Broker 集合。
+     *
+     * @param topic
+     * @param timeoutMillis
+     * @param allowTopicNotExist
+     * @return
+     * @throws MQClientException
+     * @throws InterruptedException
+     * @throws RemotingTimeoutException
+     * @throws RemotingSendRequestException
+     * @throws RemotingConnectException
+     */
+    public TopicRouteData getTopicRouteInfoFromNameServer(final String topic,
+                                                          final long timeoutMillis,
                                                           boolean allowTopicNotExist) throws MQClientException, InterruptedException, RemotingTimeoutException, RemotingSendRequestException, RemotingConnectException {
         GetRouteInfoRequestHeader requestHeader = new GetRouteInfoRequestHeader();
         requestHeader.setTopic(topic);
@@ -1640,9 +1678,10 @@ public class MQClientAPIImpl {
                 if (allowTopicNotExist) {
                     log.warn("get Topic [{}] RouteInfoFromNameServer is not exist value", topic);
                 }
-
                 break;
             }
+
+            // 获取 Topic 对应的路由信息成功
             case ResponseCode.SUCCESS: {
                 byte[] body = response.getBody();
                 if (body != null) {

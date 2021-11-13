@@ -300,7 +300,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         );
 
 
-        // 根据拉取结果填充 response
+        // todo 根据获取消息的结果填充 response
         if (getMessageResult != null) {
             // 设置响应结果
             response.setRemark(getMessageResult.getStatus().name());
@@ -308,9 +308,15 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             responseHeader.setMinOffset(getMessageResult.getMinOffset());
             responseHeader.setMaxOffset(getMessageResult.getMaxOffset());
 
-            // todo 根据是否建议从 slave 拉取消息，设置 BrokerId
+            // todo 根据获取消息结果中是否建议从 slave 拉取消息，来设置 BrokerId
             if (getMessageResult.isSuggestPullingFromSlave()) {
+
+                // todo 建议从从服务器拉取消息，则使用消费组订阅配置中的 whichBrokerWhenConsumeSlowly，默认为 1，也就是从从服务器
+                // 可以通过客户端命令 updateSubGroup 指定当主服务器繁忙时，建议从哪个从服务器读取消息
                 responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getWhichBrokerWhenConsumeSlowly());
+
+
+                // 不建议从 slave 拉取消息，则设置 0 ，表示从主服务器拉取消息
             } else {
                 responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
             }
@@ -320,23 +326,35 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 case ASYNC_MASTER:
                 case SYNC_MASTER:
                     break;
+
+                // 如果当前服务器的角色为从服务器:并且slaveReadEnable=false，则忽略上面代码设置的值，下次拉取切换为从主拉取。
                 case SLAVE:
                     if (!this.brokerController.getBrokerConfig().isSlaveReadEnable()) {
                         response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY);
+                        // 建议下次从主服务器拉取
                         responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
                     }
                     break;
             }
 
+            // 如果从允许读
             if (this.brokerController.getBrokerConfig().isSlaveReadEnable()) {
+
+                // 如果建议从从服务器读取，说明消息消费缓慢
                 // consume too slow ,redirect to another machine
                 if (getMessageResult.isSuggestPullingFromSlave()) {
+                    // 则使用消费组订阅配置中的 whichBrokerWhenConsumeSlowly，默认为 1，也就是从从服务器
+                    // todo 顺便说下，whichBrokerWhenConsumeSlowly 属性值 是消费组订阅配置指定在消费缓慢时建议的拉取 brokerId
                     responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getWhichBrokerWhenConsumeSlowly());
                 }
+
+                // 不建议从从服务器读取，也就是说消息消费速度正常，则使用订阅组建议的brokerId拉取消息进行消费，默认为主服务器
                 // consume ok
                 else {
                     responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getBrokerId());
                 }
+
+                // 如果从不允许读，那么下次拉取消息只能从主服务器
             } else {
                 responseHeader.setSuggestWhichBrokerId(MixAll.MASTER_ID);
             }

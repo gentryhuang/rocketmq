@@ -59,6 +59,7 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
  * - brokerName
  * - queueId
  * 4 在 NameServer 的 RouteInfoManager 中，主要的路由信息就是由 topicQueueTable 和 brokerAddrTable 这两个 Map 来保存的。
+ * 5 在 RouteInfoManager 中，这 5 个 Map 作为一个整体资源，使用了一个读写锁来做并发控制，避免并发更新和更新过程中读到不一致的数据问题。
  */
 public class RouteInfoManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
@@ -144,9 +145,10 @@ public class RouteInfoManager {
     }
 
     /**
-     * Broker 上报信息处理
+     * 根据 Broker 请求过来的路由信息，依次对比并更新 clusterAddrTable、brokerAddrTable、topicQueueTable、brokerLiveTable 和 filterServerTable
+     * 这 5 个保存集群信息和路由信息的 Map 对象中的数据
      *
-     * @param clusterName
+     * @param clusterName        Broker 集群名
      * @param brokerAddr         Broker 地址
      * @param brokerName         Broker 名称
      * @param brokerId           Broker ID
@@ -168,6 +170,8 @@ public class RouteInfoManager {
         RegisterBrokerResult result = new RegisterBrokerResult();
         try {
             try {
+
+                // 加写锁，防止并发修改数据
                 this.lock.writeLock().lockInterruptibly();
 
                 // 1 处理 Broker 集群信息
@@ -183,6 +187,7 @@ public class RouteInfoManager {
                 // 2 处理 Broker
                 BrokerData brokerData = this.brokerAddrTable.get(brokerName);
                 if (null == brokerData) {
+                    // 标识需要先注册
                     registerFirst = true;
                     brokerData = new BrokerData(clusterName, brokerName, new HashMap<Long, String>());
                     this.brokerAddrTable.put(brokerName, brokerData);
@@ -190,6 +195,8 @@ public class RouteInfoManager {
                 Map<Long, String> brokerAddrsMap = brokerData.getBrokerAddrs();
                 //Switch slave to master: first remove <1, IP:PORT> in namesrv, then add <0, IP:PORT>
                 //The same IP:PORT must only have one record in brokerAddrTable
+
+                // 更新brokerAddrTable中的brokerData
                 Iterator<Entry<Long, String>> it = brokerAddrsMap.entrySet().iterator();
                 while (it.hasNext()) {
                     Entry<Long, String> item = it.next();
@@ -198,6 +205,7 @@ public class RouteInfoManager {
                     }
                 }
 
+                // 如果是新注册的Master Broker，或者Broker中的路由信息变了，需要更新topicQueueTable
                 String oldAddr = brokerData.getBrokerAddrs().put(brokerId, brokerAddr);
                 registerFirst = registerFirst || (null == oldAddr);
 
@@ -230,6 +238,7 @@ public class RouteInfoManager {
                     log.info("new broker registered, {} HAServer: {}", brokerAddr, haServerAddr);
                 }
 
+                // 更新filterServerTable
                 if (filterServerList != null) {
                     if (filterServerList.isEmpty()) {
                         this.filterServerTable.remove(brokerAddr);
@@ -238,7 +247,9 @@ public class RouteInfoManager {
                     }
                 }
 
+                // 如果是Slave Broker，需要在返回的信息中带上master的相关信息
                 if (MixAll.MASTER_ID != brokerId) {
+                    // 找 Mater Broker 地址
                     String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID);
                     if (masterAddr != null) {
                         BrokerLiveInfo brokerLiveInfo = this.brokerLiveTable.get(masterAddr);
@@ -249,6 +260,7 @@ public class RouteInfoManager {
                     }
                 }
             } finally {
+                // 释放写锁
                 this.lock.writeLock().unlock();
             }
         } catch (Exception e) {
@@ -468,12 +480,21 @@ public class RouteInfoManager {
 
 
     /**
-     * 根据 Topic 从 Namesrc 中获取 Broker 及 Topic 队列信息，组装成 Topic 路由信息
+     * 根据 Topic 从 Namesrv 中获取 Broker 及 Topic 队列信息，组装成 Topic 路由信息。
+     * 过程如下：
+     * 1 初始化返回的 TopicRouteData
+     * 2 获取操作缓存Map 的读锁
+     * 3 根据传入的 Topic 在队列缓存 Map 中获取对应的队列信息，并写入返回结果中
+     * 4 遍历 3 中获取到的队列，找出队列所在的所有 BrokerName，并收集起来
+     * 5 遍历 4 中收集到的 BrokerName，根据 BrokerName 从 brokerAddrTable 中找到对应的 BrokerData ，并写入返回结果中。
+     * 6 释放读锁并返回结果
+     * todo 注意，根据 Topic 返回的 Broker 信息是通过队列解析处理的得到的，毕竟队列信息是 Broker 上报的
      *
      * @param topic
      * @return
      */
     public TopicRouteData pickupTopicRouteData(final String topic) {
+
         // 创建 Topic 路由数据
         TopicRouteData topicRouteData = new TopicRouteData();
         boolean foundQueueData = false;
@@ -487,26 +508,31 @@ public class RouteInfoManager {
 
         try {
             try {
+                // 加读锁
                 this.lock.readLock().lockInterruptibly();
-                // 先从缓存中找 Topic 对应的队列信息
+
+                // 1 先从缓存中找 Topic 对应的队列信息
                 List<QueueData> queueDataList = this.topicQueueTable.get(topic);
                 if (queueDataList != null) {
-                    // 1 设置 队列信息
+                    // 1.1  设置 队列信息
                     topicRouteData.setQueueDatas(queueDataList);
                     foundQueueData = true;
 
-                    // 遍历队列，取出队列对应的 Broker 名
+                    // 1.2 遍历队列，取出队列对应的 Broker 名
                     Iterator<QueueData> it = queueDataList.iterator();
                     while (it.hasNext()) {
                         QueueData qd = it.next();
                         brokerNameSet.add(qd.getBrokerName());
                     }
 
-                    // 遍历 Broker 名称列表，根据名称取出 Broker 数据
+                    // 2  遍历 Topic 的队列对应的 Broker 名称列表，根据名称取出 Broker 数据
                     for (String brokerName : brokerNameSet) {
+                        // 根据 Broker 名称找到对应的 BrokerData
                         BrokerData brokerData = this.brokerAddrTable.get(brokerName);
                         if (null != brokerData) {
-                            BrokerData brokerDataClone = new BrokerData(brokerData.getCluster(),
+                            // 封装 Broker 信息
+                            BrokerData brokerDataClone = new BrokerData(
+                                    brokerData.getCluster(),
                                     brokerData.getBrokerName(),
                                     (HashMap<Long, String>) brokerData.getBrokerAddrs().clone());
 
@@ -522,6 +548,7 @@ public class RouteInfoManager {
                     }
                 }
             } finally {
+                // 释放读锁
                 this.lock.readLock().unlock();
             }
         } catch (Exception e) {

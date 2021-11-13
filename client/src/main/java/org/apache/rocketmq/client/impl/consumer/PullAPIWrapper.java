@@ -61,7 +61,9 @@ public class PullAPIWrapper {
 
     /**
      * 消息队列 与 拉取 Broker 的映射
-     * 当拉取消息时，会通过该映射获取拉取请求对应的 Broker
+     * todo 存放的是建议 消息队列从从哪个 Broker 服务器拉取消息的缓存表
+     * 1 当拉取消息时，会通过该映射获取拉取请求对应的 Broker
+     * 2 当处理拉取结果时，会更新该表，根据 Broker 建议下次从那个 broker 拉取消息
      */
     private ConcurrentMap<MessageQueue, AtomicLong/* brokerId */> pullFromWhichNodeTable = new ConcurrentHashMap<MessageQueue, AtomicLong>(32);
     /**
@@ -96,8 +98,10 @@ public class PullAPIWrapper {
                                         final SubscriptionData subscriptionData) {
         PullResultExt pullResultExt = (PullResultExt) pullResult;
 
-        // 更新消息队列拉取消息 Broker 编号的映射
-        // 下次拉取消息时，如果未设置默认拉取的 Broker 编号，会使用更新后的 Broker 编号。
+        /**
+         * todo 根据拉取结果中建议，更新消息队列拉取消息 Broker 编号的映射
+         * 即 在处理拉取结果时会将服务端建议的brokerId更新到broker拉取缓存表中
+         */
         this.updatePullFromWhichNode(mq, pullResultExt.getSuggestWhichBrokerId());
 
         // 解析消息，并根据订阅信息消息 tagCode 匹配合适消息
@@ -220,14 +224,16 @@ public class PullAPIWrapper {
             final PullCallback pullCallback
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
 
-        // 获取 Broker 信息
+        // todo 获取 Broker 信息
         FindBrokerResult findBrokerResult =
 
                 // 根据 brokerName 和 brokerId 获取 Broker 信息
-                // 在整个 RocketMQ Broker 的部署结构中，相同名称的 Broker 构成主从结构，其 BrokerId 会不一样。在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
-                this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(),
+                // todo 在整个 RocketMQ Broker 的部署结构中，相同名称的 Broker 构成主从结构，其 BrokerId 会不一样。在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
+                this.mQClientFactory.findBrokerAddressInSubscribe(
+                        mq.getBrokerName(),
                         // 获取 mq 拉取消息对应的 Broker 编号
-                        this.recalculatePullFromWhichNode(mq), false);
+                        this.recalculatePullFromWhichNode(mq),
+                        false);
 
         if (null == findBrokerResult) {
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(mq.getTopic());
@@ -311,7 +317,7 @@ public class PullAPIWrapper {
             return suggest.get();
         }
 
-        // 返回Broker 编号
+        // 未找到，则返回 brokerName 的主节点
         return MixAll.MASTER_ID;
     }
 

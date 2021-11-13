@@ -27,17 +27,19 @@ import java.util.List;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
 /**
- * Topic 路由数据
+ *
+ *
+ * 每个主题的路由信息用一个 TopicTouteData 对象来表示
  */
 public class TopicRouteData extends RemotingSerializable {
     private String orderTopicConf;
     /**
-     * Topic 队列元数据
+     * Topic 队列元数据，即保存了 Topic 中的所有队列信息
      * todo 是 Topic 下队列分布在不同的 Broker 的集合，即 Topic 的 队列分布在哪些 Broker 上
      */
     private List<QueueData> queueDatas;
     /**
-     * Topic 分布的 Broker 元数据
+     * Topic 分布的 Broker 元数据，即保存了 Topic 相关的所有 Broker 信息。
      * todo 是 Topic 队列分布的 Broker 集合
      */
     private List<BrokerData> brokerDatas;

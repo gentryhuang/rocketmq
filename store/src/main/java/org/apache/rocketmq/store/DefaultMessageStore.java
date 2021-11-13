@@ -376,6 +376,8 @@ public class DefaultMessageStore implements MessageStore {
              * 4. Make sure the fall-behind messages to be dispatched before starting the commitlog, especially when the broker role are automatically changed.
              */
             long maxPhysicalPosInLogicQueue = commitLog.getMinOffset();
+
+            // 遍历队列，获取最大偏移量，因为重放消息，不能重复。先看 ConsumeQueue 已经写入到哪了
             for (ConcurrentMap<Integer, ConsumeQueue> maps : this.consumeQueueTable.values()) {
                 for (ConsumeQueue logic : maps.values()) {
                     if (logic.getMaxPhysicOffset() > maxPhysicalPosInLogicQueue) {
@@ -433,7 +435,10 @@ public class DefaultMessageStore implements MessageStore {
 
         // todo 启动延时消息处理任务
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
+
+            // 启动 HA
             this.haService.start();
+
             // 处理延迟消息
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
@@ -843,6 +848,7 @@ public class DefaultMessageStore implements MessageStore {
                 } else {
                     nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
                 }
+
             } else {
 
                 // 7 从 consuequeue 中根据 offset 这个逻辑偏移量获取消息索引信息
@@ -855,7 +861,6 @@ public class DefaultMessageStore implements MessageStore {
                         // 8 初始化基本变量。
                         long nextPhyFileStartOffset = Long.MIN_VALUE;
                         long maxPhyOffsetPulling = 0;
-
                         int i = 0;
 
                         // 最大消息数
@@ -873,6 +878,7 @@ public class DefaultMessageStore implements MessageStore {
                             long tagsCode = bufferConsumeQueue.getByteBuffer().getLong();
 
                             // 11 当前拉取的物理偏移量，即拉取到的最大offset
+                            // 按照消息顺序拉取的基本原则，可以基本预测下次开始拉取的物理偏移量将大于该值，并且就在其附近。
                             maxPhyOffsetPulling = offsetPy;
 
                             // 12 如果拉取到的消息偏移量小于下一个要拉取的物理偏移量的话，直接跳过该条消息
@@ -956,14 +962,25 @@ public class DefaultMessageStore implements MessageStore {
                             brokerStatsManager.recordDiskFallBehindSize(group, topic, queueId, fallBehind);
                         }
 
-                        // todo 计算下次从当前消息队列拉取消息的逻辑偏移量
+                        // 21 todo 计算下次从当前消息队列拉取消息的逻辑偏移量
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
-                        // 21 如果当前commitlog中的偏移量 - 当前最大拉取消息偏移量 > 允许消息在内存中存在大小时，建议下一次拉取任务从从节点拉取。
-                        // 即根据剩余可拉取消息字节数与内存判断是否建议读取从节点
+
+                        /*--------- 22 建议消息拉取从哪个 Broker 。-------*/
+
+                        // 当前未被拉取到消息端的消息长度
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
-                        long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE
-                                * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0));
+
+                        // RocketMQ 消息常驻内存的大小：40% * (机器物理内存)；超过该大小，RocketMQ 会将旧的消息置换回磁盘。
+                        long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE // RocketMQ 所在服务器的总内存大小
+                                * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio()  // RocketMQ 所能使用内存的最大比例，默认 40 。
+                                / 100.0));
+
+                        /**
+                         * todo 触发下次从从服务器拉取的条件：剩余可拉取的消息大小 > RocketMQ 消息常驻内存的大小。
+                         * 即 diff > memory 表示可拉取的消息大小已经超出了 RocketMQ 常驻内存的大小，反映了主服务器繁忙，建议从从服务器拉取消息。
+                         * todo 该属性在 {PullMessageProcessor#processRequest} 处使用
+                         */
                         getResult.setSuggestPullingFromSlave(diff > memory);
                     } finally {
 
@@ -1096,10 +1113,18 @@ public class DefaultMessageStore implements MessageStore {
         return this.storeStatsService.toString();
     }
 
+    /**
+     * 获取 CommitLog 物理存储路径
+     *
+     * @return
+     */
     private String getStorePathPhysic() {
         String storePathPhysic = "";
+        // 如果启动 Dleger
         if (DefaultMessageStore.this.getMessageStoreConfig().isEnableDLegerCommitLog()) {
             storePathPhysic = ((DLedgerCommitLog) DefaultMessageStore.this.getCommitLog()).getdLedgerServer().getdLedgerConfig().getDataStorePath();
+
+            // CommitLog 默认存储路径： /Users/huanglibao/store/commitlog
         } else {
             storePathPhysic = DefaultMessageStore.this.getMessageStoreConfig().getStorePathCommitLog();
         }
@@ -1211,6 +1236,13 @@ public class DefaultMessageStore implements MessageStore {
         return this.commitLog.getData(offset);
     }
 
+    /**
+     * 将消息 data 追加到 CommitLog 内存映射文件中
+     *
+     * @param startOffset starting offset.
+     * @param data        data to append.
+     * @return
+     */
     @Override
     public boolean appendToCommitLog(long startOffset, byte[] data) {
         if (this.shutdown) {
@@ -1219,6 +1251,8 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         boolean result = this.commitLog.appendData(startOffset, data);
+
+        // 追加成功，则唤醒ReputMessageService实时将消息转发给消息消费队列与索引文件
         if (result) {
             this.reputMessageService.wakeup();
         } else {
@@ -1640,12 +1674,20 @@ public class DefaultMessageStore implements MessageStore {
     private void addScheduleTask() {
 
         /**
-         * 周期性清理文件。默认每 10s 检查一次过期文件
+         * todo 周期性清理文件。默认每 10s 检查一次过期文件
+         * 说明：
+         * 1 RocketMQ 操作 CommitLog 、ConsumeQueue 文件，都是基于内存映射方法并在启动的时候，会加载 commitlog、consumequeue 目录下的所有文件.
+         * 2 为了避免内存与磁盘的浪费，不可能将消息永久存储在消息服务器，所以需要一种机制来删除已过期的文件。
+         * 3 RocketMQ 顺序写 CommitLog、ConsumeQueue 文件，所有写操作全部落在最后一个 CommitLog 或 ConsumeQueue 文件上，之前的文件在下一个文件创建后，将不会再被更新。
+         * 4 RocketMQ清除过期文件的方法是：
+         *   4.1 如果非当前写文件在一定时间间隔内没有再次被更新，则认为是过期文件，可以被删除。默认每个文件的过期时间为72小时。可以通过在Broker配置文件中设置fileReservedTime来改变过期时间，单位为小时。
+         *   4.2 清理过期文件时，RocketMQ 不会管这个文件上的消息是否被全部消费
          */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                // 定期执行过期文件清理工作，默认 10s 执行一次
+                // todo 定期执行过期文件清理工作，默认 10s 执行一次
+                // 主要清理 CommitLog 和 ConsumeQueue 的过期文件。如何定义文件过期，两个文件的判断方式大同小异。
                 DefaultMessageStore.this.cleanFilesPeriodically();
             }
         }, 1000 * 60, this.messageStoreConfig.getCleanResourceInterval(), TimeUnit.MILLISECONDS);
@@ -2034,8 +2076,10 @@ public class DefaultMessageStore implements MessageStore {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
 
+        /*-------------------------------- RocketMQ 提供了两个与磁盘空间使用率相关的系统级参数，如下：-------------------*/
+
         /**
-         * 通过系统参数设置，默认值为 0.90。如果磁盘分区使用率超过该阈值，将设置磁盘为不可写，此时会拒绝写入新消息，并且立即启动过期文件删除操作。
+         * 通过系统参数设置，默认值为 0.90。如果磁盘分区使用率超过该阈值，将设置磁盘为不可写，此时会拒绝写入新消息，并且立即启动文件删除操作。
          */
         private final double diskSpaceWarningLevelRatio =
                 Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceWarningLevelRatio", "0.90"));
@@ -2046,11 +2090,16 @@ public class DefaultMessageStore implements MessageStore {
         private final double diskSpaceCleanForciblyRatio =
                 Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceCleanForciblyRatio", "0.85"));
 
+        /*-------------------------------- RocketMQ 提供了两个与磁盘空间使用率相关的系统级参数，如下：-------------------*/
+
 
         private long lastRedeleteTimestamp = 0;
 
         private volatile int manualDeleteFileSeveralTimes = 0;
 
+        /**
+         * 是否立即清理文件，根据磁盘文件更新该值
+         */
         private volatile boolean cleanImmediately = false;
 
         public void excuteDeleteFilesManualy() {
@@ -2058,12 +2107,18 @@ public class DefaultMessageStore implements MessageStore {
             DefaultMessageStore.log.info("executeDeleteFilesManually was invoked");
         }
 
+        /**
+         * 清理 CommitLog 过期文件。整个执行过程分为两个大的步骤：
+         * 1 尝试删除过期文件
+         * 2 重试删除被 hang 住的文件（由于被其它线程引用，在第一个步中未删除的文件），再重试一次
+         */
         public void run() {
             try {
 
                 // 清理过期文件
                 this.deleteExpiredFiles();
 
+                // 重试没有删除成功的过期文件
                 this.redeleteHangedFile();
             } catch (Throwable e) {
                 DefaultMessageStore.log.warn(this.getServiceName() + " service has exception. ", e);
@@ -2080,7 +2135,8 @@ public class DefaultMessageStore implements MessageStore {
          */
         private void deleteExpiredFiles() {
             int deleteCount = 0;
-            // 文件保存的时长，默认 72 小时。
+
+            // 文件保存的时长，默认 72 小时。如果超过了该时间，则认为是过期文件。
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
 
             // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间
@@ -2090,10 +2146,15 @@ public class DefaultMessageStore implements MessageStore {
             // 该值表示第一次拒绝删除之后能保留文件的最大时间，在此时间内，同样地可以被拒绝删除，超过该时间后，会将引用次数设置为负数，文件将被强制删除
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            /*------------- RocketMQ 在如下三种情况任意满足之一的情况下将执行删除文件操作 ------------*/
+            /*1. 到了删除文件的时间点，RocketMQ 通过 deleteWhen 设置一天的固定时间执行一次删除过期文件操作，默认为凌晨 4 点  */
+            /*2. 判断磁盘空间是否充足，如果不充足，则返回 ture，表示应该触发过期文件删除操作                               */
+            /*3. 预留，手工触发                                                                                    */
+
             // 1 清理时间达到，默认为每天凌晨 4 点
             boolean timeup = this.isTimeToDelete();
 
-            // 2 磁盘空间占用率，默认为 75%
+            // 2 todo 磁盘空间占用率，默认为 75%
             boolean spacefull = this.isSpaceToDelete();
 
             // 3 手动删除
@@ -2105,6 +2166,7 @@ public class DefaultMessageStore implements MessageStore {
                 if (manualDelete)
                     this.manualDeleteFileSeveralTimes--;
 
+                // 是否立即删除
                 boolean cleanAtOnce = DefaultMessageStore.this.getMessageStoreConfig().isCleanFileForciblyEnable() && this.cleanImmediately;
 
                 log.info("begin to delete before {} hours file. timeup: {} spacefull: {} manualDeleteFileSeveralTimes: {} cleanAtOnce: {}",
@@ -2117,9 +2179,12 @@ public class DefaultMessageStore implements MessageStore {
                 // 按天为单位
                 fileReservedTime *= 60 * 60 * 1000;
 
-                // 清理 CommitLog 文件
-                deleteCount = DefaultMessageStore.this.commitLog.deleteExpiredFile(fileReservedTime, deletePhysicFilesInterval,
-                        destroyMapedFileIntervalForcibly, cleanAtOnce);
+                // todo 清理 CommitLog 文件，从开始到倒数第二个文件的范围内清理
+                deleteCount = DefaultMessageStore.this.commitLog.deleteExpiredFile(
+                        fileReservedTime,
+                        deletePhysicFilesInterval,
+                        destroyMapedFileIntervalForcibly,
+                        cleanAtOnce);
 
                 if (deleteCount > 0) {
                 } else if (spacefull) {
@@ -2128,9 +2193,14 @@ public class DefaultMessageStore implements MessageStore {
             }
         }
 
+        /**
+         * 重试没有删除成功的过期文件
+         */
         private void redeleteHangedFile() {
             int interval = DefaultMessageStore.this.getMessageStoreConfig().getRedeleteHangedFileInterval();
             long currentTimestamp = System.currentTimeMillis();
+
+
             if ((currentTimestamp - this.lastRedeleteTimestamp) > interval) {
                 this.lastRedeleteTimestamp = currentTimestamp;
                 int destroyMapedFileIntervalForcibly =
@@ -2169,12 +2239,16 @@ public class DefaultMessageStore implements MessageStore {
             // diskMaxUsedSpaceRatio 表示 CommitLog 文件，ConsumeQueue 文件所在磁盘分区的最大使用量，如果超过该值，则需要立即清除过期文件
             double ratio = DefaultMessageStore.this.getMessageStoreConfig().getDiskMaxUsedSpaceRatio() / 100.0;
 
-            // 是否需要立即执行清除过期文件的操作
+            // 是否需要立即执行清除文件的操作，和文件过期时间无关了
             cleanImmediately = false;
 
             {
                 // 当前 CommitLog 目录所在的磁盘分区的磁盘使用率
                 double physicRatio = UtilAll.getDiskPartitionSpaceUsedPercent(getStorePathPhysic());
+
+
+                // todo 判断磁盘是否可用，用当前已使用物理磁盘率 physicRatio、diskSpaceWarningLevelRatio、diskSpaceWarningLevelRatio 进行判断，
+                // 如果当前磁盘使用率达到上述阈值，将返回 true 表示磁盘已满，需要进行文件删除。
 
 
                 // 如果当前磁盘分区使用率大于 diskSpaceWarningLevelRatio ，应该立即启动过期文件删除操作
@@ -2184,10 +2258,11 @@ public class DefaultMessageStore implements MessageStore {
                         DefaultMessageStore.log.error("physic disk maybe full soon " + physicRatio + ", so mark disk full");
                     }
 
+                    // 设置立即启动文件删除
                     cleanImmediately = true;
 
-                    // 如果当前磁盘分区使用率大于 diskSpaceCleanForciblyRatio，建议立即启动过期文件删除操作。
-                } else if (physicRatio > diskSpaceCleanForciblyRatio) {
+                    // 如果当前磁盘分区使用率大于 diskSpaceCleanForciblyRatio，建议立即启动文件删除操作。
+                } else if (physicRatio > diskSpaceWarningLevelRatio) {
                     cleanImmediately = true;
 
                     // 如果当前磁盘使用率低于 diskSpaceCleanForciblyRatio ，将恢复磁盘可写
@@ -2204,6 +2279,7 @@ public class DefaultMessageStore implements MessageStore {
                 }
             }
 
+            /*------------------------- todo 处理消息队列文件，逻辑同上 --------------------------*/
             {
                 String storePathLogics = StorePathConfigHelper
                         .getStorePathConsumeQueue(DefaultMessageStore.this.getMessageStoreConfig().getStorePathRootDir());
@@ -2284,16 +2360,24 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         private void deleteExpiredFiles() {
+            // 1 删除 ConsumeQueue 文件的间隔时间
             int deleteLogicsFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteConsumeQueueFilesInterval();
 
+            // 2 获取 CommitLog 最小物理偏移量
             long minOffset = DefaultMessageStore.this.commitLog.getMinOffset();
+
+            // 3 CommitLog 最小物理偏移量 > lastPhysicalMinOffset
             if (minOffset > this.lastPhysicalMinOffset) {
                 this.lastPhysicalMinOffset = minOffset;
 
+                // 获取内存 ConsumeQueue
                 ConcurrentMap<String, ConcurrentMap<Integer, ConsumeQueue>> tables = DefaultMessageStore.this.consumeQueueTable;
 
                 for (ConcurrentMap<Integer, ConsumeQueue> maps : tables.values()) {
+
+                    // 遍历 ConsumeQueue
                     for (ConsumeQueue logic : maps.values()) {
+
                         int deleteCount = logic.deleteExpiredFile(minOffset);
 
                         if (deleteCount > 0 && deleteLogicsFilesInterval > 0) {
@@ -2484,6 +2568,7 @@ public class DefaultMessageStore implements MessageStore {
          * 重放消息逻辑，不断生成 消息位置信息 到 消费队列(ConsumeQueue)
          */
         private void doReput() {
+
             // 如果从 commitlog 中开始拉取的偏移量小于最小偏移量，则更新这个偏移量
             if (this.reputFromOffset < DefaultMessageStore.this.commitLog.getMinOffset()) {
                 log.warn("The reputFromOffset={} is smaller than minPyOffset={}, this usually indicate that the dispatch behind too much and the commitlog has expired.",
@@ -2508,7 +2593,7 @@ public class DefaultMessageStore implements MessageStore {
                 if (result != null) {
                     try {
 
-                        // 更新 reputFromOffset ，以实际拉取消息的起始偏移量为准，即 this.fileFromOffset + reputFromOffset
+                        // 更新 reputFromOffset ，以实际拉取消息的起始偏移量为准，即 this.fileFromOffset + reputFromOffset % mappedFileSize
                         this.reputFromOffset = result.getStartOffset();
 
                         // todo 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条，创建 DispatchRequest 对象

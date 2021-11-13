@@ -133,7 +133,7 @@ public class MQClientInstance {
     private final Lock lockHeartbeat = new ReentrantLock();
 
     /**
-     * Topic 路由信息中的 Broker 信息
+     * Topic 路由信息中的 Broker 信息，更新到本地
      * 即 Broker 名字和 Broker 地址相关 Map
      */
     private final ConcurrentMap<String/* Broker Name */, HashMap<Long/* brokerId */, String/* address */>> brokerAddrTable = new ConcurrentHashMap<String, HashMap<Long, String>>();
@@ -1249,6 +1249,12 @@ public class MQClientInstance {
         return this.consumerTable.get(group);
     }
 
+    /**
+     * 根据 BrokerName 查找对应 Broker 地址
+     *
+     * @param brokerName
+     * @return
+     */
     public FindBrokerResult findBrokerAddressInAdmin(final String brokerName) {
         String brokerAddr = null;
         boolean slave = false;
@@ -1259,8 +1265,12 @@ public class MQClientInstance {
             for (Map.Entry<Long, String> entry : map.entrySet()) {
                 Long id = entry.getKey();
                 brokerAddr = entry.getValue();
+
+                // 找到即返回
                 if (brokerAddr != null) {
                     found = true;
+
+                    // 优先主服务器
                     if (MixAll.MASTER_ID == id) {
                         slave = false;
                     } else {
@@ -1298,8 +1308,8 @@ public class MQClientInstance {
      * 获取 Broker 信息
      *
      * @param brokerName     Broker 名字
-     * @param brokerId       Broker 编号
-     * @param onlyThisBroker 是否必须是该 Broker
+     * @param brokerId       BrokerId
+     * @param onlyThisBroker 是否必须返回 brokerId 的 Broker 信息
      * @return
      */
     public FindBrokerResult findBrokerAddressInSubscribe(
@@ -1313,12 +1323,14 @@ public class MQClientInstance {
         // 是否找到
         boolean found = false;
 
-        // 获得Broker信息
+        // 根据 brokerName 获取所有的 Broker 信息
         HashMap<Long/* brokerId */, String/* address */> map = this.brokerAddrTable.get(brokerName);
         if (map != null && !map.isEmpty()) {
+            // 根据 brokerId 获取 Broker 地址
             brokerAddr = map.get(brokerId);
             slave = brokerId != MixAll.MASTER_ID;
             found = brokerAddr != null;
+
 
             if (!found && slave) {
                 brokerAddr = map.get(brokerId + 1);

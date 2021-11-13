@@ -85,7 +85,7 @@ public class ConsumeQueue {
      */
     private final int mappedFileSize;
     /**
-     * 最大物理偏移量
+     * 最大物理偏移量，在 CommitLog 中
      */
     private long maxPhysicOffset = -1;
     /**
@@ -177,7 +177,7 @@ public class ConsumeQueue {
 
             while (true) {
 
-                // 4 循环验证 consumeque 包含条目的有效性（如果offset大于0并且size大于0，则表示是一个有效的条目）
+                // 4 循环验证 consumeque 包含条目的有效性（如果offset大于等于0并且size大于0，则表示是一个有效的条目）
                 for (int i = 0; i < mappedFileSizeLogics; i += CQ_STORE_UNIT_SIZE) {
 
                     // 5 读取一个条目的内容

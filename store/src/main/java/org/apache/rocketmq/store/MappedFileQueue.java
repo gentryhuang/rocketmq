@@ -40,6 +40,9 @@ public class MappedFileQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
+    /**
+     * 一次删除文件的最大值
+     */
     private static final int DELETE_FILES_BATCH_MAX = 10;
 
     /**
@@ -532,10 +535,10 @@ public class MappedFileQueue {
     /**
      * 根据时间执行文件销毁和删除
      *
-     * @param expiredTime
-     * @param deleteFilesInterval
-     * @param intervalForcibly
-     * @param cleanImmediately
+     * @param expiredTime         过期时间戳
+     * @param deleteFilesInterval 删除文件间的间隔时间
+     * @param intervalForcibly    第一次拒绝删除之后能保留文件的最大时间
+     * @param cleanImmediately    是否立即删除
      * @return
      */
     public int deleteExpiredFileByTime(final long expiredTime,
@@ -547,31 +550,37 @@ public class MappedFileQueue {
         if (null == mfs)
             return 0;
 
-        // 到倒数第二个文件
+        // 1 到倒数第二个文件。最后一个文件是活跃文件，其它的都不会被更新了。
         int mfsLength = mfs.length - 1;
         int deleteCount = 0;
         List<MappedFile> files = new ArrayList<MappedFile>();
         if (null != mfs) {
+
+            // 2 从前往后遍历到倒数第 2 个文件
             for (int i = 0; i < mfsLength; i++) {
                 MappedFile mappedFile = (MappedFile) mfs[i];
 
-                // 取文件的修改时间，计算文件最大存活时间。过期时间默认 72小时
+                // 2.1 取文件的修改时间，计算文件最大存活时间。过期时间默认 72小时
                 long liveMaxTimestamp = mappedFile.getLastModifiedTimestamp() + expiredTime;
 
-                // 如果当前时间大于文件的最大存活时间或须臾奥强制删除文件（当磁盘使用超过预定的阈值）
+                // todo 2.2 如果当前时间大于文件的最大存活时间或必须强制删除文件（当磁盘使用超过预定的阈值），则删除文件
                 if (System.currentTimeMillis() >= liveMaxTimestamp || cleanImmediately) {
 
-                    // 删除内部封装的文件通道和物理文件
+                    // todo 2.3 关闭内部封装的文件通道、删除物理文件
                     if (mappedFile.destroy(intervalForcibly)) {
 
                         // 将内存文件加入待删除文件列表中，最后统一清除内存文件
                         files.add(mappedFile);
+
+                        // 统计成功删除文件个数
                         deleteCount++;
 
+                        // todo 一次删除文件的数量不能超过批量删除阈值 ，默认是 10 。
                         if (files.size() >= DELETE_FILES_BATCH_MAX) {
                             break;
                         }
 
+                        // 删除一个 文件后休眠  deleteFilesInterval
                         if (deleteFilesInterval > 0 && (i + 1) < mfsLength) {
                             try {
                                 Thread.sleep(deleteFilesInterval);
@@ -588,7 +597,7 @@ public class MappedFileQueue {
             }
         }
 
-        // 删除过期内存文件
+        // 删除 MappedFile 缓存
         deleteExpiredFile(files);
 
         return deleteCount;
@@ -601,6 +610,7 @@ public class MappedFileQueue {
         int deleteCount = 0;
         if (null != mfs) {
 
+            // 从倒数第 2 个 MappedFile 开始
             int mfsLength = mfs.length - 1;
 
             for (int i = 0; i < mfsLength; i++) {
@@ -623,6 +633,7 @@ public class MappedFileQueue {
                     break;
                 }
 
+                // 删除物理文件
                 if (destroy && mappedFile.destroy(1000 * 60)) {
                     files.add(mappedFile);
                     deleteCount++;
@@ -632,6 +643,7 @@ public class MappedFileQueue {
             }
         }
 
+        // 清理 MappedFile 缓存
         deleteExpiredFile(files);
 
         return deleteCount;
@@ -653,7 +665,7 @@ public class MappedFileQueue {
         if (mappedFile != null) {
             long tmpTimeStamp = mappedFile.getStoreTimestamp();
 
-            // 2 执行 MappedFile 的 flush 方法
+            // 2 执行 MappedFile 的 flush 方法，并返回刷盘后的刷盘指针
             int offset = mappedFile.flush(flushLeastPages);
 
             // 刷盘后，新的刷盘物理偏移量 where
@@ -748,6 +760,7 @@ public class MappedFileQueue {
     public boolean retryDeleteFirstFile(final long intervalForcibly) {
         MappedFile mappedFile = this.getFirstMappedFile();
         if (mappedFile != null) {
+            // 删除不可用的
             if (!mappedFile.isAvailable()) {
                 log.warn("the mappedFile was destroyed once, but still alive, " + mappedFile.getFileName());
                 boolean result = mappedFile.destroy(intervalForcibly);

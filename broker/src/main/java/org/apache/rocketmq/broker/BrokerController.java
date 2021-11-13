@@ -1214,15 +1214,19 @@ public class BrokerController {
     }
 
     private void handleSlaveSynchronize(BrokerRole role) {
+        // 如果是从服务器
         if (role == BrokerRole.SLAVE) {
             if (null != slaveSyncFuture) {
                 slaveSyncFuture.cancel(false);
             }
             this.slaveSynchronize.setMasterAddr(null);
+
+            // 开启定时任务，每隔 10s 执行一次元数据同步任务
             slaveSyncFuture = this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
                     try {
+                        // 执行元数据同步任务
                         BrokerController.this.slaveSynchronize.syncAll();
                     } catch (Throwable e) {
                         log.error("ScheduledTask SlaveSynchronize syncAll error.", e);

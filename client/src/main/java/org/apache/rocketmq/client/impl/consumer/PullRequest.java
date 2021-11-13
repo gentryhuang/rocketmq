@@ -46,7 +46,7 @@ public class PullRequest {
      */
     private long nextOffset;
     /**
-     * 是否被锁定
+     * 是否被锁定。用于 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
      */
     private boolean previouslyLocked = false;
 

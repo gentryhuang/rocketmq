@@ -31,6 +31,9 @@ public class ConsumeOrderlyContext {
      * 是否自动提交
      */
     private boolean autoCommit = true;
+    /**
+     * 设置当前队列重试挂起时间
+     */
     private long suspendCurrentQueueTimeMillis = -1;
 
     public ConsumeOrderlyContext(MessageQueue messageQueue) {

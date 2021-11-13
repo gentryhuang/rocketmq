@@ -46,7 +46,7 @@ public abstract class ReferenceResource {
      * @param intervalForcibly
      */
     public void shutdown(final long intervalForcibly) {
-        // 如果可用，则设置为非可用，并
+        // 如果可用，则设置为非可用
         if (this.available) {
             this.available = false;
             // 设置关闭时间戳
@@ -55,7 +55,11 @@ public abstract class ReferenceResource {
             // 释放资源
             // 只有在 MappedFile 引用次数小于 1 的情况下才会释放资源
             this.release();
+
+            // 如果当前该文件被其它线程引用，则本次不强制删除
         } else if (this.getRefCount() > 0) {
+
+            // 在拒绝被删除保护期内，每执行一次清理任务，将引用次数减去 1000，引用数小于 1 后，该文件最终将被删除
             if ((System.currentTimeMillis() - this.firstShutdownTimestamp) >= intervalForcibly) {
                 this.refCount.set(-1000 - this.getRefCount());
                 this.release();

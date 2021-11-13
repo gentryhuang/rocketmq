@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.validator.routines.InetAddressValidator;
 import org.apache.rocketmq.common.constant.LoggerName;
@@ -122,8 +123,8 @@ public class UtilAll {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(t);
         return String.format("%04d%02d%02d%02d%02d%02d%03d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1,
-            cal.get(Calendar.DAY_OF_MONTH), cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), cal.get(Calendar.SECOND),
-            cal.get(Calendar.MILLISECOND));
+                cal.get(Calendar.DAY_OF_MONTH), cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), cal.get(Calendar.SECOND),
+                cal.get(Calendar.MILLISECOND));
     }
 
     public static long computeNextMorningTimeMillis() {
@@ -178,27 +179,33 @@ public class UtilAll {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(t);
         return String.format("%04d-%02d-%02d %02d:%02d:%02d,%03d",
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH) + 1,
-            cal.get(Calendar.DAY_OF_MONTH),
-            cal.get(Calendar.HOUR_OF_DAY),
-            cal.get(Calendar.MINUTE),
-            cal.get(Calendar.SECOND),
-            cal.get(Calendar.MILLISECOND));
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH),
+                cal.get(Calendar.HOUR_OF_DAY),
+                cal.get(Calendar.MINUTE),
+                cal.get(Calendar.SECOND),
+                cal.get(Calendar.MILLISECOND));
     }
 
     public static String timeMillisToHumanString3(final long t) {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(t);
         return String.format("%04d%02d%02d%02d%02d%02d",
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH) + 1,
-            cal.get(Calendar.DAY_OF_MONTH),
-            cal.get(Calendar.HOUR_OF_DAY),
-            cal.get(Calendar.MINUTE),
-            cal.get(Calendar.SECOND));
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH),
+                cal.get(Calendar.HOUR_OF_DAY),
+                cal.get(Calendar.MINUTE),
+                cal.get(Calendar.SECOND));
     }
 
+    /**
+     * 获取 CommitLog 目录所在的磁盘分区的磁盘使用率
+     *
+     * @param path
+     * @return
+     */
     public static double getDiskPartitionSpaceUsedPercent(final String path) {
         if (null == path || path.isEmpty()) {
             log.error("Error when measuring disk space usage, path is null or empty, path : {}", path);
@@ -207,6 +214,7 @@ public class UtilAll {
 
 
         try {
+            // 封装 /Users/huanglibao/store/commitlog 目录
             File file = new File(path);
 
             if (!file.exists()) {
@@ -214,13 +222,16 @@ public class UtilAll {
                 return -1;
             }
 
-
+            // commitlog 目录所在磁盘分区总的存储容量
             long totalSpace = file.getTotalSpace();
 
             if (totalSpace > 0) {
+                // 剩余空间
                 long freeSpace = file.getFreeSpace();
+                // 已使用空间
                 long usedSpace = totalSpace - freeSpace;
 
+                // commitlog 目录所在磁盘分区的磁盘使用率
                 return usedSpace / (double) totalSpace;
             }
         } catch (Exception e) {
@@ -449,9 +460,9 @@ public class UtilAll {
 
     public static boolean isInternalV6IP(InetAddress inetAddr) {
         if (inetAddr.isAnyLocalAddress() // Wild card ipv6
-            || inetAddr.isLinkLocalAddress() // Single broadcast ipv6 address: fe80:xx:xx...
-            || inetAddr.isLoopbackAddress() //Loopback ipv6 address
-            || inetAddr.isSiteLocalAddress()) { // Site local ipv6 address: fec0:xx:xx...
+                || inetAddr.isLinkLocalAddress() // Single broadcast ipv6 address: fe80:xx:xx...
+                || inetAddr.isLoopbackAddress() //Loopback ipv6 address
+                || inetAddr.isSiteLocalAddress()) { // Site local ipv6 address: fec0:xx:xx...
             return true;
         }
         return false;
@@ -461,7 +472,7 @@ public class UtilAll {
         if (ip.length != 4) {
             throw new RuntimeException("illegal ipv4 bytes");
         }
-    
+
         InetAddressValidator validator = InetAddressValidator.getInstance();
         return validator.isValidInet4Address(ipToIPv4Str(ip));
     }
@@ -480,8 +491,8 @@ public class UtilAll {
             return null;
         }
         return new StringBuilder().append(ip[0] & 0xFF).append(".").append(
-            ip[1] & 0xFF).append(".").append(ip[2] & 0xFF)
-            .append(".").append(ip[3] & 0xFF).toString();
+                ip[1] & 0xFF).append(".").append(ip[2] & 0xFF)
+                .append(".").append(ip[3] & 0xFF).toString();
     }
 
     public static String ipToIPv6Str(byte[] ip) {

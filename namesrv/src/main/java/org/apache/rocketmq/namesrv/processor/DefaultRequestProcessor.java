@@ -73,7 +73,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
     }
 
     /**
-     * 处理请求 NameSrv 的请求
+     * 处理请求 NameSrv 的请求，通过路由分发器
      *
      * @param ctx
      * @param request
@@ -102,8 +102,10 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
             case RequestCode.QUERY_DATA_VERSION:
                 return queryBrokerTopicConfig(ctx, request);
 
-            // 上报 Broker(包括路由信息) 到 NameSrv
+            // 处理 Broker(包括路由信息) 注册的路由信息
             case RequestCode.REGISTER_BROKER:
+                // 根据 Broker 的版本号不同，分别有两个不同的处理实现方法。这两个方法实现的流程是差不多的，
+                // 实际都是调用 RouteInfoManager#registerBroker
                 Version brokerVersion = MQVersion.value2Version(request.getVersion());
                 if (brokerVersion.ordinal() >= MQVersion.Version.V3_0_11.ordinal()) {
                     return this.registerBrokerWithFilterServer(ctx, request);
@@ -117,7 +119,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
                 return this.unregisterBroker(ctx, request);
 
             /**
-             * 根据主题获取路由信息
+             * 处理客户端请求，根据主题获取路由信息
              */
             case RequestCode.GET_ROUTEINFO_BY_TOPIC:
                 return this.getRouteInfoByTopic(ctx, request);

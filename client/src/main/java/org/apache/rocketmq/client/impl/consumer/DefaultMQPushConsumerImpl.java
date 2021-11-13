@@ -336,6 +336,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         } else {
             // 消息处理队列是否被锁定
             if (processQueue.isLocked()) {
+                // 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
                 if (!pullRequest.isPreviouslyLocked()) {
                     long offset = -1L;
                     try {
@@ -357,7 +358,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                 pullRequest, offset);
                     }
 
+                    // 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
                     pullRequest.setPreviouslyLocked(true);
+
+                    // 设置消息拉取点
                     pullRequest.setNextOffset(offset);
                 }
 

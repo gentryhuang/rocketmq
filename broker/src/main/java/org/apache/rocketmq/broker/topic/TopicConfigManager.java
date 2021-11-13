@@ -204,8 +204,8 @@ public class TopicConfigManager extends ConfigManager {
      * 在发送消息的方法中创建 Topic 并上报的 NameSrv
      * todo 言外之意，以后就可以获取到了该 topic 的路由信息
      *
-     * @param topic
-     * @param defaultTopic                发送消息时默认的 Topic 是 TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC
+     * @param topic                       发送消息时的 Topic
+     * @param defaultTopic                发送消息时默认的 Topic 是 TBW102
      * @param remoteAddress
      * @param clientDefaultTopicQueueNums
      * @param topicSysFlag
@@ -289,7 +289,7 @@ public class TopicConfigManager extends ConfigManager {
             log.error("createTopicInSendMessageMethod exception", e);
         }
 
-        // 如果是新的 Topic ，那么上报的 NameSrv
+        // todo 如果是新的 Topic ，那么上报的 NameSrv
         if (createNew) {
             // 通过 Broker 控制器上报 Broker 信息以及 Topic 信息
             this.brokerController.registerBrokerAll(false, true, true);

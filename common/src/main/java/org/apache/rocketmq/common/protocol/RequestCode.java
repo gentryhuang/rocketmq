@@ -36,6 +36,9 @@ public class RequestCode {
      * 获取消费进度请求码
      */
     public static final int QUERY_CONSUMER_OFFSET = 14;
+    /**
+     * 更新消费进度请求码
+     */
     public static final int UPDATE_CONSUMER_OFFSET = 15;
     /**
      * 创建或更新主题的请求码
