@@ -59,6 +59,7 @@ public class BrokerStartup {
 
     /**
      * Broker 启动
+     *
      * @param args
      */
     public static void main(String[] args) {
@@ -96,6 +97,7 @@ public class BrokerStartup {
 
     /**
      * 创建 Broker 控制器
+     *
      * @param args
      * @return
      */
@@ -157,7 +159,7 @@ public class BrokerStartup {
             // 集成开发环境，手动指定 rocketmq 目录，启动当中需要读取该目录下的配置文件
             brokerConfig.setRocketmqHome("/Users/huanglibao/study/rocketmq/distribution");
             // todo 静止自动创建 Topic
-           // brokerConfig.setAutoCreateTopicEnable(false);
+            // brokerConfig.setAutoCreateTopicEnable(false);
 
             if (null == brokerConfig.getRocketmqHome()) {
                 System.out.printf("Please set the %s variable in your environment to match the location of the RocketMQ installation", MixAll.ROCKETMQ_HOME_ENV);
@@ -236,7 +238,7 @@ public class BrokerStartup {
             // remember all configs to prevent discard
             controller.getConfiguration().registerConfig(properties);
 
-            // 初始化
+            // todo 初始化 BrokerController
             boolean initResult = controller.initialize();
             if (!initResult) {
                 controller.shutdown();

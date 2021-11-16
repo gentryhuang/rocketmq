@@ -146,9 +146,16 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         }
     }
 
+    /**
+     * 拒绝请求
+     *
+     * @return
+     */
     @Override
     public boolean rejectRequest() {
+        // 判断操作系统PageCache是否繁忙，如果忙，则返回true。
         return this.brokerController.getMessageStore().isOSPageCacheBusy() ||
+                // 判断堆外内存池是否还有堆外内存可使用
                 this.brokerController.getMessageStore().isTransientStorePoolDeficient();
     }
 

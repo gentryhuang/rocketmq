@@ -109,7 +109,13 @@ public class TransientStorePool {
         return buffer;
     }
 
+    /**
+     * 获取可用堆外内存 ByteBuffer 个数
+     *
+     * @return
+     */
     public int availableBufferNums() {
+        // 是否启用transientStorePoolEnable机制
         if (storeConfig.isTransientStorePoolEnable()) {
             return availableBuffers.size();
         }

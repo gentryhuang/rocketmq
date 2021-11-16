@@ -18,7 +18,11 @@
 package org.apache.rocketmq.common.protocol;
 
 /**
- * 请求码，RPC 请求功能的标志
+ * 请求码，用来区分请求的类型，如 SEND_MESSAGE 表示消息发送请求，PULL_MESSAGE 表示消息拉取请求
+ * 特别说明：
+ * 1 RocketMQ 的网络设计值得我们学习和借鉴
+ * 2 首先在客户端将不同的请求定义不同的请求命令 CODE ，服务端会将客户端请求进行分类，每个命令或每类请求命令定义一个处理器(NettyRequestProcessor)，然后每个 NettyRequestProcessor 绑定到一个单独的线程池，
+ * 进行命令处理，不同类型的请求将使用不同的线程池进行处理，实现线程隔离。
  */
 public class RequestCode {
 

@@ -29,13 +29,14 @@ public abstract class AsyncNettyRequestProcessor implements NettyRequestProcesso
      * 异步处理请求
      *
      * @param ctx
-     * @param request
-     * @param responseCallback
+     * @param request          请求对象
+     * @param responseCallback 回调
      * @throws Exception
      */
     public void asyncProcessRequest(ChannelHandlerContext ctx, RemotingCommand request, RemotingResponseCallback responseCallback) throws Exception {
         // 处理请求
         RemotingCommand response = processRequest(ctx, request);
+
         // 执行回调
         responseCallback.callback(response);
     }

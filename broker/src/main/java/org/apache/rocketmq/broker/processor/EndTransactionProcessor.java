@@ -232,6 +232,11 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         return response;
     }
 
+    /**
+     * 不拒绝
+     *
+     * @return
+     */
     @Override
     public boolean rejectRequest() {
         return false;

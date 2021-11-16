@@ -189,7 +189,8 @@ public class MQClientInstance {
         this.nettyClientConfig.setUseTLS(clientConfig.isUseTLS());
         this.clientRemotingProcessor = new ClientRemotingProcessor(this);
 
-        // 封装网络处理的客户端
+        // todo 封装网络处理的客户端
+        // todo 在客户端实例创建时，创建 网络通信客户端封装类
         this.mQClientAPIImpl = new MQClientAPIImpl(this.nettyClientConfig, this.clientRemotingProcessor, rpcHook, clientConfig);
 
         if (this.clientConfig.getNamesrvAddr() != null) {

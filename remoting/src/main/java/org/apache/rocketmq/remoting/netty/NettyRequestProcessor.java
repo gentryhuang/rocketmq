@@ -20,8 +20,10 @@ import io.netty.channel.ChannelHandlerContext;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
- * 处理请求接口
- * <p>
+ * RocketMQ 请求处理器，如 SendMessageProcessor 是消息发送处理器、PullMessageProcessor 是消息拉取处理器
+ * 说明：
+ * 服务端会将客户端请求进行分类，每个命令或每类请求命令定义一个处理器(NettyRequestProcessor)，然后每一个NettyRequestProcessor绑定到
+ * 一个单独的线程池，进行命令处理，不同类型的请求将使用不同的线程池进行处理，实现线程隔离。
  * Common remoting command processor
  */
 public interface NettyRequestProcessor {
@@ -37,7 +39,7 @@ public interface NettyRequestProcessor {
             throws Exception;
 
     /**
-     * 拒绝请求
+     * 是否要拒绝请求
      *
      * @return
      */

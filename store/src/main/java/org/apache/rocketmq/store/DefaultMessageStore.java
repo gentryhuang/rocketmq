@@ -158,7 +158,7 @@ public class DefaultMessageStore implements MessageStore {
     private final StoreStatsService storeStatsService;
 
     /**
-     * 消息堆内存缓存
+     * 消息堆外内存池
      * ByteBuffer 池
      */
     private final TransientStorePool transientStorePool;
@@ -592,6 +592,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
 
+        // 判断 OS 是否忙碌
         if (this.isOSPageCacheBusy()) {
             return PutMessageStatus.OS_PAGECACHE_BUSY;
         }
@@ -743,11 +744,21 @@ public class DefaultMessageStore implements MessageStore {
         return result;
     }
 
+    /**
+     * 判断操作系统PageCache是否繁忙，如果忙，则返回true。
+     *
+     * @return
+     */
     @Override
     public boolean isOSPageCacheBusy() {
+        // 消息开始写入 Commitlog 文件时加锁的时间
         long begin = this.getCommitLog().getBeginTimeInLock();
+
+        // 一次消息追加过程中持有锁的总时长，即往内存映射文件或pageCache追加一条消息直到现在所耗时间
         long diff = this.systemClock.now() - begin;
 
+        // 如果一次消息追加过程的时间超过了Broker配置文件osPageCacheBusyTimeOutMills，则认为pageCache繁忙，
+        // osPageCacheBusyTimeOutMills默认值为1000，表示1s。
         return diff < 10000000
                 && diff > this.messageStoreConfig.getOsPageCacheBusyTimeOutMills();
     }
@@ -2002,6 +2013,11 @@ public class DefaultMessageStore implements MessageStore {
         return this.transientStorePool.availableBufferNums();
     }
 
+    /**
+     * 获取消息堆外内存池是否还有堆外内存可使用
+     *
+     * @return
+     */
     @Override
     public boolean isTransientStorePoolDeficient() {
         return remainTransientStoreBufferNumbs() == 0;

@@ -3,7 +3,10 @@ package org.apache.rocketmq.test.demo;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
+import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
+
+import java.util.List;
 
 /**
  * DemoProducer
@@ -34,7 +37,7 @@ public class DemoProducer {
                             i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
             );
 
-          //  msg.setDelayTimeLevel(3);
+            //  msg.setDelayTimeLevel(3);
 
             //Call send message to deliver message to one of brokers.
             SendResult sendResult = producer.send(msg, 50000);
@@ -45,7 +48,11 @@ public class DemoProducer {
                 //...
             }
         }
+
+
         //Shut down once the producer instance is not longer in use.
         producer.shutdown();
+
+
     }
 }

@@ -16,8 +16,21 @@
  */
 package org.apache.rocketmq.remoting.common;
 
+/**
+ * 用来封装 NettyRequestProcessor 与 ExecuteService 的绑定关系。因为在 RocketMQ 的网络模型中，会为每一个 NettyRequestProcessor 与特定的线程池绑定，
+ * 所有该 NettyRequestProcessor 的处理逻辑都在该线程池中运行。
+ *
+ * @param <T1>
+ * @param <T2>
+ */
 public class Pair<T1, T2> {
+    /**
+     * NettyRequestProcessor
+     */
     private T1 object1;
+    /**
+     * ExecutorService
+     */
     private T2 object2;
 
     public Pair(T1 object1, T2 object2) {

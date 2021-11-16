@@ -150,6 +150,9 @@ public class BrokerController {
      */
     private MessageStore messageStore;
 
+    /**
+     * 远程通信抽服务端实现类
+     */
     private RemotingServer remotingServer;
     private RemotingServer fastRemotingServer;
 
@@ -304,10 +307,18 @@ public class BrokerController {
         result = result && this.messageStore.load();
 
         if (result) {
+
+            /** todo 创建远程通信抽服务端实现类
+             * @see BrokerController#initialize()
+             */
             this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.clientHousekeepingService);
+
             NettyServerConfig fastConfig = (NettyServerConfig) this.nettyServerConfig.clone();
             fastConfig.setListenPort(nettyServerConfig.getListenPort() - 2);
             this.fastRemotingServer = new NettyRemotingServer(fastConfig, this.clientHousekeepingService);
+
+            /*--------- 创建不同的线程池，用于支持不同请求处理器 ---------*/
+            // 处理发送来的消息请求
             this.sendMessageExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getSendMessageThreadPoolNums(),
                     this.brokerConfig.getSendMessageThreadPoolNums(),
@@ -316,6 +327,7 @@ public class BrokerController {
                     this.sendThreadPoolQueue,
                     new ThreadFactoryImpl("SendMessageThread_"));
 
+            // 处理拉取消息请求
             this.pullMessageExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getPullMessageThreadPoolNums(),
                     this.brokerConfig.getPullMessageThreadPoolNums(),
@@ -324,6 +336,7 @@ public class BrokerController {
                     this.pullThreadPoolQueue,
                     new ThreadFactoryImpl("PullMessageThread_"));
 
+            // 处理回复消息
             this.replyMessageExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getProcessReplyMessageThreadPoolNums(),
                     this.brokerConfig.getProcessReplyMessageThreadPoolNums(),
@@ -332,6 +345,7 @@ public class BrokerController {
                     this.replyThreadPoolQueue,
                     new ThreadFactoryImpl("ProcessReplyMessageThread_"));
 
+            // 处理查询消息
             this.queryMessageExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getQueryMessageThreadPoolNums(),
                     this.brokerConfig.getQueryMessageThreadPoolNums(),
@@ -344,6 +358,7 @@ public class BrokerController {
                     Executors.newFixedThreadPool(this.brokerConfig.getAdminBrokerThreadPoolNums(), new ThreadFactoryImpl(
                             "AdminBrokerThread_"));
 
+
             this.clientManageExecutor = new ThreadPoolExecutor(
                     this.brokerConfig.getClientManageThreadPoolNums(),
                     this.brokerConfig.getClientManageThreadPoolNums(),
@@ -352,6 +367,7 @@ public class BrokerController {
                     this.clientManagerThreadPoolQueue,
                     new ThreadFactoryImpl("ClientManageThread_"));
 
+            // 处理心跳
             this.heartbeatExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getHeartbeatThreadPoolNums(),
                     this.brokerConfig.getHeartbeatThreadPoolNums(),
@@ -360,6 +376,7 @@ public class BrokerController {
                     this.heartbeatThreadPoolQueue,
                     new ThreadFactoryImpl("HeartbeatThread_", true));
 
+            // 处理结束事务请求
             this.endTransactionExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getEndTransactionThreadPoolNums(),
                     this.brokerConfig.getEndTransactionThreadPoolNums(),
@@ -368,12 +385,16 @@ public class BrokerController {
                     this.endTransactionThreadPoolQueue,
                     new ThreadFactoryImpl("EndTransactionThread_"));
 
+
             this.consumerManageExecutor =
                     Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                             "ConsumerManageThread_"));
 
+            // todo 注册请求处理器，非常重要
             this.registerProcessor();
 
+
+            /*------------------------------- 定义系列线程池 ---------------------------------*/
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();
             final long period = 1000 * 60 * 60 * 24;
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
@@ -389,7 +410,7 @@ public class BrokerController {
 
 
             /**
-             * 每 5s 执行一次消费进度持久化到文件的逻辑
+             * todo 每 5s 执行一次消费进度持久化到文件的逻辑
              */
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
@@ -591,6 +612,9 @@ public class BrokerController {
         }
     }
 
+    /**
+     * todo 注册服务端请求处理器，这样服务端就可以利用注册的请求处理器来处理不同请求码对应的请求了，请求是提交到线程池处理的
+     */
     public void registerProcessor() {
         /**
          * SendMessageProcessor

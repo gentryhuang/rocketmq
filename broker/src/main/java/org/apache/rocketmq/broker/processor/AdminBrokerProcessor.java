@@ -247,6 +247,11 @@ public class AdminBrokerProcessor extends AsyncNettyRequestProcessor implements 
         return null;
     }
 
+    /**
+     * 不拒绝
+     *
+     * @return
+     */
     @Override
     public boolean rejectRequest() {
         return false;

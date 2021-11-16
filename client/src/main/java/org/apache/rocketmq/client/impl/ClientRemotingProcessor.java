@@ -59,7 +59,7 @@ import org.apache.rocketmq.remoting.netty.NettyRequestProcessor;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
- * 远程通信客户端
+ * 远程通信客户端请求处理器，主要针对对端发来的请求，进行处理
  */
 public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implements NettyRequestProcessor {
     private final InternalLogger log = ClientLogger.getLog();
@@ -79,7 +79,7 @@ public class ClientRemotingProcessor extends AsyncNettyRequestProcessor implemen
     }
 
     /**
-     * 处理请求
+     * 处理对端发来的请求
      *
      * @param ctx
      * @param request

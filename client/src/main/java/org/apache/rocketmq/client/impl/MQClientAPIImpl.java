@@ -183,11 +183,24 @@ public class MQClientAPIImpl {
      * 远程客户端
      */
     private final RemotingClient remotingClient;
+
     private final TopAddressing topAddressing;
+
+    /**
+     * 客户端通信处理器器，用于处理对端发来的请求
+     */
     private final ClientRemotingProcessor clientRemotingProcessor;
+
     private String nameSrvAddr = null;
     private ClientConfig clientConfig;
 
+    /**
+     * @param nettyClientConfig
+     * @param clientRemotingProcessor
+     * @param rpcHook
+     * @param clientConfig
+     * @see MQClientInstance#MQClientInstance(org.apache.rocketmq.client.ClientConfig, int, java.lang.String, org.apache.rocketmq.remoting.RPCHook)
+     */
     public MQClientAPIImpl(final NettyClientConfig nettyClientConfig,
                            final ClientRemotingProcessor clientRemotingProcessor,
                            RPCHook rpcHook, final ClientConfig clientConfig) {
@@ -197,6 +210,10 @@ public class MQClientAPIImpl {
         this.clientRemotingProcessor = clientRemotingProcessor;
 
         this.remotingClient.registerRPCHook(rpcHook);
+
+        /*--------- 为不同的请求码绑定对应的请求处理器，并指定每个请求处理器关联的线程池。可以发现客户端处理器对端请求，传入的都是 null ，说明使用的都是客户端默认的-------------*/
+
+        // 事务消息回查
         this.remotingClient.registerProcessor(RequestCode.CHECK_TRANSACTION_STATE, this.clientRemotingProcessor, null);
 
         this.remotingClient.registerProcessor(RequestCode.NOTIFY_CONSUMER_IDS_CHANGED, this.clientRemotingProcessor, null);

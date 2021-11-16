@@ -71,7 +71,7 @@ import org.apache.rocketmq.remoting.exception.RemotingTooMuchRequestException;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
- * RocketMQ 各进程之间网络通信的底层实现类
+ * RocketMQ 远程通信抽客户端实现
  */
 public class NettyRemotingClient extends NettyRemotingAbstract implements RemotingClient {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(RemotingHelper.ROCKETMQ_REMOTING);
@@ -104,6 +104,12 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         this(nettyClientConfig, null);
     }
 
+    /**
+     * 远程通信客户端构造方法
+     *
+     * @param nettyClientConfig
+     * @param channelEventListener
+     */
     public NettyRemotingClient(final NettyClientConfig nettyClientConfig,
                                final ChannelEventListener channelEventListener) {
         super(nettyClientConfig.getClientOnewaySemaphoreValue(), nettyClientConfig.getClientAsyncSemaphoreValue());
@@ -115,6 +121,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             publicThreadNums = 4;
         }
 
+        // 创建一个固定大小的线程池
         this.publicExecutor = Executors.newFixedThreadPool(publicThreadNums, new ThreadFactory() {
             private AtomicInteger threadIndex = new AtomicInteger(0);
 
@@ -152,6 +159,13 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         return Math.abs(r.nextInt() % 999) % 999;
     }
 
+    /**
+     * Netty 使用的模版，主要是管道上绑定的通道处理器，这些处理实现了 Netty 和 RocketMQ 之间的连接。下面列举主要的处理器：
+     * 1 编码和解码器
+     * 2 Netty 提供的心跳处理器 IdleStateHandler
+     * 3 连接相关的处理器 NettyConnectManageHandler
+     * 4 读取消息处理器 NettyClientHandler
+     */
     @Override
     public void start() {
         this.defaultEventExecutorGroup = new DefaultEventExecutorGroup(
@@ -563,10 +577,13 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     @Override
     public void registerProcessor(int requestCode, NettyRequestProcessor processor, ExecutorService executor) {
         ExecutorService executorThis = executor;
+
+        // 如果没有传入线程池，则使用统一默认的线程池
         if (null == executor) {
             executorThis = this.publicExecutor;
         }
 
+        // 创建 Pair 对象封装 请求处理对应和关联的线程池
         Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<NettyRequestProcessor, ExecutorService>(processor, executorThis);
         this.processorTable.put(requestCode, pair);
     }
@@ -624,6 +641,10 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         }
     }
 
+    /**
+     * 继承 Netty 的通道处理器，用于读取数据，将读取到的数据交给 RocketMQ 内部处理。
+     * todo 绑定到 Netty 的 pipeline 上即可生效
+     */
     class NettyClientHandler extends SimpleChannelInboundHandler<RemotingCommand> {
 
         @Override
@@ -632,6 +653,10 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         }
     }
 
+    /**
+     * 继承 Netty 通道处理器，实现了对连接的管理
+     * todo 绑定到 Netty 的 pipeline 上即可生效
+     */
     class NettyConnectManageHandler extends ChannelDuplexHandler {
         @Override
         public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress,
