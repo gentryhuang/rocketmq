@@ -267,10 +267,12 @@ public class PullAPIWrapper {
             requestHeader.setMaxMsgNums(maxNums);
             requestHeader.setSysFlag(sysFlagInner);
 
-            // 提交到 Broker 的消费进度
+            // todo 提交到 Broker 的消费进度
             requestHeader.setCommitOffset(commitOffset);
             // todo Broker 取消息时暂停时间（没有消息会等待的时间），默认 15s
             requestHeader.setSuspendTimeoutMillis(brokerSuspendMaxTimeMillis);
+
+            // todo 设置订阅表达式
             requestHeader.setSubscription(subExpression);
             requestHeader.setSubVersion(subVersion);
             requestHeader.setExpressionType(expressionType);

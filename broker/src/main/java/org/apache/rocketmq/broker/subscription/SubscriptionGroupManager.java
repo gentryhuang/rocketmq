@@ -43,6 +43,7 @@ public class SubscriptionGroupManager extends ConfigManager {
      * key: 消费组名 value: 消费组订阅数据
      */
     private final ConcurrentMap<String, SubscriptionGroupConfig> subscriptionGroupTable = new ConcurrentHashMap<String, SubscriptionGroupConfig>(1024);
+
     private final DataVersion dataVersion = new DataVersion();
     private transient BrokerController brokerController;
 
@@ -124,10 +125,22 @@ public class SubscriptionGroupManager extends ConfigManager {
         }
     }
 
+    /**
+     * 根据消费组名，获取对应的订阅信息
+     *
+     * @param group
+     * @return
+     */
     public SubscriptionGroupConfig findSubscriptionGroupConfig(final String group) {
+        // 从 Broker 本地缓存取，该配置信息也会持久化
         SubscriptionGroupConfig subscriptionGroupConfig = this.subscriptionGroupTable.get(group);
+
+        // 如果没有对应的消费组订阅信息，判断是否允许自动创建
         if (null == subscriptionGroupConfig) {
+            // 如果允许自动创建消费者组订阅信息，或是系统内部的订阅组
             if (brokerController.getBrokerConfig().isAutoCreateSubscriptionGroup() || MixAll.isSysConsumerGroup(group)) {
+
+                // todo 创建消费组订阅信息，除 groupName 属性外，其他都使用默认值
                 subscriptionGroupConfig = new SubscriptionGroupConfig();
                 subscriptionGroupConfig.setGroupName(group);
                 SubscriptionGroupConfig preConfig = this.subscriptionGroupTable.putIfAbsent(group, subscriptionGroupConfig);

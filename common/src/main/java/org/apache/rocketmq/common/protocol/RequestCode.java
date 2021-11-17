@@ -61,7 +61,13 @@ public class RequestCode {
 
     public static final int GET_BROKER_RUNTIME_INFO = 28;
     public static final int SEARCH_OFFSET_BY_TIMESTAMP = 29;
+    /**
+     * 获取消息队列最大偏移量
+     */
     public static final int GET_MAX_OFFSET = 30;
+    /**
+     * 获取最小偏移量
+     */
     public static final int GET_MIN_OFFSET = 31;
 
     public static final int GET_EARLIEST_MSG_STORETIME = 32;

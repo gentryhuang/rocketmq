@@ -63,6 +63,10 @@ public class BrokerConfig {
     private boolean clusterTopicEnable = true;
 
     private boolean brokerTopicEnable = true;
+
+    /**
+     * 是否允许自动创建消费组订阅信息，默认允许
+     */
     @ImportantField
     private boolean autoCreateSubscriptionGroup = true;
     private String messageStorePlugIn = "";
@@ -139,7 +143,11 @@ public class BrokerConfig {
     private boolean disableConsumeIfConsumerReadSlowly = false;
     private long consumerFallbehindThreshold = 1024L * 1024 * 1024 * 16;
 
+    /**
+     * 开始快速失败，针对发送来的消息请求，如果操作系统 PageCache 繁忙则直接快速失败队列中排队的任务请求
+     */
     private boolean brokerFastFailureEnable = true;
+
     private long waitTimeMillsInSendQueue = 200;
     private long waitTimeMillsInPullQueue = 5 * 1000;
     private long waitTimeMillsInHeartbeatQueue = 31 * 1000;

@@ -245,6 +245,7 @@ public class BrokerController {
         this.brokerStatsManager = new BrokerStatsManager(this.brokerConfig.getBrokerClusterName());
         this.setStoreHost(new InetSocketAddress(this.getBrokerConfig().getBrokerIP1(), this.getNettyServerConfig().getListenPort()));
 
+        // todo 快速失败
         this.brokerFastFailure = new BrokerFastFailure(this);
         this.configuration = new Configuration(
                 log,
@@ -988,6 +989,7 @@ public class BrokerController {
             this.brokerStatsManager.start();
         }
 
+        // todo 开启快速失败 发送消息任务
         if (this.brokerFastFailure != null) {
             this.brokerFastFailure.start();
         }

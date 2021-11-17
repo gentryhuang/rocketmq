@@ -106,6 +106,7 @@ public class CommitLog {
     /**
      * todo Topic 下 queue 的 逻辑偏移量，类似数组下标记(注意，不是物理偏移量)
      * todo 特别说明：在进行 CommitLog 转发时，对应消息队列的逻辑偏移量就是从这里取的
+     * @see DefaultMessageStore#recoverTopicQueueTable()
      */
     protected HashMap<String/* topic-queueid */, Long/* offset */> topicQueueTable = new HashMap<String, Long>(1024);
 
@@ -374,9 +375,9 @@ public class CommitLog {
             int queueId = byteBuffer.getInt();
             // FLAG FLAG 消息标记，RocketMQ 对其不做处理，供应用程序使用
             int flag = byteBuffer.getInt();
-            // 消息队列逻辑偏移量
+            // todo 消息队列逻辑偏移量
             long queueOffset = byteBuffer.getLong();
-            // 消息在 CommitLog 文件中的物理偏移量
+            // todo 消息在 CommitLog 文件中的物理偏移量
             long physicOffset = byteBuffer.getLong();
             // 消息系统标记，例如是否压缩、是否是事务消息等
             int sysFlag = byteBuffer.getInt();
@@ -1108,6 +1109,7 @@ public class CommitLog {
                     return new PutMessageResult(PutMessageStatus.UNKNOWN_ERROR, result);
             }
 
+            // 写消息耗时
             elapsedTimeInLock = this.defaultMessageStore.getSystemClock().now() - beginLockTimestamp;
             beginTimeInLock = 0;
 

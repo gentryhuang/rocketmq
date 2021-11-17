@@ -70,7 +70,7 @@ public class MappedFile extends ReferenceResource {
 
 
     /*-------------- 以下三个变量的区别与联系
-     * wrotePosition: 写入到缓存映射文件 MappedFile 中的位置
+     * wrotePosition: 写入到缓存映射文件 MappedFile 中的位置，不论是否使用堆外内存，写成功该指针都会移动
      * committedPosition：将数据写入到 FileChannel 中的位置
      * flushedPosition：将数据刷盘的位置
      * todo 特别说明：在 MappedFile 设计中，只有提交了的数据（写入 MappedByteBuffer 或 FileChannel 中的数据）才是安全的数据
@@ -115,17 +115,15 @@ public class MappedFile extends ReferenceResource {
      */
     private MappedByteBuffer mappedByteBuffer;
 
-
     /**
-     * 堆外内存 ByteBuffer
+     * 堆外内存 DirectByteBuffer
      * 说明：
-     * 如果开启了 transientStorePoolEnable，数据会先写入堆外内存（ByteBuffer），然后提交到 MappedFile 创建的 FileChannel 中， 并最终刷写到磁盘。
-     * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
+     * 如果开启了 transientStorePoolEnable 内存锁定，数据会先写入堆外内存（DirectByteBuffer），然后提交到 MappedFile 创建的 FileChannel 中， 并最终刷写到磁盘。
      */
     protected ByteBuffer writeBuffer = null;
 
     /**
-     * ByteBuffer的缓冲池，即堆外内存池，transientStorePoolEnable 为 true 时生效。
+     * DirectByteBuffer的缓冲池，即堆外内存池，transientStorePoolEnable 为 true 时生效。
      */
     protected TransientStorePool transientStorePool = null;
 
@@ -497,9 +495,10 @@ public class MappedFile extends ReferenceResource {
             }
         }
 
-        // 所有堆外数据提交完毕，归还对外内存 writeBuffer
+        // todo 所有堆外数据提交完毕，归还堆外内存 writeBuffer
         // All dirty data has been committed to FileChannel.
         if (writeBuffer != null && this.transientStorePool != null && this.fileSize == this.committedPosition.get()) {
+            // 归还后，重置该堆外内存
             this.transientStorePool.returnBuffer(writeBuffer);
             this.writeBuffer = null;
         }

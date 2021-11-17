@@ -16,6 +16,9 @@
  */
 package org.apache.rocketmq.common.message;
 
+/**
+ *
+ */
 public class MessageClientExt extends MessageExt {
 
     public String getOffsetMsgId() {
@@ -26,6 +29,12 @@ public class MessageClientExt extends MessageExt {
         super.setMsgId(offsetMsgId);
     }
 
+    /**
+     * 重写方法，返回的是我们通常所说的 msgId。全局ID 会存储在消息的属性 UNIQ_KEY
+     * todo 如果消息消费失败需要重试（顺序消息不是重新投递到 Broker 的方式），RocketMQ 的做法是将消息重新发送到 Broker 服务器，此时全局 msgId 是不会发送变化的，但该消息的 offsetMsgId 会发送变化，因为其存储在服务器中的位置发生了变化。
+     *
+     * @return
+     */
     @Override
     public String getMsgId() {
         String uniqID = MessageClientIDSetter.getUniqID(this);

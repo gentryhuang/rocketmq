@@ -189,6 +189,8 @@ public class RebalancePushImpl extends RebalanceImpl {
      */
     @Override
     public long computePullFromWhereWithException(MessageQueue mq) throws MQClientException {
+
+        // 默认为 -1
         long result = -1;
 
         // todo 从何处开始消费，消费的时候可以指定
@@ -209,62 +211,76 @@ public class RebalancePushImpl extends RebalanceImpl {
             case CONSUME_FROM_MIN_OFFSET:
             case CONSUME_FROM_MAX_OFFSET:
 
-                // 一个新的消费集群第一次启动从队列的最后位置开始消费。后续再启动接着上次消费的进度开始消费。
+                // 从队列的最大偏移量开始消费
             case CONSUME_FROM_LAST_OFFSET: {
 
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
+
+                // todo 注意，要特别留意lastOffset为0是什么场景，因为返回0，并不会执行CONSUME_FROM_LAST_OFFSET(语义)
+                // todo 解答：consumequeue/topicName/queueNum的第一个消息消费队列文件为 00000000000000000000,并且偏移量 0 对应的消息索引对应的消息缓存在Broker端的内存中(pageCache)，
+                //  其返回给消费端的偏移量为0，故会从0开始消费，而不是从队列的最大偏移量处开始消费。
                 if (lastOffset >= 0) {
                     result = lastOffset;
                 }
+                // 如果lastOffset为-1,表示当前并未存储其有效偏移量，可以理解为第一次消费
                 // First start,no offset
                 else if (-1 == lastOffset) {
+
                     // 如果是重试主题，则按照从头开始消费，即返回 0
                     if (mq.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                         result = 0L;
+
+                        // 普通主题，则从队列当前的最大的有效偏移量开始消费，即CONSUME_FROM_LAST_OFFSET语义的实现
                     } else {
                         try {
-                            // 获取消费队列最大 offset
+                            // 获取消费队列最大逻辑偏移量，从该位置消费
+                            // 即 todo (mappedFile.getFileFromOffset() + mappedFile.getReadPosition())/CQ_STORE_UNIT_SIZE
                             result = this.mQClientFactory.getMQAdminImpl().maxOffset(mq);
                         } catch (MQClientException e) {
                             log.warn("Compute consume offset from last offset exception, mq={}, exception={}", mq, e);
                             throw e;
                         }
                     }
+
                 } else {
                     result = -1;
                 }
                 break;
             }
 
-            // 个新的消费集群第一次启动从队列的最前位置开始消费。后续再启动接着上次消费的进度开始消费。
+            // 从队列最小偏移量开始消费
             case CONSUME_FROM_FIRST_OFFSET: {
                 // 先查询当前消费队列消费进度
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
+
+                // todo lastOffset = 0 的情况，同上
                 if (lastOffset >= 0) {
                     result = lastOffset;
 
-                    // 当前消费队列消费进度小于0，则从0开始
+                    // 当前消费队列消费进度小于0，表示并没有存储该队列的消息消费进度，可以理解为第一次消费，此时是 CONSUME_FROM_FIRST_OFFSET 语义
                 } else if (-1 == lastOffset) {
                     result = 0L;
+
                 } else {
                     result = -1;
                 }
                 break;
             }
 
-            // 从消费者启动时间戳对应的消费进度开始消费。后续再启动接着上次消费的进度开始消费。
+            // 从指定时间戳开始消费
+            // 其基本套路与CONSUME_FROM_LAST_OFFSET一样
             case CONSUME_FROM_TIMESTAMP: {
                 // 查询当前消费队列消费进度
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
 
-                // >= 0 直接返回
+                // >= 0 直接返回，从当前该偏移量开始消费。
                 if (lastOffset >= 0) {
                     result = lastOffset;
 
-                    // -1 说明消息队列刚创建
+                    // -1 表示并没有存储该队列的消息消费进度
                 } else if (-1 == lastOffset) {
 
-                    // 重试队列，从最新位置消费
+                    // 如果是重试主题，则从当前队列的最大偏移量开始消费
                     if (mq.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                         try {
                             result = this.mQClientFactory.getMQAdminImpl().maxOffset(mq);
@@ -274,7 +290,7 @@ public class RebalancePushImpl extends RebalanceImpl {
                         }
 
 
-                        // 根据消费者启动时间获取消费进度
+                       // 如果是普通主题，则根据时间戳去Broker端查询，根据查询到的偏移量开始消费。
                     } else {
                         try {
 

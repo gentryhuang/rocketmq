@@ -1324,10 +1324,11 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
     @Override
     public void updateTopicSubscribeInfo(String topic, Set<MessageQueue> info) {
-        // 获取订阅信息
+        // 1 当前消费方的订阅信息
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
         if (subTable != null) {
-            // 是否订阅了传入的 topic
+
+            // todo 是否订阅了传入的 topic
             if (subTable.containsKey(topic)) {
                 // 如果订阅了，则缓存该 Topic 的队列
                 this.rebalanceImpl.topicSubscribeInfoTable.put(topic, info);

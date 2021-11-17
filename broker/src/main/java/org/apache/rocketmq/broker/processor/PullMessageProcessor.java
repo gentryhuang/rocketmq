@@ -126,10 +126,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 校验 consumer 分组配置是否存在
+        /*--- 消费者向 Broker 发起消息拉取请求时，如果broker上并没有存在该消费组的订阅消息时，如果不允许自动创建(autoCreateSubscriptionGroup 设置为 false)，默认为true，则不会返回消息给客户端 -----*/
+
+        // todo 校验 consumer 分组配置是否存在。当不存在时，如果允许自动创建则根据当前 consumerGroup 创建一个基本的消费组配置信息
         SubscriptionGroupConfig subscriptionGroupConfig =
                 this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getConsumerGroup());
-
+        // todo 如果还是为空，则不能拉取消息，直接报错 订阅组不存在
+        // todo 如果不允许自动创建订阅组信息，必须手动向 Broker 创建订阅组信息，否则不能拉取消息
         if (null == subscriptionGroupConfig) {
             response.setCode(ResponseCode.SUBSCRIPTION_GROUP_NOT_EXIST);
             response.setRemark(String.format("subscription group [%s] does not exist, %s", requestHeader.getConsumerGroup(), FAQUrl.suggestTodo(FAQUrl.SUBSCRIPTION_GROUP_NOT_EXIST)));
@@ -154,7 +157,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         // todo 如果没有消息时挂起请求，则获取挂起请求超时时长
         final long suspendTimeoutMillisLong = hasSuspendFlag ? requestHeader.getSuspendTimeoutMillis() : 0;
 
-        // 校验 topic 配置存在
+        // todo 校验 topic 配置存在
         TopicConfig topicConfig = this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
         if (null == topicConfig) {
             log.error("the topic {} not exist, consumer: {}", requestHeader.getTopic(), RemotingHelper.parseChannelRemoteAddr(channel));
@@ -231,7 +234,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 return response;
             }
 
-            // 校验 订阅信息 是否存在
+            // todo  校验 订阅信息 是否存在。
             subscriptionData = consumerGroupInfo.findSubscriptionData(requestHeader.getTopic());
             if (null == subscriptionData) {
                 log.warn("the consumer's subscription not exist, group: {}, topic:{}", requestHeader.getConsumerGroup(), requestHeader.getTopic());

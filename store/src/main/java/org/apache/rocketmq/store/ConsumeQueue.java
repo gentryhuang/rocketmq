@@ -85,11 +85,12 @@ public class ConsumeQueue {
      */
     private final int mappedFileSize;
     /**
-     * 最大物理偏移量，在 CommitLog 中
+     * 记录当前 ConsumeQueue 中存放的消息索引对象消息的最大物理偏移量（是在 CommitLog 中）
+     * todo 该属性主要作用是判断当前 ConsumeQueue 已经保存消息索引对应消息的物理偏移量，和 ConsumeQueue 物理偏移量没有关系
      */
     private long maxPhysicOffset = -1;
     /**
-     * 最小偏移量 （todo ？物理偏移量）
+     * 当最小物理偏移量
      */
     private volatile long minLogicOffset = 0;
 
@@ -473,6 +474,11 @@ public class ConsumeQueue {
         }
     }
 
+    /**
+     * 在队列中的最小下标
+     *
+     * @return
+     */
     public long getMinOffsetInQueue() {
         // 计算得到的是 下标
         return this.minLogicOffset / CQ_STORE_UNIT_SIZE;
@@ -579,7 +585,12 @@ public class ConsumeQueue {
         // tag 哈希吗 （注意如果是延时消息，则是计划消费时）
         this.byteBufferIndex.putLong(tagsCode);
 
-        // 2 todo 根据 cqOffset 逻辑地址计算消息在 ConsumeQueue 中的物理偏移量
+        // 2 todo 根据 cqOffset 逻辑地址计算消息索引在 ConsumeQueue 中的物理偏移量
+        // cqOffset=0 -> expectLogicOffset = 0
+        // cqOffset=1 -> expectLogicOffset = 20
+        // cqOffset=2 -> expectLogicOffset = 40
+        // ... todo expectLogicOffset == mappedFile.getWrotePosition() + mappedFile.getFileFromOffset()，因为写入的指针位置就是下次写入数据的位置
+        // 比真实的大1
         final long expectLogicOffset = cqOffset * CQ_STORE_UNIT_SIZE;
 
         // 3 根据消息在 ConsumeQueue 中的物理偏移量，查找对应的 MappedFile
@@ -589,6 +600,7 @@ public class ConsumeQueue {
 
             // 3 如果文件是新建的，需要先填充前置空白占位
             if (mappedFile.isFirstCreateInQueue() && cqOffset != 0 && mappedFile.getWrotePosition() == 0) {
+                // todo  记录最小物理偏移量
                 this.minLogicOffset = expectLogicOffset;
                 this.mappedFileQueue.setFlushedWhere(expectLogicOffset);
                 this.mappedFileQueue.setCommittedWhere(expectLogicOffset);
@@ -601,7 +613,7 @@ public class ConsumeQueue {
 
             // 校验consumeQueue存储位置是否合法。
             if (cqOffset != 0) {
-                // 获取当前写的偏移量
+                // todo 获取当前写的物理偏移量
                 long currentLogicOffset = mappedFile.getWrotePosition() + mappedFile.getFileFromOffset();
 
                 // 如果消息预期物理偏移量 < 当前 MappedFile 写入偏移量，说明出现了问题
@@ -611,7 +623,8 @@ public class ConsumeQueue {
                     return true;
                 }
 
-                // 如果 消息预期物理偏移量 不等于当前 MappedFile 写入偏移量，说明可能出错了
+                // todo 如果 消息预期物理偏移量 不等于当前 MappedFile 写入偏移量，说明可能出错了
+                // todo 因为当前追加的消息索引的物理偏移量必须是上次写入的位置，每个索引长度固定。
                 if (expectLogicOffset != currentLogicOffset) {
                     LOG_ERROR.warn(
                             "[BUG]logic queue order maybe wrong, expectLogicOffset: {} currentLogicOffset: {} Topic: {} QID: {} Diff: {}",
@@ -624,7 +637,7 @@ public class ConsumeQueue {
                 }
             }
 
-            // 更新 commitLog 重放消息到当前 ConsumeQueue 的最大位置。
+            // todo 更新 commitLog 重放消息到当前 ConsumeQueue 的最大位置。
             this.maxPhysicOffset = offset + size;
 
             // 4 写入消息索引信息到 consumeQueue 文件中，整个过程都是基于 MappedFile 来操作的

@@ -57,6 +57,10 @@ public class MessageExt extends Message {
 
     private long storeTimestamp;
     private SocketAddress storeHost;
+
+    /**
+     * 本质上是 offsetMsgId，是消息存储在 Broker 后生成的一个id。并非我们说的那个 msgId
+     */
     private String msgId;
 
     /**
@@ -198,6 +202,10 @@ public class MessageExt extends Message {
         this.storeHost = storeHost;
     }
 
+    /**
+     * todo 子类重写了该方法，返回的不再是 offsetMsgId
+     * @return
+     */
     public String getMsgId() {
         return msgId;
     }

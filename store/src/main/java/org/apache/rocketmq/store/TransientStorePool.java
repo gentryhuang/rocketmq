@@ -66,21 +66,26 @@ public class TransientStorePool {
          * 创建数量为 pollSize ，默认为 5 个对外内存
          */
         for (int i = 0; i < poolSize; i++) {
+            // 分配 DirectByteBuffer
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(fileSize);
 
             final long address = ((DirectBuffer) byteBuffer).address();
             Pointer pointer = new Pointer(address);
 
-            // 利用 com.sun.jna 类库锁定该内存，避免被置换到交换区，以便提高存储性能
+            // todo 利用 com.sun.jna 类库锁定该内存，避免被置换到交换区，以便提高存储性能
             LibC.INSTANCE.mlock(pointer, new NativeLong(fileSize));
+
+            // 加入到缓存
             availableBuffers.offer(byteBuffer);
         }
     }
 
     public void destroy() {
+        // 遍历堆外内存 DirectByteBuffer
         for (ByteBuffer byteBuffer : availableBuffers) {
             final long address = ((DirectBuffer) byteBuffer).address();
             Pointer pointer = new Pointer(address);
+            // todo 解锁堆外内存
             LibC.INSTANCE.munlock(pointer, new NativeLong(fileSize));
         }
     }

@@ -692,14 +692,14 @@ public class DefaultMessageStore implements MessageStore {
             return new PutMessageResult(msgCheckStatus, null);
         }
 
-        // 消息写入计时
+        // todo 消息写入计时开始
         long beginTime = this.getSystemClock().now();
 
         // todo 重点关注
         // 将消息写入 CommitLog 文件，具体实现类 CommitLog
         PutMessageResult result = this.commitLog.putMessage(msg);
 
-        // 消息写入耗时
+        // todo 消息写入计时结束，计算本次消息写入耗时
         long elapsedTime = this.getSystemClock().now() - beginTime;
         if (elapsedTime > 500) {
             log.warn("not in lock elapsed time(ms)={}, bodyLength={}", elapsedTime, msg.getBody().length);
@@ -754,11 +754,11 @@ public class DefaultMessageStore implements MessageStore {
         // 消息开始写入 Commitlog 文件时加锁的时间
         long begin = this.getCommitLog().getBeginTimeInLock();
 
-        // 一次消息追加过程中持有锁的总时长，即往内存映射文件或pageCache追加一条消息直到现在所耗时间
+        // 一次消息追加过程中截止到当前持有锁的总时长，完成后重置为 0
+        // 即往内存映射文件或pageCache追加一条消息直到现在所耗时间
         long diff = this.systemClock.now() - begin;
 
-        // 如果一次消息追加过程的时间超过了Broker配置文件osPageCacheBusyTimeOutMills，则认为pageCache繁忙，
-        // osPageCacheBusyTimeOutMills默认值为1000，表示1s。
+        // 如果一次消息追加过程的时间超过了Broker配置文件osPageCacheBusyTimeOutMills ，默认 1000 即 1s，则认为pageCache繁忙，
         return diff < 10000000
                 && diff > this.messageStoreConfig.getOsPageCacheBusyTimeOutMills();
     }
@@ -844,6 +844,7 @@ public class DefaultMessageStore implements MessageStore {
 
                 // 待拉取偏移量为队列最大偏移量，表示超出一个，返回状态：OFFSET_OVERFLOW_ONE，
                 // 下次 拉取偏移量依然为 offset 保持不变。
+                // todo offset  <  (mappedFile.getFileFromOffset() + mappedFile.getReadPosition())/20，因为写指针停留的位置是下一次开始写入数据的位置
             } else if (offset == maxOffset) {
                 status = GetMessageStatus.OFFSET_OVERFLOW_ONE;
                 nextBeginOffset = nextOffsetCorrection(offset, offset);
@@ -974,6 +975,7 @@ public class DefaultMessageStore implements MessageStore {
                         }
 
                         // 21 todo 计算下次从当前消息队列拉取消息的逻辑偏移量
+                        // 即消费几条就推进几个进度
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
 
@@ -1610,14 +1612,17 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 校验 commitLog 是否需要硬盘，无法全部放在内存
+     * 校验当前物理偏移量 offsetPy 对应的消息是否还在内存
      *
-     * @param offsetPy
-     * @param maxOffsetPy
+     * @param offsetPy    commitLog 物理偏移量
+     * @param maxOffsetPy commitLog 最大物理偏移量
      * @return
      */
     private boolean checkInDiskByCommitOffset(long offsetPy, long maxOffsetPy) {
+        // 驻内存的消息大小
         long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0));
+
+        // 是否超过驻内猝的大小
         return (maxOffsetPy - offsetPy) > memory;
     }
 
@@ -2009,9 +2014,6 @@ public class DefaultMessageStore implements MessageStore {
 
     }
 
-    public int remainTransientStoreBufferNumbs() {
-        return this.transientStorePool.availableBufferNums();
-    }
 
     /**
      * 获取消息堆外内存池是否还有堆外内存可使用
@@ -2021,6 +2023,10 @@ public class DefaultMessageStore implements MessageStore {
     @Override
     public boolean isTransientStorePoolDeficient() {
         return remainTransientStoreBufferNumbs() == 0;
+    }
+
+    public int remainTransientStoreBufferNumbs() {
+        return this.transientStorePool.availableBufferNums();
     }
 
     @Override

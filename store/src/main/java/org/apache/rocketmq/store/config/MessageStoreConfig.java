@@ -217,6 +217,10 @@ public class MessageStoreConfig {
     private boolean debugLockEnable = false;
     private boolean duplicationEnable = false;
     private boolean diskFallRecorded = true;
+
+    /**
+     * 认为 OS pageCache 繁忙 的超时时间，即在一次消息追加过程中的据当前时间的耗时
+     */
     private long osPageCacheBusyTimeOutMills = 1000;
     private int defaultQueryMaxNum = 32;
 

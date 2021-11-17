@@ -20,6 +20,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
 import org.apache.rocketmq.broker.BrokerController;
 import org.apache.rocketmq.common.ThreadFactoryImpl;
 import org.apache.rocketmq.common.constant.LoggerName;
@@ -28,10 +29,13 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.remoting.netty.RequestTask;
 import org.apache.rocketmq.remoting.protocol.RemotingSysResponseCode;
 
+/**
+ * 快速失败的实现类，用于定期检测 PageCache 是否繁忙，繁忙则将排队中的发送消息线程任务快速失败掉，结束等待。
+ */
 public class BrokerFastFailure {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl(
-        "BrokerFastFailureScheduledThread"));
+            "BrokerFastFailureScheduledThread"));
     private final BrokerController brokerController;
 
     public BrokerFastFailure(final BrokerController brokerController) {
@@ -51,10 +55,15 @@ public class BrokerFastFailure {
         return null;
     }
 
+    /**
+     * 每隔10s，检测一次。
+     * 如果检测到PageCache繁忙，并且发送队列中还有排队的任务，则直接不再等待，直接抛出系统繁忙错误，使正在排队的线程任务快速失败，结束等待。
+     */
     public void start() {
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
+                // 开启快速失败 发送消息任务，会执行
                 if (brokerController.getBrokerConfig().isBrokerFastFailureEnable()) {
                     cleanExpiredRequest();
                 }
@@ -62,16 +71,24 @@ public class BrokerFastFailure {
         }, 1000, 10, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * 快速失败消息发送任务
+     */
     private void cleanExpiredRequest() {
+        // 如果操作系统 PageCache 繁忙，并且发送队列中还有排队的任务
         while (this.brokerController.getMessageStore().isOSPageCacheBusy()) {
             try {
                 if (!this.brokerController.getSendThreadPoolQueue().isEmpty()) {
+
+                    // 从消息发送任务队列中取出任务，进行快速失败，直到操作系统 PageCache 恢复
                     final Runnable runnable = this.brokerController.getSendThreadPoolQueue().poll(0, TimeUnit.SECONDS);
                     if (null == runnable) {
                         break;
                     }
 
                     final RequestTask rt = castRunnable(runnable);
+
+                    // 直接抛出系统繁忙错误，使正在排队的线程任务快速失败，结束等待。
                     rt.returnResponse(RemotingSysResponseCode.SYSTEM_BUSY, String.format("[PCBUSY_CLEAN_QUEUE]broker busy, start flow control for a while, period in queue: %sms, size of queue: %d", System.currentTimeMillis() - rt.getCreateTimestamp(), this.brokerController.getSendThreadPoolQueue().size()));
                 } else {
                     break;
@@ -81,16 +98,16 @@ public class BrokerFastFailure {
         }
 
         cleanExpiredRequestInQueue(this.brokerController.getSendThreadPoolQueue(),
-            this.brokerController.getBrokerConfig().getWaitTimeMillsInSendQueue());
+                this.brokerController.getBrokerConfig().getWaitTimeMillsInSendQueue());
 
         cleanExpiredRequestInQueue(this.brokerController.getPullThreadPoolQueue(),
-            this.brokerController.getBrokerConfig().getWaitTimeMillsInPullQueue());
+                this.brokerController.getBrokerConfig().getWaitTimeMillsInPullQueue());
 
         cleanExpiredRequestInQueue(this.brokerController.getHeartbeatThreadPoolQueue(),
-            this.brokerController.getBrokerConfig().getWaitTimeMillsInHeartbeatQueue());
+                this.brokerController.getBrokerConfig().getWaitTimeMillsInHeartbeatQueue());
 
         cleanExpiredRequestInQueue(this.brokerController.getEndTransactionThreadPoolQueue(), this
-            .brokerController.getBrokerConfig().getWaitTimeMillsInTransactionQueue());
+                .brokerController.getBrokerConfig().getWaitTimeMillsInTransactionQueue());
     }
 
     void cleanExpiredRequestInQueue(final BlockingQueue<Runnable> blockingQueue, final long maxWaitTimeMillsInQueue) {

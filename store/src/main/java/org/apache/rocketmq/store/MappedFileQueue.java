@@ -164,6 +164,8 @@ public class MappedFileQueue {
      * 1 使用内存映射，只要是存在于存储目录下的文件，都需要对应创建内存映射文件
      * 2 如果不定时将已消费的消息从存储文件中删除，会造成极大的内存压力于资源浪费，因此 RocketMQ 采取定时删除存储文件的策略
      * 3 在存储目录中，第一个文件不一定是 00000000000000000000 ，因为该文件在某一时刻会被删除
+     * todo 不管是 ConsumeQueue 还是 CommitLog ，物理偏移量都是 "左闭右开"。如，假设文件大小 40，则：
+     * 1 位于第一个文件的物理偏移量范围：[0,40)，即 0 <= offset < mappedFile.getFileFromOffset() + this.mappedFileSize
      *
      * @param offset                物理偏移量
      * @param returnFirstOnNotFound 如果没有找到，是否返回第一个

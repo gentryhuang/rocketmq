@@ -86,14 +86,14 @@ public abstract class NettyRemotingAbstract {
             new ConcurrentHashMap<Integer, ResponseFuture>(256);
 
     /**
-     * 处理器缓存表，在 Broker 初始化时进行初始化。
+     * 处理器缓存表，在 Broker 初始化 或 MQClientInstance 初始化时进行初始化。
+     * todo 注意，这个缓存表是针对服务端和客户端，它们注册的处理器都会缓存到这里
      * key: 约定的请求码
      * value: Pair ，用于封装请求处理器与关联的线程池
      * 说明：
      * 这个缓存表缓存了请求码对应的处理器，也就是说对于每个传入的请求，我们可以查找这个映射中的对应的请求处理器
      */
-    protected final HashMap<Integer/* request code */, Pair<NettyRequestProcessor, ExecutorService>> processorTable =
-            new HashMap<Integer, Pair<NettyRequestProcessor, ExecutorService>>(64);
+    protected final HashMap<Integer/* request code */, Pair<NettyRequestProcessor, ExecutorService>> processorTable = new HashMap<Integer, Pair<NettyRequestProcessor, ExecutorService>>(64);
 
     /**
      * Executor to feed netty events to user defined {@link ChannelEventListener}.
@@ -289,12 +289,12 @@ public abstract class NettyRemotingAbstract {
             }
 
             try {
-                // 创建请求任务
+                // 5 创建请求任务
                 final RequestTask requestTask = new RequestTask(run, ctx.channel(), cmd);
                 // 提交到服务端请求处理器管理的 ExecutorService 中
                 pair.getObject2().submit(requestTask);
 
-                // 线程池处理达到上线，则执行拒绝策略
+                // 6 线程池处理达到上线，则执行拒绝策略
             } catch (RejectedExecutionException e) {
                 if ((System.currentTimeMillis() % 10000) == 0) {
                     log.warn(RemotingHelper.parseChannelRemoteAddr(ctx.channel())

@@ -147,6 +147,7 @@ public class MQClientInstance {
         }
     });
 
+    // 远程通信客户端请求处理器
     private final ClientRemotingProcessor clientRemotingProcessor;
 
     /**
@@ -162,6 +163,7 @@ public class MQClientInstance {
      * 生产者
      */
     private final DefaultMQProducer defaultMQProducer;
+
     private final ConsumerStatsManager consumerStatsManager;
     private final AtomicLong sendHeartbeatTimesTotal = new AtomicLong(0);
     private ServiceState serviceState = ServiceState.CREATE_JUST;
@@ -287,7 +289,7 @@ public class MQClientInstance {
                         continue;
                     }
 
-                    // 队列对应的 Broker 非主节点
+                    // 队列对应的 Broker 需要是主节点，否则不会组装对应的 Topic 发布信息
                     if (!brokerData.getBrokerAddrs().containsKey(MixAll.MASTER_ID)) {
                         continue;
                     }
@@ -364,7 +366,7 @@ public class MQClientInstance {
                     // Start various schedule tasks
                     this.startScheduledTask();
 
-                    // todo 注意，先启动 拉取消息线程 ，等待拉取消息任务的到来（没有则阻塞），后负载均衡消息队列 //
+                    // todo 注意，先启动 拉取消息线程 ，等待拉取消息任务的到来（没有则阻塞），后负载均衡消息队列，均衡后就为队列创建拉取消息任务 //
 
                     // todo 启动拉取消息任务
                     // Start pull service
@@ -478,6 +480,10 @@ public class MQClientInstance {
      * 1 如果是消费方，则获取订阅的数据，取出订阅的 Topic
      * 2 如果是生产者，则获取 Topic 发布信息，取出对应的 Topic
      * 3 根据 Topic 从 NameSrv 拉取 Topic 路由信息
+     * todo 特别说明
+     * 1 如果是一台新加入的 Broker 机器，额外的什么都没有做，那么它就不能和其他 Broker 那样，拥有业务 Topic 信息（不考虑自动创建主题），NameServer 中就不会有该 Broker 上报的 Topic 路由信息
+     * 2 如果在新加入的 Broker 上设置了业务 Topic 信息，那么就会上报到 NameServer 。关键来了：客户端会定时从 NameServer 拉取感兴趣的 Topic 路由信息，并更新到本地：
+     * - 2.1 对于消息生产方，
      */
     public void updateTopicRouteInfoFromNameServer() {
         Set<String> topicList = new HashSet<String>();

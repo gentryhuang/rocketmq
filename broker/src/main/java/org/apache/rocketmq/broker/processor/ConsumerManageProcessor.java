@@ -148,7 +148,7 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                 (QueryConsumerOffsetRequestHeader) request
                         .decodeCommandCustomHeader(QueryConsumerOffsetRequestHeader.class);
 
-        // Broker 使用 ConsumerOffsetManager 获取消费进度
+        // Broker 使用 ConsumerOffsetManager 获取消费进度，没有则返回 -1
         long offset =
                 this.brokerController.getConsumerOffsetManager().queryOffset(
                         requestHeader.getConsumerGroup(),
@@ -159,14 +159,19 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
             responseHeader.setOffset(offset);
             response.setCode(ResponseCode.SUCCESS);
             response.setRemark(null);
+
+
+            // offset 为 -1 一般都是针对一个新的消费组
         } else {
 
-            // 获取 ComsumeQueue 最小的物理偏移量
+            // 获取该主题、消息队列当前在 Broker 服务器最小的物理偏移量
+            // 如果返回 0 则表示该队列的文件还未曾删除
             long minOffset =
                     this.brokerController.getMessageStore().getMinOffsetInQueue(requestHeader.getTopic(),
                             requestHeader.getQueueId());
 
-            // 如果最小物理偏移 <= 0 ，说明是新的队列或者还没有被消费者消费过，返回消费进度
+            // 如果最小物理偏移为 0 ，并且该偏移量对应的 commitLog 仍然存储在内存，而不是磁盘中，则返回 0
+            // todo 这样情况下，意味着ConsumeFromWhere中定义的三种枚举类型都不会生效，直接从0开始消费
             if (minOffset <= 0
                     && !this.brokerController.getMessageStore().checkInDiskByConsumeOffset(
                     requestHeader.getTopic(), requestHeader.getQueueId(), 0)) {
@@ -175,6 +180,7 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                 response.setRemark(null);
 
 
+                // 如果偏移量小于等于0，但其消息已经存储在磁盘中，此时返回未找到，最终RebalancePushImpl#computePullFromWhere中得到的偏移量为-1。
             } else {
                 response.setCode(ResponseCode.QUERY_NOT_FOUND);
                 response.setRemark("Not found, V3_0_6_SNAPSHOT maybe this group consumer boot first");
