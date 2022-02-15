@@ -17,11 +17,21 @@
 package org.apache.rocketmq.remoting.protocol;
 
 import com.alibaba.fastjson.JSON;
+
 import java.nio.charset.Charset;
 
+/**
+ * FastJson 序列化方式
+ */
 public abstract class RemotingSerializable {
     private final static Charset CHARSET_UTF8 = Charset.forName("UTF-8");
 
+    /**
+     * 序列化
+     *
+     * @param obj 待序列化的数据
+     * @return
+     */
     public static byte[] encode(final Object obj) {
         final String json = toJson(obj, false);
         if (json != null) {
@@ -34,6 +44,14 @@ public abstract class RemotingSerializable {
         return JSON.toJSONString(obj, prettyFormat);
     }
 
+    /**
+     * 反序列化
+     *
+     * @param data 二进制数据
+     * @param classOfT
+     * @param <T>
+     * @return
+     */
     public static <T> T decode(final byte[] data, Class<T> classOfT) {
         final String json = new String(data, CHARSET_UTF8);
         return fromJson(json, classOfT);

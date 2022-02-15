@@ -632,7 +632,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
                 // todo (广播模式) 或者 (集群模式 && 消息处理队列锁有效)
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
-                        // 2 todo 第二把锁，其实就是 Broker 分布式锁的提现
+                        // 2 todo 第二把锁，其实就是 Broker 分布式锁的体现
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
                     // 记录开始时间
@@ -641,6 +641,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     // 循环
                     // continueConsume 是否继续消费
                     for (boolean continueConsume = true; continueConsume; ) {
+
+                        // todo 每次继续消费前判断消息处理队列是否已经被废弃
                         if (this.processQueue.isDropped()) {
                             log.warn("the message queue not be able to consume, because it's dropped. {}", this.messageQueue);
                             break;
@@ -797,17 +799,19 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeMessageOrderlyService.this.getConsumerStatsManager()
                                     .incConsumeRT(ConsumeMessageOrderlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
-                            // todo 处理消费结果
+                            // todo 处理消费结果，返回是否继续消费
                             continueConsume = ConsumeMessageOrderlyService.this.processConsumeResult(msgs, status, context, this);
 
-                            // 没有消息，则
+                            // 没有消息，则结束
                         } else {
                             continueConsume = false;
                         }
                     }
 
-                    // 没有锁定 ConsumeQueue
+                    // 没有锁定 ConsumeQueue，则只有等待获取到锁才能尝试消费
                 } else {
+
+                    // 判断是否被废弃，废弃直接结束消费
                     if (this.processQueue.isDropped()) {
                         log.warn("the message queue not be able to consume, because it's dropped. {}", this.messageQueue);
                         return;

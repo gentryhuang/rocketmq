@@ -139,7 +139,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                     return this.asyncSendBatchMessage(ctx, request, mqtraceContext, requestHeader);
 
                     // 非批量发送消息
-                    // todo 包含对事务消息、重试消息以及是否触发私信队列的处理
+                    // todo 包含对事务消息、重试消息以及是否触发死信队列的处理
                 } else {
                     return this.asyncSendMessage(ctx, request, mqtraceContext, requestHeader);
                 }

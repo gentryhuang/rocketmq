@@ -496,7 +496,7 @@ public class ConsumeQueue {
         // 1 判断 ConsumeQueue 是否可写
         boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable();
 
-        // 多次循环写，直到成功
+        // todo 多次循环写，直到成功
         for (int i = 0; i < maxRetries && canWrite; i++) {
             // 消息 tag 哈希码
             long tagsCode = request.getTagsCode();

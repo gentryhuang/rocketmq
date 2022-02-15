@@ -1428,6 +1428,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     /**
      * 向选择的消息队列中发送消息
+     * todo 使用自定义的消息发送负载算法，RocketMQ消息发送内部的重试机制将失效，请再调用该方法的上层进行重试。
      *
      * @param msg               消息
      * @param selector          队列选择器

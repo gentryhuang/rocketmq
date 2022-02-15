@@ -462,7 +462,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         // 1、注意这里：默认为0，其实一直都是0，其它地方没有修改。这表示RocketMQ延迟消息的 延迟级别
         int delayLevel = context.getDelayLevelWhenNextConsume();
 
-        // todo 注意，这里没有对 重试主题 进行处理，在 Broker 端才会进行处理
+        // todo 注意，这里没有对 重试主题 进行处理，在 Broker 端才会进行处理(专门调用处理重试消息)
         // Wrap topic with namespace before sending back message.
         msg.setTopic(this.defaultMQPushConsumer.withNamespace(msg.getTopic()));
         try {
@@ -612,7 +612,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                         ConsumeMessageConcurrentlyService.this.consumerGroup,
                         msgs,
                         messageQueue);
-                // 消费异常
+                // 标记消费异常
+                // todo 注意，消费端出现异常也不会导致消费线程异常退出。
                 hasException = true;
             }
 

@@ -17,10 +17,16 @@
 
 package org.apache.rocketmq.remoting.protocol;
 
+/**
+ * RocketMQ 序列化方式。目前支持 FastJson ，RocketMQ 自己实现的 ROCKETMQ 方式
+ */
 public enum SerializeType {
     JSON((byte) 0),
     ROCKETMQ((byte) 1);
 
+    /**
+     * 序列化标志
+     */
     private byte code;
 
     SerializeType(byte code) {

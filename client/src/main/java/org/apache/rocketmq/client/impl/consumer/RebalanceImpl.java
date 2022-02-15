@@ -535,7 +535,8 @@ public abstract class RebalanceImpl {
                     // todo 废弃 ProcessQueue
                     pq.setDropped(true);
 
-                    // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息
+                    // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息。
+                    // todo 如果是顺序消费，则尝试释放 mq 的分布式锁，释放依据是：没有正在消费该队列
                     if (this.removeUnnecessaryMessageQueue(mq, pq)) {
 
                         // todo 移除缓存中的该消息队列到消息处理队列的映射关系
@@ -557,7 +558,11 @@ public abstract class RebalanceImpl {
                             break;
                         // 在 Push 模式下，标记消息处理队列不可用，并尝试移除
                         case CONSUME_PASSIVELY:
+
+                            // todo 废弃 ProcessQueue
                             pq.setDropped(true);
+                            // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息。
+                            // todo 如果是顺序消费，则尝试释放 mq 的分布式锁，释放依据是：没有正在消费该队列
                             if (this.removeUnnecessaryMessageQueue(mq, pq)) {
                                 it.remove();
                                 changed = true;
