@@ -67,7 +67,7 @@ public class PullConsumerNewTest {
 
         //You would better to register topics,It will use in rebalance when starting
 
-        topics.add("hlb_topic");
+        topics.add("pp_topic");
 
         // 注册 Topic ，用于订阅
         consumer.setRegisterTopics(topics);

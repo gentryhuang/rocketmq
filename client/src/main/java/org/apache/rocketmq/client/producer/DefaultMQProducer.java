@@ -134,7 +134,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
 
     /**
      * 消息的最大长度：
-     * 消息的最大大小。当消息题的字节数超过maxMessageSize就发送失败。默认值：1024 * 1024 * 4，单位：字节
+     * 消息的最大大小。当消息体的字节数超过maxMessageSize就发送失败。默认值：1024 * 1024 * 4，单位：字节
      */
     private int maxMessageSize = 1024 * 1024 * 4; // 4M
 

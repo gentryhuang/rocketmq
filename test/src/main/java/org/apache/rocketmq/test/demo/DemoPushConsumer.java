@@ -40,7 +40,15 @@ public class DemoPushConsumer {
             @Override
             public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
                                                             ConsumeConcurrentlyContext context) {
+
                 System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
+
+                System.out.println("具体消息如下：");
+                msgs.forEach(messageExt -> {
+                    System.out.println(messageExt);
+
+                });
+
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
                 //return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }

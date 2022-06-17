@@ -206,6 +206,7 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
                     }
                 });
 
+        // 创建下面通道关联的各种处理器
         prepareSharableHandlers();
 
         ServerBootstrap childHandler =
@@ -364,10 +365,18 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         return this.publicExecutor;
     }
 
+    /**
+     * 准备共用的通道处理器
+     */
     private void prepareSharableHandlers() {
+
         handshakeHandler = new HandshakeHandler(TlsSystemConfig.tlsMode);
+
+        // 消息编码处理器
         encoder = new NettyEncoder();
+        // 连接处理器
         connectionManageHandler = new NettyConnectManageHandler();
+        // 请求处理器
         serverHandler = new NettyServerHandler();
     }
 

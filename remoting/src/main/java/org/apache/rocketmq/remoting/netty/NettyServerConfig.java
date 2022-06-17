@@ -30,6 +30,7 @@ public class NettyServerConfig implements Cloneable {
      * 作用范围：该参数目前主要用于 NameServer 的默认业务线程池，处理诸如 Broker、Producer、Consumer 与 NameServer 的所有交互命令。
      */
     private int serverWorkerThreads = 8;
+
     private int serverCallbackExecutorThreads = 0;
     private int serverSelectorThreads = 3;
     private int serverOnewaySemaphoreValue = 256;

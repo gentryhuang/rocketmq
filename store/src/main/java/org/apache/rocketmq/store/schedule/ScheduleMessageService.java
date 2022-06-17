@@ -175,7 +175,8 @@ public class ScheduleMessageService extends ConfigManager {
             super.load();
 
             // 创建定时器
-            // 内部通过创建并启动一个线程，不断轮询定时器中的任务队列，
+            // 内部通过创建并启动一个线程，不断轮询定时器中的任务队列
+            // 方法 schedule 和方法 scheduleAtFixedRate ，如果执行任务的时间被延迟了，那么下一次任务的执行时间参考的是上一次任务"结束"时的时间来计算。
             this.timer = new Timer("ScheduleMessageTimerThread", true);
 
             // 1 遍历延时级别到延迟时间的映射
@@ -193,7 +194,7 @@ public class ScheduleMessageService extends ConfigManager {
 
                 // 每个消费队列对应单独一个定时任务进行轮询，发送 到达投递时间【计划消费时间】 的消息
                 if (timeDelay != null) {
-                    // 针对 messageDelayLevel 配置，启动对应的 timer 开始每秒执行 DeliverDelayedMessageTimerTask,判断消息是否延时到期
+                    // 针对 messageDelayLevel 配置，启动对应的 timer 开始 1秒后执行 DeliverDelayedMessageTimerTask,判断消息是否延时到期
                     this.timer.schedule(new DeliverDelayedMessageTimerTask(level, offset), FIRST_DELAY_TIME);
                 }
             }

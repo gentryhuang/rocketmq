@@ -306,7 +306,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
     }
 
     /**
-     * 上报 Broker(包括路由信息) 到 NameSrv
+     * 上报 Broker(附带 Broker 上的 Topic 队列信息) 到 NameSrv
      *
      * @param ctx
      * @param request
@@ -315,6 +315,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
      */
     public RemotingCommand registerBroker(ChannelHandlerContext ctx,
                                           RemotingCommand request) throws RemotingCommandException {
+        // 创建响应消息对象
         final RemotingCommand response = RemotingCommand.createResponseCommand(RegisterBrokerResponseHeader.class);
         final RegisterBrokerResponseHeader responseHeader = (RegisterBrokerResponseHeader) response.readCustomHeader();
 
@@ -340,14 +341,14 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
 
         // 3 todo 接收到上报的 Broker 和 Topic 信息
         RegisterBrokerResult result = this.namesrvController.getRouteInfoManager().registerBroker(
-                requestHeader.getClusterName(),
+                requestHeader.getClusterName(), // 上报的 Broker 所在的集群名
                 requestHeader.getBrokerAddr(), // 上报的 Broker 地址
                 requestHeader.getBrokerName(), // 上报的 Broker 名称
                 requestHeader.getBrokerId(),   // 上报的 BrokerId   0为Master ,>0 为 Slave
                 requestHeader.getHaServerAddr(),
                 topicConfigWrapper,           // 传过来的 Topic 信息
-                null,
-                ctx.channel()
+                null, // 无过滤器
+                ctx.channel() // 连接 NameSrv 的通道
         );
 
         responseHeader.setHaServerAddr(result.getHaServerAddr());
@@ -361,12 +362,23 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         return response;
     }
 
+    /**
+     * 注销 Broker 信息包括它相关的路由信息
+     *
+     * @param ctx
+     * @param request
+     * @return
+     * @throws RemotingCommandException
+     */
     public RemotingCommand unregisterBroker(ChannelHandlerContext ctx,
                                             RemotingCommand request) throws RemotingCommandException {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+
+        // 解码
         final UnRegisterBrokerRequestHeader requestHeader =
                 (UnRegisterBrokerRequestHeader) request.decodeCommandCustomHeader(UnRegisterBrokerRequestHeader.class);
 
+        // 注销当前 Broker 在 NameSrv 中的信息
         this.namesrvController.getRouteInfoManager().unregisterBroker(
                 requestHeader.getClusterName(),
                 requestHeader.getBrokerAddr(),
@@ -381,10 +393,12 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
     public RemotingCommand getRouteInfoByTopic(ChannelHandlerContext ctx,
                                                RemotingCommand request) throws RemotingCommandException {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
+
+        // 解码
         final GetRouteInfoRequestHeader requestHeader =
                 (GetRouteInfoRequestHeader) request.decodeCommandCustomHeader(GetRouteInfoRequestHeader.class);
 
-        // 获取 Topic 路由信息
+        // 从路由信息管理中获取 Topic 路由信息
         TopicRouteData topicRouteData = this.namesrvController.getRouteInfoManager().pickupTopicRouteData(requestHeader.getTopic());
 
         if (topicRouteData != null) {

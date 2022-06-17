@@ -94,7 +94,7 @@ public class RemotingCommand {
         }
     }
 
-    /*--------------------------------- 消息头的字段，被被编解码 ------------------------------------*/
+    /*--------------------------------- 消息头的字段，被编解码 ------------------------------------*/
     /**
      * 请求命令编码，表示请求命令类型
      */
@@ -129,7 +129,7 @@ public class RemotingCommand {
 
 
     /**
-     * todo 每个请求对应的请求头信息
+     * todo 每个请求对应的请求头信息/响应头信息
      */
     private transient CommandCustomHeader customHeader;
 
@@ -148,6 +148,7 @@ public class RemotingCommand {
 
     /**
      * 创建请求通信对象
+     *
      * @param code
      * @param customHeader
      * @return
@@ -177,6 +178,7 @@ public class RemotingCommand {
 
     /**
      * 创建响应通信对象
+     *
      * @param classHeader
      * @return
      */
@@ -212,6 +214,7 @@ public class RemotingCommand {
 
     /**
      * 解码
+     *
      * @param array
      * @return
      */
@@ -241,6 +244,7 @@ public class RemotingCommand {
         byte[] bodyData = null;
         if (bodyLength > 0) {
             bodyData = new byte[bodyLength];
+            // 读取 bodyLength 个字节的数据，也就是消息体
             byteBuffer.get(bodyData);
         }
         cmd.body = bodyData;
@@ -254,6 +258,7 @@ public class RemotingCommand {
 
     /**
      * 反序列化
+     *
      * @param headerData
      * @param type
      * @return
@@ -428,7 +433,7 @@ public class RemotingCommand {
         int length = 4;
 
         // 2> header data length
-        // 报文头部的数据，要经过序列化
+        // 报文头部的所需数据进行序列化
         byte[] headerData = this.headerEncode();
         // 加上头部报文的字节长度
         length += headerData.length;
@@ -440,9 +445,10 @@ public class RemotingCommand {
         }
 
         //分配一个  (4+length)这么大的字节缓冲区，这个缓冲区就用来存储上述协议格式的整个报文的数据
+        // todo 即：存储消息总长度（4字节） + 存储序列化类型&消息头长度（4字节） + 消息头数据大小 + 消息数据大小
         ByteBuffer result = ByteBuffer.allocate(4 + length);
 
-        // length
+        // length - 消息总大小
         // 1 缓冲区的最开始的4个字节用来存储总的长度length
         // 即 消息长度：总长度，四个字节存储，占用一个int类型；
         result.putInt(length);
@@ -471,7 +477,7 @@ public class RemotingCommand {
     }
 
     /**
-     * 消息头部序列化
+     * 消息头部序列化 - RemotingCommand 中的消息头的字段
      *
      * @return
      */
@@ -517,6 +523,11 @@ public class RemotingCommand {
         }
     }
 
+    /**
+     * 编码头，这里是除了消息体数据外的部分
+     *
+     * @return
+     */
     public ByteBuffer encodeHeader() {
         return encodeHeader(this.body != null ? this.body.length : 0);
     }
@@ -569,6 +580,11 @@ public class RemotingCommand {
         this.code = code;
     }
 
+    /**
+     * 命令类型：请求/响应
+     *
+     * @return
+     */
     @JSONField(serialize = false)
     public RemotingCommandType getType() {
         if (this.isResponseType()) {

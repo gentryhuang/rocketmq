@@ -153,12 +153,15 @@ public class BrokerStartup {
                     in.close();
                 }
             }
-
             MixAll.properties2Object(ServerUtil.commandLine2Properties(commandLine), brokerConfig);
 
             // 集成开发环境，手动指定 rocketmq 目录，启动当中需要读取该目录下的配置文件
             brokerConfig.setRocketmqHome("/Users/huanglibao/study/rocketmq/distribution");
-            // todo 静止自动创建 Topic
+
+            // todo 之前调试没有这个就可以，现在死活连不上 NameSrv ，真奇怪
+            brokerConfig.setNamesrvAddr("127.0.0.1:9876");
+
+            // todo 禁止自动创建 Topic
             // brokerConfig.setAutoCreateTopicEnable(false);
 
             if (null == brokerConfig.getRocketmqHome()) {

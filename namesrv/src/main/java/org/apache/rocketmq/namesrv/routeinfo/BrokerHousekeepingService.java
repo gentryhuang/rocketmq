@@ -25,6 +25,8 @@ import org.apache.rocketmq.remoting.ChannelEventListener;
 
 /**
  * 监控 Broker 连接状态的代理类
+ *
+ * 主要用于在Nameserver与 Broker的连接通道在关闭、通道发送异常、通道空闲时），在 RouteInfoManager 的 5 个 Map 中移除已宕机的 Broker。
  */
 public class BrokerHousekeepingService implements ChannelEventListener {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);

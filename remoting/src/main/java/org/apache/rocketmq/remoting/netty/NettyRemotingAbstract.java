@@ -172,6 +172,7 @@ public abstract class NettyRemotingAbstract {
                 case REQUEST_COMMAND:
                     processRequestCommand(ctx, cmd);
                     break;
+
                 // 响应
                 case RESPONSE_COMMAND:
                     processResponseCommand(ctx, cmd);
@@ -206,11 +207,13 @@ public abstract class NettyRemotingAbstract {
      * @param cmd request command.
      */
     public void processRequestCommand(final ChannelHandlerContext ctx, final RemotingCommand cmd) {
-        // 1 根据请求码获取对应的请求处理器
+        // 1 根据请求码获取对应的请求处理器 NettyRequestProcessor
         final Pair<NettyRequestProcessor, ExecutorService> matched = this.processorTable.get(cmd.getCode());
 
         // 2 如果没有请求码对应的处理器，就使用默认的
         final Pair<NettyRequestProcessor, ExecutorService> pair = null == matched ? this.defaultRequestProcessor : matched;
+
+        // 获取请求编号，用来和对应的响应对应
         final int opaque = cmd.getOpaque();
 
         // 3 如果有对应的处理器，则进行请求的处理
@@ -233,6 +236,7 @@ public abstract class NettyRemotingAbstract {
                                 // 如果是非 oneway 的请求，则进行响应
                                 if (!cmd.isOnewayRPC()) {
                                     if (response != null) {
+                                        // 请求编码对应上
                                         response.setOpaque(opaque);
                                         response.markResponseType();
                                         try {
