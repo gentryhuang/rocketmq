@@ -56,21 +56,17 @@ public class PullConsumerNewTest {
 
 
     public static void main(String[] args) throws MQClientException {
-
         DefaultMQPullConsumer consumer = new DefaultMQPullConsumer("pull_group_name1");
-
-
         // Specify name server addresses.
         // namesrv 地址
         consumer.setNamesrvAddr("localhost:9876");
         Set<String> topics = new HashSet<>();
 
         //You would better to register topics,It will use in rebalance when starting
-
         topics.add("pp_topic");
-
         // 注册 Topic ，用于订阅
         consumer.setRegisterTopics(topics);
+
         consumer.start();
         ExecutorService executors = Executors.newFixedThreadPool(topics.size(), new ThreadFactory() {
             @Override
@@ -85,7 +81,6 @@ public class PullConsumerNewTest {
                 public void doSomething(List<MessageExt> msgs) {
                     System.out.println(Thread.currentThread().getName() + " 正在消费消息 " + msgs);
                 }
-
 
                 @Override
                 public void run() {

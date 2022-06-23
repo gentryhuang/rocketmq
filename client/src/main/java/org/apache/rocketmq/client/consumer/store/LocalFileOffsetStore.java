@@ -65,8 +65,7 @@ public class LocalFileOffsetStore implements OffsetStore {
     /**
      * 内存中的 offfset 进度保持，以 MessageQueue 为键，偏移量为值
      */
-    private ConcurrentMap<MessageQueue, AtomicLong> offsetTable =
-            new ConcurrentHashMap<MessageQueue, AtomicLong>();
+    private ConcurrentMap<MessageQueue, AtomicLong> offsetTable = new ConcurrentHashMap<MessageQueue, AtomicLong>();
 
     public LocalFileOffsetStore(MQClientInstance mQClientFactory, String groupName) {
         this.mQClientFactory = mQClientFactory;
@@ -155,7 +154,7 @@ public class LocalFileOffsetStore implements OffsetStore {
     }
 
     /**
-     * 持久化消费进度。将消费进度写入文件
+     * 持久化消费进度。将消费进度以 JSON 字符串写入文件
      * @param mqs
      */
     @Override

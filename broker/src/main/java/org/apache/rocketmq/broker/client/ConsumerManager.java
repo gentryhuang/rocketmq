@@ -48,7 +48,7 @@ public class ConsumerManager {
     private static final long CHANNEL_EXPIRED_TIMEOUT = 1000 * 120;
 
     /**
-     * 消费分组信息
+     * 消费分组信息，这个分组信息量很大
      */
     private final ConcurrentMap<String/* Group */, ConsumerGroupInfo> consumerTable = new ConcurrentHashMap<String, ConsumerGroupInfo>(1024);
 
@@ -109,10 +109,23 @@ public class ConsumerManager {
         }
     }
 
+    /**
+     * 注册消费信息（消费者上报）
+     *
+     * @param group                            消费组
+     * @param clientChannelInfo                通信信息
+     * @param consumeType                      消费类型
+     * @param messageModel                     消费模式
+     * @param consumeFromWhere                 从哪里消费
+     * @param subList                          当前消费者的订阅信息
+     * @param isNotifyConsumerIdsChangedEnable
+     * @return
+     */
     public boolean registerConsumer(final String group, final ClientChannelInfo clientChannelInfo,
                                     ConsumeType consumeType, MessageModel messageModel, ConsumeFromWhere consumeFromWhere,
                                     final Set<SubscriptionData> subList, boolean isNotifyConsumerIdsChangedEnable) {
 
+        // 1 消费者分组信息处理
         ConsumerGroupInfo consumerGroupInfo = this.consumerTable.get(group);
         if (null == consumerGroupInfo) {
             ConsumerGroupInfo tmp = new ConsumerGroupInfo(group, consumeType, messageModel, consumeFromWhere);
@@ -120,9 +133,12 @@ public class ConsumerManager {
             consumerGroupInfo = prev != null ? prev : tmp;
         }
 
+        // 2 尝试更新分组信息中的消息通信，若变动则返回 true
         boolean r1 =
                 consumerGroupInfo.updateChannel(clientChannelInfo, consumeType, messageModel,
                         consumeFromWhere);
+
+        // 3 尝试更新分组信息中的订阅信息，若变动则返回 true
         boolean r2 = consumerGroupInfo.updateSubscription(subList);
 
         if (r1 || r2) {

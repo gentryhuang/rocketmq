@@ -28,7 +28,7 @@ public class AppendMessageResult {
     private AppendMessageStatus status;
 
     /**
-     * 消息的物理偏移量，即当前消息从哪里开始写的
+     * 消息的物理偏移量，即当前消息是从哪里开始写的
      * Where to start writing
      */
     private long wroteOffset;

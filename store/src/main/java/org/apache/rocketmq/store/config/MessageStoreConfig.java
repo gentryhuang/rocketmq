@@ -68,17 +68,17 @@ public class MessageStoreConfig {
 
     /**
      * 刷写 CommitLog 到磁盘的间隔时间，默认 500 毫秒
-     * RocketMQ 会启动后台线程，将消息刷写到磁盘。
+     * RocketMQ 会启动后台线程，将消息刷写到磁盘，即 flush 操作，调用文件通道的 force() 方法
      */
     @ImportantField
     private int flushIntervalCommitLog = 500;
 
     /**
-     * 提交消息到 CommitLog 对应的文件通道的间隔时间，即
+     * 提交消息到 CommitLog 对应的文件通道的间隔时间，原理与上面类似。将消息写入到文件通道（调用 FileChannel.write 方法）得到最新的写指针，默认为 200 毫秒。
      *
      * @see org.apache.rocketmq.store.CommitLog.CommitRealTimeService 执行间隔时间，默认 200ms
      */
-    // Only used if TransientStorePool enabled
+    // Only used if TransientStorePool enabled 在开启 TransientStorePool 的情况下，将消息写入到 FileChannel
     // flush data to FileChannel
     @ImportantField
     private int commitIntervalCommitLog = 200;
@@ -98,7 +98,7 @@ public class MessageStoreConfig {
     private boolean flushCommitLogTimed = false;
 
     /**
-     * 两次刷盘的的间隔，默认为 1s
+     * 刷写到 ConsumeQueue 的间隔，默认为 1s
      */
     private int flushIntervalConsumeQueue = 1000;
 
@@ -226,7 +226,7 @@ public class MessageStoreConfig {
 
     /**
      * 内存级别的读写分离机制
-     * 优点：是消息直接写入堆外内存，然后异步写入 pagecache ，相比每条消息追加直接写入 pagecache ，最大的优势是实现了批量化消息写入
+     * 优点：消息直接写入堆外内存，然后异步写入 pagecache ，相比每条消息追加直接写入 pagecache ，最大的优势是实现了批量化消息写入
      * 缺点：如果 Broker 进程异常退出，放入 pagecache 中的数据不会丢失，而存储在堆外内存数据会丢失
      */
     @ImportantField

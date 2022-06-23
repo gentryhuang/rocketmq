@@ -32,8 +32,22 @@ public class GetMessageResult {
     private final List<ByteBuffer> messageBufferList = new ArrayList<ByteBuffer>(100);
 
     private GetMessageStatus status;
+
+    /**
+     * 消费者下次拉取消息的 offset 信息，即消费者对 consumeQueue 的消费进度
+     *
+     * 是消费者在下一轮消息拉取时 offset 的重要依据，无论当次拉取的消息消费是否正常，nextBeginOffset都不会回滚，
+     * 这是因为rocketMQ对消费异常的消息的处理是将消息重新发回broker端的重试队列（会为每个topic创建一个重试队列，以%RERTY%开头），达到重试时间后将消息投递到重试队列中进行消费重试。
+     *
+     */
     private long nextBeginOffset;
+    /**
+     * 消费队列 consumeQueue 记录的最小 offset 信息
+     */
     private long minOffset;
+    /**
+     * 消费队列 consumeQueue 记录的最大 offset 信息
+     */
     private long maxOffset;
 
     private int bufferTotalSize = 0;

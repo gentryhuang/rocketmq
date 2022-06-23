@@ -1188,6 +1188,7 @@ public class MQClientAPIImpl {
         // 获取消费队列的消费进度，请求码：QUERY_CONSUMER_OFFSET
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.QUERY_CONSUMER_OFFSET, requestHeader);
 
+        // 同步超时调用
         RemotingCommand response = this.remotingClient.invokeSync(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr),
                 request, timeoutMillis);
         assert response != null;

@@ -54,6 +54,8 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
     public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request)
             throws RemotingCommandException {
         switch (request.getCode()) {
+
+            // 获取某个消费组下的所有消费者 ID
             case RequestCode.GET_CONSUMER_LIST_BY_GROUP:
                 return this.getConsumerListByGroup(ctx, request);
 
@@ -140,10 +142,14 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
      */
     private RemotingCommand queryConsumerOffset(ChannelHandlerContext ctx, RemotingCommand request)
             throws RemotingCommandException {
+
+        // 创建响应对象
         final RemotingCommand response =
                 RemotingCommand.createResponseCommand(QueryConsumerOffsetResponseHeader.class);
         final QueryConsumerOffsetResponseHeader responseHeader =
                 (QueryConsumerOffsetResponseHeader) response.readCustomHeader();
+
+        // 解码
         final QueryConsumerOffsetRequestHeader requestHeader =
                 (QueryConsumerOffsetRequestHeader) request
                         .decodeCommandCustomHeader(QueryConsumerOffsetRequestHeader.class);
@@ -164,7 +170,7 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
             // offset 为 -1 一般都是针对一个新的消费组
         } else {
 
-            // 获取该主题、消息队列当前在 Broker 服务器最小的物理偏移量
+            // 获取该主题、消息队列当前在 Broker 服务器最小的 offset
             // 如果返回 0 则表示该队列的文件还未曾删除
             long minOffset =
                     this.brokerController.getMessageStore().getMinOffsetInQueue(requestHeader.getTopic(),
@@ -180,7 +186,7 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                 response.setRemark(null);
 
 
-                // 如果偏移量小于等于0，但其消息已经存储在磁盘中，此时返回未找到，最终RebalancePushImpl#computePullFromWhere中得到的偏移量为-1。
+                // 返回未找到，最终 RebalancePushImpl#computePullFromWhere 中得到的偏移量为-1。
             } else {
                 response.setCode(ResponseCode.QUERY_NOT_FOUND);
                 response.setRemark("Not found, V3_0_6_SNAPSHOT maybe this group consumer boot first");

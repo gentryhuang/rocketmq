@@ -52,9 +52,15 @@ public class MessageExt extends Message {
      * 系统标志，什么类型的消息
      */
     private int sysFlag;
+    /**
+     * 消息创建时间
+     */
     private long bornTimestamp;
     private SocketAddress bornHost;
 
+    /**
+     * 消息存储时间
+     */
     private long storeTimestamp;
     private SocketAddress storeHost;
 
@@ -204,6 +210,7 @@ public class MessageExt extends Message {
 
     /**
      * todo 子类重写了该方法，返回的不再是 offsetMsgId
+     *
      * @return
      */
     public String getMsgId() {

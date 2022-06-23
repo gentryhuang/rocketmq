@@ -29,7 +29,7 @@ import org.apache.rocketmq.common.message.MessageQueue;
  * 2 区别：
  * 2.1 开启故障延迟机制，其实是一种悲观的做法。一旦消息发送失败后就会悲观认为 Broker 不可用，把这个 Broker 记录下来，在接下来的一段时间（延迟规避时间）内就不能再向其发送消息，直接避开该 Broker。
  * 2.2 未开始故障延迟机制，只会在本地消息发送的重试过程中规避该 Broker，下一次消息发送是个无状态，还是会继续尝试
- * 3 联系：开始故障延迟机制是将认为出现问题的 Broker 记录下来，指定多长时间内不能参与消息队列负载；不开启故障延迟机制，只是对上次出现的故障进行规避；
+ * 3 联系：开启故障延迟机制是将认为出现问题的 Broker 记录下来，指定多长时间内不能参与消息队列负载；不开启故障延迟机制，只是对上次出现的故障进行规避；
  * <p>
  * 默认情况下容错策略关闭，即 sendLatencyFaultEnable=false
  */
@@ -129,7 +129,7 @@ public class MQFaultStrategy {
                         return mq;
                 }
 
-                /* 选择一个broker获取队列，不考虑该队列的可用性 */
+                /* 选择一个相对较好的 broker 获取队列，不考虑该队列的可用性 */
 
                 // 根据 Broker 的 startTimestart 进行一个排序，值越小，排前面，然后再选择一个，返回（此时不能保证一定可用，会抛出异常，如果消息发送方式是同步调用，则有重试机制）。
                 // 即 选择一个相对好的 Broker，并获得其对应的一个消息队列，不考虑该队列的可用性
@@ -179,7 +179,7 @@ public class MQFaultStrategy {
         if (this.sendLatencyFaultEnable) {
 
             // 计算延迟对应的不可用时长
-            // 1 如果隔离，则使用 30s 作为消息发送延迟时间
+            // 1 如果隔离，则使用 30s 作为消息发送延迟时间，即当前 broker 在接下来的 60000L 也就是 5 分钟内不提供服务
             // 2 如果不隔离，则使用本次消息发送时延作为消息发送延迟时间
             long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
 

@@ -108,6 +108,9 @@ import org.apache.rocketmq.store.dledger.DLedgerCommitLog;
 import org.apache.rocketmq.store.stats.BrokerStats;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
+/**
+ * Broker 在 RocketMQ 架构中的角色，就是存储消息，核心任务就是持久化消息。生产者发送消息给 Broker，消费者从 Broker 消费消息。
+ */
 public class BrokerController {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private static final InternalLogger LOG_PROTECTION = InternalLoggerFactory.getLogger(LoggerName.PROTECTION_LOGGER_NAME);
@@ -205,32 +208,44 @@ public class BrokerController {
         this.nettyClientConfig = nettyClientConfig;
         this.messageStoreConfig = messageStoreConfig;
         /**
-         * 维护消费者的消费进度
+         * 1 维护消费者的消费进度
          */
         this.consumerOffsetManager = new ConsumerOffsetManager(this);
 
         /**
-         * 创建 Topic 配置管理对象
-         * 1 在初始化时，会设置 {#link org.apache.rocketmq.broker.topic.TopicConfigManager#topicConfigTable} 属性，如 TBW102 到对应的 TopicConfig 映射
+         * 2 创建 Topic 配置管理对象
+         * 在初始化时，会设置 {#link org.apache.rocketmq.broker.topic.TopicConfigManager#topicConfigTable} 属性，如 TBW102 到对应的 TopicConfig 映射
          */
         this.topicConfigManager = new TopicConfigManager(this);
+
+        // 3 创建拉取消息请求处理器
         this.pullMessageProcessor = new PullMessageProcessor(this);
+
+        // 4 长轮询实现相关 - 挂起拉取消息请求
         this.pullRequestHoldService = new PullRequestHoldService(this);
+
+        // 5 长轮询实现相关 - 消息到达监听器
         this.messageArrivingListener = new NotifyMessageArrivingListener(this.pullRequestHoldService);
+
         this.consumerIdsChangeListener = new DefaultConsumerIdsChangeListener(this);
 
         /**
-         * 维护消费者上报的信息
+         * 6 维护消费者上报的信息
          */
         this.consumerManager = new ConsumerManager(this.consumerIdsChangeListener);
+
+
         this.consumerFilterManager = new ConsumerFilterManager(this);
         this.producerManager = new ProducerManager();
         this.clientHousekeepingService = new ClientHousekeepingService(this);
         this.broker2Client = new Broker2Client(this);
+
+        // 7 消费组订阅配置信息
         this.subscriptionGroupManager = new SubscriptionGroupManager(this);
         this.brokerOuterAPI = new BrokerOuterAPI(nettyClientConfig);
         this.filterServerManager = new FilterServerManager(this);
 
+        // 8 从节点同步
         this.slaveSynchronize = new SlaveSynchronize(this);
 
         this.sendThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getSendThreadPoolQueueCapacity());
@@ -245,8 +260,10 @@ public class BrokerController {
         this.brokerStatsManager = new BrokerStatsManager(this.brokerConfig.getBrokerClusterName());
         this.setStoreHost(new InetSocketAddress(this.getBrokerConfig().getBrokerIP1(), this.getNettyServerConfig().getListenPort()));
 
-        // todo 快速失败
+        // 9 快速失败的实现类，用于定期检测 PageCache 是否繁忙，繁忙则将排队中的发送消息线程任务快速失败掉，结束等待。
         this.brokerFastFailure = new BrokerFastFailure(this);
+
+
         this.configuration = new Configuration(
                 log,
                 BrokerPathConfigHelper.getBrokerConfigPath(),
@@ -277,18 +294,25 @@ public class BrokerController {
      * @throws CloneNotSupportedException
      */
     public boolean initialize() throws CloneNotSupportedException {
+        // 1 主要加载 Topic 的基本属性文件，如队列信息 org.apache.rocketmq.broker.topic.TopicConfigManager.topicConfigTable
         boolean result = this.topicConfigManager.load();
 
-        // todo 对 offset 进行加载，然后将文件内容更新到 org.apache.rocketmq.broker.offset.ConsumerOffsetManager.offsetTable 缓存中
+        // 2 对 offset 进行加载，然后将文件内容更新到 org.apache.rocketmq.broker.offset.ConsumerOffsetManager.offsetTable 缓存中
         result = result && this.consumerOffsetManager.load();
+
+        // 3 对消费者订阅信息进行加载 org.apache.rocketmq.broker.subscription.SubscriptionGroupManager.subscriptionGroupTable
         result = result && this.subscriptionGroupManager.load();
         result = result && this.consumerFilterManager.load();
 
+        // 以上正常加载后开始创建核心对象
         if (result) {
             try {
+                // 4 创建 RocketMQ 存储核心类
                 this.messageStore =
                         new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener,
                                 this.brokerConfig);
+
+                // 5 开启 DLeger
                 if (messageStoreConfig.isEnableDLegerCommitLog()) {
                     DLedgerRoleChangeHandler roleChangeHandler = new DLedgerRoleChangeHandler(this, (DefaultMessageStore) messageStore);
                     ((DLedgerCommitLog) ((DefaultMessageStore) messageStore).getCommitLog()).getdLedgerServer().getdLedgerLeaderElector().addRoleChangeHandler(roleChangeHandler);
@@ -304,12 +328,12 @@ public class BrokerController {
             }
         }
 
-        // 加载
+        // 6 加载与恢复文件。主要是在 RocketMQ 启动过程中根据 commitlog 重构 consumequeue ，index
         result = result && this.messageStore.load();
 
         if (result) {
 
-            /** todo 创建远程通信抽服务端实现类
+            /** 7  todo 创建远程通信抽服务端实现类
              * @see BrokerController#initialize()
              */
             this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.clientHousekeepingService);
@@ -391,11 +415,12 @@ public class BrokerController {
                     Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                             "ConsumerManageThread_"));
 
-            // todo 注册请求处理器，非常重要
+            // todo 注册处理各种请求（码）的请求处理器，并关联对应的线程池。
+            //  非常重要
             this.registerProcessor();
 
 
-            /*------------------------------- 定义系列线程池 ---------------------------------*/
+            /*------------------------------- 定义系列定时线程池 ---------------------------------*/
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();
             final long period = 1000 * 60 * 60 * 24;
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
@@ -549,7 +574,11 @@ public class BrokerController {
                     log.warn("FileWatchService created error, can't load the certificate dynamically");
                 }
             }
+
+            // todo 事务消息相关类的创建
             initialTransaction();
+
+            // ACL 相关逻辑
             initialAcl();
             initialRpcHooks();
         }

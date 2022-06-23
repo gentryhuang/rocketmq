@@ -496,9 +496,11 @@ public class MappedFileQueue {
     public long getMaxOffset() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
-            // 最后一个文件的起始偏移量 + 读位置
+            // 最后一个文件的起始偏移量 + 可读位置（写或提交指针）
             return mappedFile.getFileFromOffset() + mappedFile.getReadPosition();
         }
+
+        // 当前的 ConsumeQueue 还没有消息索引
         return 0;
     }
 

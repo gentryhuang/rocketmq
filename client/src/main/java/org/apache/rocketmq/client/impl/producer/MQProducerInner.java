@@ -44,6 +44,12 @@ public interface MQProducerInner {
             final MessageExt msg,
             final CheckTransactionStateRequestHeader checkRequestHeader);
 
+    /**
+     * 更新 Topic 的发布信息
+     *
+     * @param topic
+     * @param info
+     */
     void updateTopicPublishInfo(final String topic, final TopicPublishInfo info);
 
     boolean isUnitMode();

@@ -174,7 +174,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
 
     /**
      * 消息校验
-     * todo 发送消息的请求到达 Broker 后，会有一步 msgCheck 的过程
+     * todo 发送消息的请求到达 Broker 后，会有一步 msgCheck 的过程，主要包括 topic 是否在当前 Broker 中
      *
      * @param ctx
      * @param requestHeader
@@ -195,7 +195,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
 
         /**
          * 2 Topic 的校验 (todo 主要针对默认主题，默认主题不能发送消息，仅供路由查找)
-         *  2.1 检查Topic是否可以被发送，目前是 TWB102 不被允许发送
+         *  2.1 检查Topic是否可以被发送
          *  2.2 当找不到Topic配置，则进行创建
          */
         if (!TopicValidator.validateTopic(requestHeader.getTopic(), response)) {

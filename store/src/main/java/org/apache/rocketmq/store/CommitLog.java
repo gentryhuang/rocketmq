@@ -106,6 +106,7 @@ public class CommitLog {
     /**
      * todo Topic 下 queue 的 逻辑偏移量，类似数组下标记(注意，不是物理偏移量)
      * todo 特别说明：在进行 CommitLog 转发时，对应消息队列的逻辑偏移量就是从这里取的
+     *
      * @see DefaultMessageStore#recoverTopicQueueTable()
      */
     protected HashMap<String/* topic-queueid */, Long/* offset */> topicQueueTable = new HashMap<String, Long>(1024);
@@ -146,6 +147,9 @@ public class CommitLog {
          */
         this.commitLogService = new CommitRealTimeService();
 
+        /**
+         * 追加消息的回调函数
+         */
         this.appendMessageCallback = new DefaultAppendMessageCallback(defaultMessageStore.getMessageStoreConfig().getMaxMessageSize());
         batchEncoderThreadLocal = new ThreadLocal<MessageExtBatchEncoder>() {
             @Override
@@ -777,6 +781,8 @@ public class CommitLog {
             switch (result.getStatus()) {
                 case PUT_OK:
                     break;
+
+                // 创建一个新文件继续写
                 case END_OF_FILE:
                     unlockMappedFile = mappedFile;
                     // Create a new file, re-write the message
@@ -1051,6 +1057,7 @@ public class CommitLog {
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {
             long beginLockTimestamp = this.defaultMessageStore.getSystemClock().now();
+            // 写消息加锁的开始时间
             this.beginTimeInLock = beginLockTimestamp;
 
             // Here settings are stored timestamp, in order to ensure an orderly
@@ -1080,7 +1087,7 @@ public class CommitLog {
                 case PUT_OK:
                     break;
 
-                // MappedFile 已满，创建新的，再次追加消息
+                // MappedFile 不够写了（填空占位），创建新的重新写消息
                 case END_OF_FILE:
                     unlockMappedFile = mappedFile;
                     // Create a new file, re-write the message
@@ -1938,7 +1945,7 @@ public class CommitLog {
                         // todo 是否刷盘成功，比对 刷盘点和提交的预期刷盘点，看是否需要刷盘
                         boolean flushOK = CommitLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
 
-                        // todo 考虑到有可能每次循环的消息写入的消息，可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
+                        // todo 考虑到有可能每次循环写入的消息，可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
                         for (int i = 0; i < 2 && !flushOK; i++) {
                             // 1 执行刷盘操作
                             CommitLog.this.mappedFileQueue.flush(0);
@@ -2170,9 +2177,9 @@ public class CommitLog {
             }
 
 
-            // 8 如果 MapperFile 剩余空间不足时，写入 BLANK 占位，，返回结果 END_OF_FILE 。
-            // todo 后续会新创建 CommitLog 文件来存储该消息
+            // 8 如果 MapperFile 剩余空间不足时，写入 BLANK 占位，，返回结果 END_OF_FILE ，后续会新创建 CommitLog 文件来存储该消息
             // todo 从这里可以看出，每个 CommitLog 文件最少空闲 8 个字节。高 4 字节存储当前文件的剩余空间，低 4 字节存储魔数 CommitLog.BLANK_MAGIC_CODE
+            // 也就是文件可用的空间放不下一个消息，为了区分，在每一个commitlog 文件的最后会写入8个字节，表示文件的结束。
             // Determines whether there is sufficient free space
             if ((msgLen + END_FILE_MIN_BLANK_LENGTH) > maxBlank) {
                 this.resetByteBuffer(this.msgStoreItemMemory, maxBlank);

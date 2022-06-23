@@ -69,7 +69,7 @@ import org.apache.rocketmq.store.stats.BrokerStatsManager;
  * 说明：
  * 1 RocketMQ 存储用的是本地文件存储系统，效率高也可靠
  * 2 主要涉及到三种类型的文件：CommitLog、ConsumeQueue、IndexFile
- * - CommitLog: 所有主题的消息都存在 CommitLog 中，当个 CommitLog 默认为 1G，并且文件名以起始偏移量命令，固定 20 位，不足前面补 0 。
+ * - CommitLog: 所有主题的消息都存在 CommitLog 中，单个 CommitLog 默认为 1G，并且文件名以起始偏移量命令，固定 20 位，不足前面补 0 。
  * 比如 00000000000000000000 代表了第一个文件，第二个文件名就是 00000000001073741824，表明起始偏移量为 1073741824，
  * 以这样的方式命名用偏移量就能找到对应的文件。所有消息都是顺序写入的，超过文件大小则开启下一个文件。
  * - ConsumeQueue:

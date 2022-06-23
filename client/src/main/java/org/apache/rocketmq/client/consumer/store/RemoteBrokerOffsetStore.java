@@ -58,7 +58,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
 
     /**
      * 内存中的消费进度
-     * todo 说明：是针对消息队列的逻辑偏移量
+     * todo 说明：是针对消息队列的逻辑偏移量，非 offset
      */
     private ConcurrentMap<MessageQueue, AtomicLong> offsetTable = new ConcurrentHashMap<MessageQueue, AtomicLong>();
 

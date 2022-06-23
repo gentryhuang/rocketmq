@@ -22,6 +22,8 @@ package org.apache.rocketmq.common.consumer;
 public enum ConsumeFromWhere {
     /**
      * 一个新的订阅组第一次启动从队列的最后位置开始消费，后续再启动接着上次消费的进度开始消费，todo 即跳过历史消息
+     * <p>
+     * 从最新的 offset 开始消费
      */
     CONSUME_FROM_LAST_OFFSET,
 
@@ -35,6 +37,8 @@ public enum ConsumeFromWhere {
 
     /**
      * 一个新的订阅组第一次启动从队列的最前位置开始消费，后续再启动接着上次消费的进度开始消费，todo 即消费Broker未过期的历史消息
+     * <p>
+     * 从第一个 offset 开始消费
      */
     CONSUME_FROM_FIRST_OFFSET,
 

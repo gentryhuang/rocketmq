@@ -132,6 +132,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>();
     private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5"));
+    /**
+     * 消息发送容错策略
+     */
     private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy();
     private ExecutorService asyncSenderExecutor;
 
@@ -242,7 +245,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
                 // 向 MQClientInstance 注册消息生产者自己，将当前生产者加入客户端管理
-                // 其实消息生产者的智能是交给 客户端实例完成的
+                // 其实消息生产者的职能是交给 客户端实例完成的
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
 
                 // 更新消息生产者的状态
@@ -280,7 +283,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 break;
         }
 
-        // 同步向所有 Broker 发送心跳检测请求
+        // 同步向所有 Broker 发送心跳请求，上报信息
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
         this.timer.scheduleAtFixedRate(new TimerTask() {
@@ -603,10 +606,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      * 异步发送消息
      * It will be removed at 4.4.0 cause for exception handling and the wrong Semantics of timeout. A new one will be
      * provided in next version
-     *
+     * <p>
      * todo 异步发送已经废弃，原因如下：
-     *  1 超时时间的计算不准确
-     *  2 异步方法还有改进的空间，其实可以直接结合Netty做到不需要Executor。
+     * 1 超时时间的计算不准确
+     * 2 异步方法还有改进的空间，其实可以直接结合Netty做到不需要Executor。
      *
      * @param msg
      * @param sendCallback
@@ -651,7 +654,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     /**
-     * 根据 Topic 选择队列
+     * 根据 Broker 选择队列
      *
      * @param tpInfo
      * @param lastBrokerName
@@ -735,12 +738,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 String lastBrokerName = null == mq ? null : mq.getBrokerName();
 
                 // 2 根据负载均衡算法选择一个MessageQueue，即选择消息要发送到的队列
-                // todo 这里没有指定队列选择器，使用的是默认的选择队列逻辑。结合是否开启延迟规避策略，使用随机递增取模选择队列
-                // todo 其实 RocketMQ 提供了很多 MessageQueueSelector 的实现，例如随机选择策略，哈希选择策略和同机房选择策略，如果需要，你也可以自己实现选择策略
+                // todo 这里没有指定队列选择器，使用的是默认的选择队列逻辑。结合是否开启延迟规避策略，使用随机递增取模选择队列。
+                // todo 其实 RocketMQ 提供了很多 MessageQueueSelector 的实现，例如随机选择策略，参数哈希取模选择策略和同机房选择策略，如果需要，你也可以自己实现选择策略
                 // todo 注意和消费端 MessageQueue 负载算法的区别，两者一个是消息生产端，一个是消费端
                 MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
                 if (mqSelected != null) {
                     mq = mqSelected;
+                    // 存放选择的 broker 名
                     brokersSent[times] = mq.getBrokerName();
                     try {
                         beginTimestampPrev = System.currentTimeMillis();
@@ -750,7 +754,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         }
                         // 耗时时间
                         long costTime = beginTimestampPrev - beginTimestampFirst;
-                        // todo 如果本身向broker发送消息产生超时异常，就不会再重试
+
+                        // todo 发送消息超时了，就不会再重试
                         if (timeout < costTime) {
                             callTimeout = true;
                             break;
@@ -761,8 +766,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
                         endTimestamp = System.currentTimeMillis();
 
-                        // 更新 Broker 可用信息 todo 干嘛的？
-                        // 在选择发送到的消息队列时，会参考Broker发送消息的延迟
+                        /*----- 说明：endTimestamp - beginTimestampPrev  表示一次消息延迟时间---------*/
+
+                        // 更新 Broker 可用信息
+                        // todo 干嘛的？在选择发送到的消息队列时，会参考Broker发送消息的延迟
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
 
                         switch (communicationMode) {
@@ -876,6 +883,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
             throw mqClientException;
         }
+
+        /* 执行到这里，说明 Topic 的路由都没找到 */
 
         // 校验 namesrv 地址列表
         validateNameServerSetting();
@@ -1190,7 +1199,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             }
         }
 
-        // 不存 Broker 异常
+        // 不存在 Broker 异常
         throw new MQClientException("The broker[" + mq.getBrokerName() + "] not exist", null);
     }
 

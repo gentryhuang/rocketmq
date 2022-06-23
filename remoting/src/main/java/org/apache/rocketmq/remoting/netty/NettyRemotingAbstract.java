@@ -81,6 +81,8 @@ public abstract class NettyRemotingAbstract {
 
     /**
      * This map caches all on-going requests.
+     * <p>
+     * 请求对应的响应
      */
     protected final ConcurrentMap<Integer /* opaque */, ResponseFuture> responseTable =
             new ConcurrentHashMap<Integer, ResponseFuture>(256);
@@ -282,7 +284,7 @@ public abstract class NettyRemotingAbstract {
             };
 
             // 4 处理请求前先判断是否需要拒绝本次请求的处理
-            // 比如 操作系统PageCache是否繁忙，如果开始使用堆外内存那是否还有可用的堆外内存缓存区
+            // 比如 操作系统PageCache是否繁忙，如果开启使用堆外内存那是否还有可用的堆外内存缓存区
             if (pair.getObject1().rejectRequest()) {
                 /// 如果拒绝请求，则响应系统繁忙
                 final RemotingCommand response = RemotingCommand.createResponseCommand(RemotingSysResponseCode.SYSTEM_BUSY,
@@ -467,16 +469,25 @@ public abstract class NettyRemotingAbstract {
     public RemotingCommand invokeSyncImpl(final Channel channel, final RemotingCommand request,
                                           final long timeoutMillis)
             throws InterruptedException, RemotingSendRequestException, RemotingTimeoutException {
+
+        // 获取当前请求的标志，用于和对应的响应对象关联
         final int opaque = request.getOpaque();
 
         try {
+
+            // 创建当前请求对应的响应的对象，并缓存起来。等到请求返回时，就可以通过响应的结果中的 opaque 找到对应 ResponseFuture 对象
             final ResponseFuture responseFuture = new ResponseFuture(channel, opaque, timeoutMillis, null, null);
             this.responseTable.put(opaque, responseFuture);
+
             final SocketAddress addr = channel.remoteAddress();
+
+            // 通过通道发起请求
             channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture f) throws Exception {
                     if (f.isSuccess()) {
+                        // 成功则设置标志
+                        // @see org.apache.rocketmq.remoting.netty.NettyRemotingAbstract.processResponseCommand ，其中已经调用 countDown() 方法唤醒等待的线程
                         responseFuture.setSendRequestOK(true);
                         return;
                     } else {
@@ -485,16 +496,21 @@ public abstract class NettyRemotingAbstract {
 
                     responseTable.remove(opaque);
                     responseFuture.setCause(f.cause());
+                    // 设置 null 结果，并唤醒等待的线程
                     responseFuture.putResponse(null);
                     log.warn("send a request command to channel <" + addr + "> failed.");
                 }
             });
 
+            // 超时等待请求返回，使用 CountDownLatch
             RemotingCommand responseCommand = responseFuture.waitResponse(timeoutMillis);
             if (null == responseCommand) {
+                // 结果为 null 且状态为 true，说明是调用超时了
                 if (responseFuture.isSendRequestOK()) {
                     throw new RemotingTimeoutException(RemotingHelper.parseSocketAddressAddr(addr), timeoutMillis,
                             responseFuture.getCause());
+
+                    // 请求处理失败
                 } else {
                     throw new RemotingSendRequestException(RemotingHelper.parseSocketAddressAddr(addr), responseFuture.getCause());
                 }
@@ -506,6 +522,18 @@ public abstract class NettyRemotingAbstract {
         }
     }
 
+    /**
+     * 异步调用
+     *
+     * @param channel
+     * @param request
+     * @param timeoutMillis
+     * @param invokeCallback
+     * @throws InterruptedException
+     * @throws RemotingTooMuchRequestException
+     * @throws RemotingTimeoutException
+     * @throws RemotingSendRequestException
+     */
     public void invokeAsyncImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis,
                                 final InvokeCallback invokeCallback)
             throws InterruptedException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {

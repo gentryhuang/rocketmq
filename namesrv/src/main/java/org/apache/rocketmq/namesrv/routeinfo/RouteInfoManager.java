@@ -342,7 +342,7 @@ public class RouteInfoManager {
                 // 缓存中的队列的 Broker 和 传入的 Broker 相同
                 if (qd.getBrokerName().equals(brokerName)) {
 
-                    // 队列也相同，则不需要新增
+                    // 队列也相同（队列的属性信息，看重写的 equals 方法），则不需要新增
                     // todo 即 NameSrv 中缓存的 Topic 队列信息，一个 Broker 下对应部分队列。
                     if (qd.equals(queueData)) {
                         addNewOne = false;

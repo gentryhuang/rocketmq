@@ -152,6 +152,8 @@ public class PullMessageService extends ServiceThread {
 
                 // 拉取消息
                 this.pullMessage(pullRequest);
+
+                // 出现异常或被中断也不会退出
             } catch (InterruptedException ignored) {
             } catch (Exception e) {
                 log.error("Pull Message Service Run Method exception", e);

@@ -96,8 +96,8 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * todo 附加：
      * writeQueueNums 和 readQueueNums 是在服务端来控制每个客户端在生产和消费的时候，分别访问多少个队列。
      * 这两个参数是服务端参数，优先级是高于客户端控制的参数defaultTopicQueueNums的。一般用于非自动创建主题的情况，
-     * 非自动创建主题，可以在手动创建 Topic 时指定读写队列个数。如果允许自动创建主题，则基于默认主题主题 TBW102 创建
-     * 队列时，队列个数取 Max.min(defaultTopicQueueNums,TBW102主题下队列数（默认8个,todo 这个是系统固定的，启动后不允许在 Consol 上修改))
+     * 非自动创建主题，可以在手动创建 Topic 时指定读写队列个数。如果允许自动创建主题，则基于默认主题 TBW102 创建
+     * 队列时，队列个数取 Max.min(defaultTopicQueueNums,TBW102主题下队列数（默认8个,todo 这个是系统固定的，启动后不允许在 Console 上修改))
      */
     private volatile int defaultTopicQueueNums = 4;
 
@@ -128,7 +128,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     /**
      * 是否在内部发送失败时重试另一个broker：
      * 同步模式下，消息保存失败时是否重试其他broker。默认值：false
-     * 注意：此配置关闭时，非投递时产生异常情况下，会忽略retryTimesWhenSendFailed配置。
+     * 注意：此配置关闭时，非投递时产生异常情况下（也是正常投递失败），会忽略retryTimesWhenSendFailed配置。
      */
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 

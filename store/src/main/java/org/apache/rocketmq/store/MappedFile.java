@@ -111,7 +111,7 @@ public class MappedFile extends ReferenceResource {
     protected FileChannel fileChannel;
 
     /**
-     * 物理文件对应的内存映射 Buffer
+     * 物理文件对应的内存映射 Buffer，对应操作系统的 PageCache
      */
     private MappedByteBuffer mappedByteBuffer;
 
@@ -329,7 +329,7 @@ public class MappedFile extends ReferenceResource {
         // 文件还可以写
         if (currentPos < this.fileSize) {
 
-            // todo 根据是否开启使用堆外内存，选择不同字节缓存区。这个很重要，后续刷盘不会刷对外内存的数据，只会刷堆内存的数据，也就是说要想将堆外内存进行持久化，必须先提交
+            // todo 根据是否开启使用堆外内存，选择不同字节缓存区。这个很重要，后续刷盘不会刷堆外内存的数据，只会刷堆内存的数据，也就是说要想将堆外内存进行持久化，必须先提交
             // 获取写入字节缓冲区； slice() 方法用于创建一个与原对象共享的内存区，且拥有独立的 position、limit、capacity 等指针
             // 为什么会有 writeBuffer != null 的判断后，使用不同的字节缓冲区，见：FlushCommitLogService。
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();

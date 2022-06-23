@@ -141,9 +141,11 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
     class FaultItem implements Comparable<FaultItem> {
         // 条目名，这里为 brokerName
         private final String name;
+
         // 消息发送故障的延迟时间
         private volatile long currentLatency;
-        // 故障规避的开始时间
+
+        // 可用的开始时间
         private volatile long startTimestamp;
 
         public FaultItem(final String name) {

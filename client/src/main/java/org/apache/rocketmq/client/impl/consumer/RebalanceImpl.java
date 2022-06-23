@@ -54,6 +54,7 @@ public abstract class RebalanceImpl {
      * 消息队列 到 消息处理队列的映射
      */
     protected final ConcurrentMap<MessageQueue, ProcessQueue> processQueueTable = new ConcurrentHashMap<MessageQueue, ProcessQueue>(64);
+
     /**
      * 订阅 Topic 下的消息队列
      * 从 NameSrv 更新路由配置到本地，设置该属性的情况如下（todo 注意：起始的时候是全部的队列，主要作为分配队列的数据源）：
@@ -456,6 +457,8 @@ public abstract class RebalanceImpl {
                     // todo 传入的是通过队列分配算法为当前消费者分配的队列集合
                     // todo 更新消息队列
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
+
+                    // 发生改变
                     if (changed) {
                         log.info(
                                 "rebalanced result changed. allocateMessageQueueStrategyName={}, group={}, topic={}, clientId={}, mqAllSize={}, cidAllSize={}, rebalanceResultSize={}, rebalanceResultSet={}",

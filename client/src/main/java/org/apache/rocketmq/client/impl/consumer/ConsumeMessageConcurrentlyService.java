@@ -444,6 +444,17 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             // 更新 ConsumeQueue 的消费进度
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), offset, true);
         }
+
+        /*
+          补充：
+          例:多线程消费,一次拉取了10个消息,offset从 100 到110 ,如果最后一个先消费成功,第100还在消费中, 更改本地offset的时候 用的100(而不是110) . 这点实现保证了消费不丢失,但会出现多次消费的情况.
+         ps:
+          1 不管消息消费是否返回消费成功状态,都会执行上面两步.消费失败了,先发回到broker的retry队列中. 如果发送成功,再从本地队列中删除掉.如果发回到broker 因为网络原因失败.就会重新放入到本地队列. 并删
+          除该消息并递增前进消费进度offset.如果此时重启,由于消费进度已经前进,但消息没有被消费掉,也没有发回到broker,消息将丢失. 这算是个bug.
+          2 offsetTable中存放的可能不是messageQueue真正消费的offset的最大值，但是consumer拉取消息时使用的是上一次拉取请求返回的nextBeginOffset，并不是依据offsetTable，正常情况下不会重复拉取数据。
+            当发生宕机等异常时，与offsetTable未提交宕机异常一样，需要通过业务流程来保证幂等性。
+
+         */
     }
 
     public ConsumerStatsManager getConsumerStatsManager() {

@@ -107,7 +107,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
     private final DefaultMQPushConsumer defaultMQPushConsumer;
     /**
      * 每个 Consumer 的对象都持有一个 RebalanceImpl 实例，每个RebalanceImpl实例也只服务于一个Consumer。Consumer负载均衡相关的操作全部都委托给RebalanceImpl对象
-     * 均衡消息队列服务，负载分配当前 Consumer 可消费的消息队列( MessageQueue )。当有新的 Consumer 的加入或移除，都会重新分配消息队列。
+     * 均衡消息队列服务，负责分配当前 Consumer 可消费的消息队列( MessageQueue )。当有新的 Consumer 的加入或移除，都会重新分配消息队列。
      */
     private final RebalanceImpl rebalanceImpl = new RebalancePushImpl(this);
 
@@ -138,6 +138,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
      * 消息消费服务，不断消费消息，并处理消费结果
      */
     private ConsumeMessageService consumeMessageService;
+
+
     private long queueFlowControlTimes = 0;
     private long queueMaxSpanFlowControlTimes = 0;
 
@@ -799,7 +801,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     this.defaultMQPushConsumer.changeInstanceNameToPID();
                 }
 
-                // 创建 MQClient 对象，clientId 为 ip@instanceName ，如 192.168.0.1@10072
+                // 创建 MQClient 对象(客户端实例），clientId 为 ip@instanceName ，如 192.168.0.1@10072
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQPushConsumer, this.rpcHook);
 
 
@@ -814,7 +816,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                 // todo 设置 分配消息队列的策略
                 this.rebalanceImpl.setAllocateMessageQueueStrategy(this.defaultMQPushConsumer.getAllocateMessageQueueStrategy());
-                // 设置消费方客户端
+                // 设置消费方客户端实例
                 this.rebalanceImpl.setmQClientFactory(this.mQClientFactory);
 
                 // 拉取消息 API 的封装

@@ -11,9 +11,6 @@ import java.util.List;
 
 /**
  * DemoConsumer
- *
- * @author <a href="mailto:libao.huang@yunhutech.com">shunhua</a>
- * @since 2021/10/08
  * <p>
  * desc：
  */

@@ -26,6 +26,9 @@ package org.apache.rocketmq.common.protocol;
  */
 public class RequestCode {
 
+    /**
+     * 发送消息
+     */
     public static final int SEND_MESSAGE = 10;
 
     /**
@@ -84,6 +87,8 @@ public class RequestCode {
      * 提交/回滚事务
      */
     public static final int END_TRANSACTION = 37;
+
+    // 获取消费组下的消费者们
     public static final int GET_CONSUMER_LIST_BY_GROUP = 38;
 
     // 消息回查
@@ -208,6 +213,9 @@ public class RequestCode {
      */
     public static final int GET_NAMESRV_CONFIG = 319;
 
+    /**
+     * 发送批量消息
+     */
     public static final int SEND_BATCH_MESSAGE = 320;
 
     public static final int QUERY_CONSUME_QUEUE = 321;

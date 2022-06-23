@@ -228,8 +228,8 @@ public class MQClientInstance {
 
     /**
      * todo topic 路由信息转换成 topic 发布信息，也就是将 Topic 元数据信息和 Topic 分布的 Broker 元数据 融合成 Topic 发布信息
-     * 1 根据 Topic 的路由：Topic 对应队列信息和 Broker 信息
-     * 2 根据 Topic 的路由，创建写队列集合，todo 写消息队列诞生
+     * 1 Topic 的路由：Topic 对应队列信息和 Broker 信息
+     * 2 根据 Topic 的路由，创建写队列集合 ---- 写消息队列诞生
      *
      * @param topic topic
      * @param route 路由信息
@@ -240,10 +240,10 @@ public class MQClientInstance {
         // Topic 发布信息
         TopicPublishInfo info = new TopicPublishInfo();
 
-        // 1 设置原始的路由信息
+        // 1 保存从 NameSrv 拉取的原始的路由信息
         info.setTopicRouteData(route);
 
-        // todo 不知道啥意思？
+        // todo 暂时不知道啥意思？
         if (route.getOrderTopicConf() != null && route.getOrderTopicConf().length() > 0) {
             String[] brokers = route.getOrderTopicConf().split(";");
             for (String broker : brokers) {
@@ -260,15 +260,14 @@ public class MQClientInstance {
 
         } else {
 
-            // todo 从路由信息中获取队列信息
-            // todo 注意，这是 topic 下所有的队列信息，可能这些队列分布在不同的 Broker 上
+            // todo 从路由信息中获取队列信息。注意，这是 topic 下所有的队列信息，可能这些队列分布在不同的 Broker 上
             List<QueueData> qds = route.getQueueDatas();
             Collections.sort(qds);
 
             // 1 todo 遍历路由信息的 队列集合，转为 MessageQueue
             // todo 注意队列数
             for (QueueData qd : qds) {
-                // 当前队列支持写，才有意义
+                // 当前队列支持写才有意义，因为这些队列是给生产者使用的
                 if (PermName.isWriteable(qd.getPerm())) {
 
                     // Broker 信息
@@ -294,7 +293,7 @@ public class MQClientInstance {
                         continue;
                     }
 
-                    // todo 根据当前队列的写队列数，创建对应个数的 MessageQueue。这些队列都分布在 qd.getBrokerName 上
+                    // todo 根据当前队列的写队列数，创建对应个数的 MessageQueue。这些队列都分布在 qd.getBrokerName 的 Broker 上
                     // todo 新版支持 16 个，具体多少看路由信息中的值
                     for (int i = 0; i < qd.getWriteQueueNums(); i++) {
                         // 1 对应所属的 Topic
@@ -427,7 +426,8 @@ public class MQClientInstance {
             }
         }, 10, this.clientConfig.getPollNameServerInterval(), TimeUnit.MILLISECONDS);
 
-        // 发送心跳消息给 Broker
+        // 默认 30s 发送心跳消息给 Broker
+        // todo Broker 可以知道客户端端信息
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -444,7 +444,7 @@ public class MQClientInstance {
         /**
          * todo 定时将消费端消费进度上报到 Broker（Broker 也会使用后台线程定时将消费进度写入文件）或写入本地文件，这对应使用的两种消费进度策略
          *
-         * 默认周期：10000ms
+         * 默认 5s
          */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
@@ -483,7 +483,6 @@ public class MQClientInstance {
      * todo 特别说明
      * 1 如果是一台新加入的 Broker 机器，额外的什么都没有做，那么它就不能和其他 Broker 那样，拥有业务 Topic 信息（不考虑自动创建主题），NameServer 中就不会有该 Broker 上报的 Topic 路由信息
      * 2 如果在新加入的 Broker 上设置了业务 Topic 信息，那么就会上报到 NameServer 。关键来了：客户端会定时从 NameServer 拉取感兴趣的 Topic 路由信息，并更新到本地：
-     * - 2.1 对于消息生产方，
      */
     public void updateTopicRouteInfoFromNameServer() {
         Set<String> topicList = new HashSet<String>();
@@ -497,6 +496,7 @@ public class MQClientInstance {
                 MQConsumerInner impl = entry.getValue();
                 if (impl != null) {
                     // 获取消费端订阅信息
+                    // 注意，这里是订阅信息，不是转换的队列信息，这是合理的，订阅信息更能反应当前消费者订阅的 Topic
                     Set<SubscriptionData> subList = impl.subscriptions();
                     if (subList != null) {
                         // 遍历订阅的 Topic
@@ -717,7 +717,9 @@ public class MQClientInstance {
      * 发送心跳给所有 Broker
      */
     private void sendHeartbeatToAllBroker() {
+        // 准备心跳数据
         final HeartbeatData heartbeatData = this.prepareHeartbeatData();
+
         final boolean producerEmpty = heartbeatData.getProducerDataSet().isEmpty();
         final boolean consumerEmpty = heartbeatData.getConsumerDataSet().isEmpty();
         if (producerEmpty && consumerEmpty) {
@@ -725,6 +727,7 @@ public class MQClientInstance {
             return;
         }
 
+        // 给所有的主 Broker 发送心跳包
         if (!this.brokerAddrTable.isEmpty()) {
             long times = this.sendHeartbeatTimesTotal.getAndIncrement();
             Iterator<Entry<String, HashMap<Long, String>>> it = this.brokerAddrTable.entrySet().iterator();
@@ -793,7 +796,7 @@ public class MQClientInstance {
     }
 
     /**
-     * 尝试从 NameServer 获取配置信息并更新到本地：
+     * 尝试从 NameServer 获取配置信息并更新到本地：实例中维护的 topicRouteTable  和 实力具体的生产者/消息者的队列信息
      * 1 根据 Topic 从 NameServer 获取 Topic 路由信息
      * todo 特别说明：
      * 1 在 Broker 启动时和运行期间会定期向每个 NameSrv 上报自身信息以及 Topic 信息
@@ -841,7 +844,7 @@ public class MQClientInstance {
                     }
 
 
-                    // 拿到最新的 topic 路由信息后，需要与客户端本地缓存中的 topic 路由进行比较，如果有变化，则需要同步更新发送者、消费者关于该 topic 的缓存
+                    // 拿到最新的 topic 路由信息后，需要与客户端实例本地缓存中的 topic 路由进行比较，如果有变化，则需要同步更新发送者、消费者关于该 topic 的缓存
                     if (topicRouteData != null) {
                         TopicRouteData old = this.topicRouteTable.get(topic);
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
@@ -863,13 +866,13 @@ public class MQClientInstance {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
 
-                            // 1 todo Update Pub info 将topic的route信息转换为publish信息。如果开始自动创建 Topic 功能，则实际是用了TBW102的route信息，给我们指定的 Topic 用
-                            // todo 即我们指定的 Topic 继承了 TBW102 的路由信息。因此我们指定的 Topic 的发布信息就有了
+                            // 1 todo Update Pub info 将topic的route信息转换为publish信息。
+                            //  如果开启自动创建 Topic 功能，则实际是用了TBW102的route信息，给我们指定的 Topic 用，即我们指定的 Topic 继承了 TBW102 的路由信息。因此我们指定的 Topic 的发布信息就有了
                             {
                                 // topic 路由信息转换成 topic 发布信息
-                                // todo 注意这里创建的是具有写队列
+                                // todo 注意这里创建的是写队列
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
-                                // 标记下，表示 Topic 路由信息
+                                // 标记下，表示有 Topic 路由信息
                                 publishInfo.setHaveTopicRouterInfo(true);
 
                                 // 遍历生产者信息，并尝试更新 topic 发布信息
@@ -930,13 +933,18 @@ public class MQClientInstance {
         return false;
     }
 
+    /**
+     * 向 Broker 的心跳包
+     *
+     * @return
+     */
     private HeartbeatData prepareHeartbeatData() {
         HeartbeatData heartbeatData = new HeartbeatData();
 
-        // clientID
+        // clientID  客户端实例ID
         heartbeatData.setClientID(this.clientId);
 
-        // Consumer
+        // Consumer 消费者心跳数据包
         for (Map.Entry<String, MQConsumerInner> entry : this.consumerTable.entrySet()) {
             MQConsumerInner impl = entry.getValue();
             if (impl != null) {
@@ -945,6 +953,7 @@ public class MQClientInstance {
                 consumerData.setConsumeType(impl.consumeType());
                 consumerData.setMessageModel(impl.messageModel());
                 consumerData.setConsumeFromWhere(impl.consumeFromWhere());
+                // 消费者的订阅信息
                 consumerData.getSubscriptionDataSet().addAll(impl.subscriptions());
                 consumerData.setUnitMode(impl.isUnitMode());
 
@@ -952,7 +961,7 @@ public class MQClientInstance {
             }
         }
 
-        // Producer
+        // Producer 生产者心跳数据包
         for (Map.Entry<String/* group */, MQProducerInner> entry : this.producerTable.entrySet()) {
             MQProducerInner impl = entry.getValue();
             if (impl != null) {
@@ -1027,7 +1036,7 @@ public class MQClientInstance {
     }
 
     /**
-     * 比对路由信息是否改变
+     * 比对路由信息是否改变，对比 Topic 的队列和这些队列所在的Broker分布情况是否发生改变
      *
      * @param olddata
      * @param nowdata
@@ -1305,6 +1314,7 @@ public class MQClientInstance {
     public String findBrokerAddressInPublish(final String brokerName) {
         HashMap<Long/* brokerId */, String/* address */> map = this.brokerAddrTable.get(brokerName);
         if (map != null && !map.isEmpty()) {
+            // 获取主 Broker
             return map.get(MixAll.MASTER_ID);
         }
 

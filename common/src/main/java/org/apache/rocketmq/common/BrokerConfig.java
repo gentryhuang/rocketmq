@@ -69,6 +69,7 @@ public class BrokerConfig {
      */
     @ImportantField
     private boolean autoCreateSubscriptionGroup = true;
+
     private String messageStorePlugIn = "";
     @ImportantField
     private String msgTraceTopicName = TopicValidator.RMQ_SYS_TRACE_TOPIC;

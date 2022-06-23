@@ -757,6 +757,7 @@ public class ConsumeQueue {
     }
 
     public long getMaxOffsetInQueue() {
+        // 消息索引最大长度 / 20 ，得到在在 ConsumeQueue 中的偏移量
         return this.mappedFileQueue.getMaxOffset() / CQ_STORE_UNIT_SIZE;
     }
 

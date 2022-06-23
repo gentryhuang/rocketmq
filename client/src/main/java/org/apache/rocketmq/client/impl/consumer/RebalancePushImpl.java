@@ -217,25 +217,26 @@ public class RebalancePushImpl extends RebalanceImpl {
 
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
 
-                // todo 注意，要特别留意lastOffset为0是什么场景，因为返回0，并不会执行CONSUME_FROM_LAST_OFFSET(语义)
-                // todo 解答：consumequeue/topicName/queueNum的第一个消息消费队列文件为 00000000000000000000,并且偏移量 0 对应的消息索引对应的消息缓存在Broker端的内存中(pageCache)，
+                // 1 todo 注意，要特别留意lastOffset为0是什么场景，因为返回0，并不会执行CONSUME_FROM_LAST_OFFSET(语义)
+                //  场景如下：
+                //  consumequeue/topicName/queueNum的第一个消息消费队列文件为 00000000000000000000,并且偏移量 0 对应的消息索引对应的消息缓存在Broker端的内存中(pageCache)，
                 //  其返回给消费端的偏移量为0，故会从0开始消费，而不是从队列的最大偏移量处开始消费。
                 if (lastOffset >= 0) {
                     result = lastOffset;
                 }
-                // 如果lastOffset为-1,表示当前并未存储其有效偏移量，可以理解为第一次消费
+                // 2 如果lastOffset为-1,表示当前并未存储其有效偏移量，可以理解为第一次消费
                 // First start,no offset
                 else if (-1 == lastOffset) {
 
-                    // 如果是重试主题，则按照从头开始消费，即返回 0
+                    // 2.1 如果是重试主题，则按照从头开始消费，即返回 0
                     if (mq.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                         result = 0L;
 
-                        // 普通主题，则从队列当前的最大的有效偏移量开始消费，即CONSUME_FROM_LAST_OFFSET语义的实现
+                        // 2.2 普通主题，则从队列当前的最大的有效偏移量开始消费，也就是 CONSUME_FROM_LAST_OFFSET 语义的实现
                     } else {
                         try {
-                            // 获取消费队列最大逻辑偏移量，从该位置消费
-                            // 即 todo (mappedFile.getFileFromOffset() + mappedFile.getReadPosition())/CQ_STORE_UNIT_SIZE
+                            // 获取消费队列最大逻辑偏移量，从该位置消费，跳过历史消息:
+                            // 即  (mappedFile.getFileFromOffset() + mappedFile.getReadPosition())/CQ_STORE_UNIT_SIZE
                             result = this.mQClientFactory.getMQAdminImpl().maxOffset(mq);
                         } catch (MQClientException e) {
                             log.warn("Compute consume offset from last offset exception, mq={}, exception={}", mq, e);
@@ -243,6 +244,7 @@ public class RebalancePushImpl extends RebalanceImpl {
                         }
                     }
 
+                    //3  < -1 的情况 -- 异常
                 } else {
                     result = -1;
                 }
@@ -251,10 +253,12 @@ public class RebalancePushImpl extends RebalanceImpl {
 
             // 从队列最小偏移量开始消费
             case CONSUME_FROM_FIRST_OFFSET: {
+
                 // 先查询当前消费队列消费进度
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
 
-                // todo lastOffset = 0 的情况，同上
+                // todo lastOffset = 0 的情况，同上，从 0 开始消费。
+                // 注意，这也是有时候设置了CONSUME_FROM_FIRST_OFFSET却不是从0开始重新消费的原因，
                 if (lastOffset >= 0) {
                     result = lastOffset;
 
@@ -291,7 +295,7 @@ public class RebalancePushImpl extends RebalanceImpl {
                         }
 
 
-                       // 如果是普通主题，则根据时间戳去Broker端查询，根据查询到的偏移量开始消费。
+                        // 如果是普通主题，则根据时间戳去Broker端查询，根据查询到的偏移量开始消费。
                     } else {
                         try {
 
