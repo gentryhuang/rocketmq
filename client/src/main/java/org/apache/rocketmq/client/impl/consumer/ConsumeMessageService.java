@@ -23,7 +23,7 @@ import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.common.protocol.body.ConsumeMessageDirectlyResult;
 
 /**
- * 消费处理服务，消费者会根据不同的消费类型（消费监听器）在启动时创建。用来消费从 Broker 拉取的消息
+ * 消息消费处理服务（逻辑），消费者会根据不同的消费类型（消费监听器）在启动时创建。用来消费从 Broker 拉取的消息
  * <p>
  * 消息消费逻辑（非顺序消息），不断消费消息，并处理消费结果
  * 1 将待消费的消息存入 ProcessQueue 中，并执行消息消费之前钩子函数

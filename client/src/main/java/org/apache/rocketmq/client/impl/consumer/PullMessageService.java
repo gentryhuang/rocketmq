@@ -39,7 +39,7 @@ public class PullMessageService extends ServiceThread {
     private final InternalLogger log = ClientLogger.getLog();
 
     /**
-     * 拉取消息请求队列
+     * 拉取消息请求的队列
      */
     private final LinkedBlockingQueue<PullRequest> pullRequestQueue = new LinkedBlockingQueue<PullRequest>();
     /**
@@ -115,6 +115,7 @@ public class PullMessageService extends ServiceThread {
      * 拉取消息
      * todo 特别说明：
      * 1 RocketMQ 未真正实现消息推模式，而是消费者主动向消费服务器拉取消息。RocketMQ推模式是循环向消息服务端发起消息拉取请求。
+     * 2 可以看出，一个应用程序下的某个消费组，只需要一个消费者，在一个应用程序中使用多个消费者尝试去消费同一个组是没有效果的，只会有一个消费者在消费。
      *
      * @param pullRequest 拉取消息请求
      */

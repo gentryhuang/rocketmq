@@ -47,8 +47,14 @@ public class ProcessQueue {
     // 30s
     public final static long REBALANCE_LOCK_MAX_LIVE_TIME =
             Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockMaxLiveTime", "30000"));
+    /**
+     * 负载队列的间隔 20s
+     */
     public final static long REBALANCE_LOCK_INTERVAL = Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockInterval", "20000"));
+
+    // 队列的过期时间，默认 2min
     private final static long PULL_MAX_IDLE_TIME = Long.parseLong(System.getProperty("rocketmq.client.pull.pullMaxIdleTime", "120000"));
+
     private final InternalLogger log = ClientLogger.getLog();
 
     /**
@@ -84,11 +90,14 @@ public class ProcessQueue {
      */
     private final TreeMap<Long, MessageExt> consumingMsgOrderlyTreeMap = new TreeMap<Long, MessageExt>();
 
+    /**
+     * 累计尝试释放锁的次数
+     */
     private final AtomicLong tryUnlockTimes = new AtomicLong(0);
     private volatile long queueOffsetMax = 0L;
 
     /**
-     * 当前 ProcessQueue 是否被丢弃
+     * 当前 ProcessQueue 是否被丢弃，注意是 volatile 修饰的
      */
     private volatile boolean dropped = false;
 
@@ -104,10 +113,12 @@ public class ProcessQueue {
 
     /**
      * 是否锁定消息处理队列，标识锁定对应的消息队列成功
+     * <p>
+     * todo 该队列对应的分布式锁定了，会设置为 true
      */
     private volatile boolean locked = false;
     /**
-     * 最后锁定时间
+     * 分布式锁最后锁定时间
      */
     private volatile long lastLockTimestamp = System.currentTimeMillis();
 

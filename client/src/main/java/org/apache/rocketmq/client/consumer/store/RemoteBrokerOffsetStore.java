@@ -58,7 +58,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
 
     /**
      * 内存中的消费进度
-     * todo 说明：是针对消息队列的逻辑偏移量，非 offset
+     * todo 说明：是针对消息队列的逻辑偏移量
      */
     private ConcurrentMap<MessageQueue, AtomicLong> offsetTable = new ConcurrentHashMap<MessageQueue, AtomicLong>();
 
@@ -116,7 +116,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
     public long readOffset(final MessageQueue mq, final ReadOffsetType type) {
         if (mq != null) {
             switch (type) {
-                // 先从内存中读取
+                // 先从内存中读取，如果内存中不存在，再尝试从磁盘中读取
                 case MEMORY_FIRST_THEN_STORE:
                 case READ_FROM_MEMORY: {
                     AtomicLong offset = this.offsetTable.get(mq);
@@ -143,7 +143,7 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
                     // todo 在 Broker 没有找到消息，会抛出异常。这里捕获异常后返回 -1（一般未找到是针对 新的消费组）
                     // todo 说明：在 Broker 寻找时会经过两个过程：
                     // todo（1）从Broker 的内存中获取 topic@group-queueId 对应的消费进度，如果为空查找结果为 -1
-                    // todo（2）如果为 -1 ，会接着判断判断 mq 的最小偏移量是否为 0 ，如果为 0（说明文件没有删除过），再判断该偏移量对应的消息索引关联的 CommitLog 是否还驻留在内存，如果驻存的化就直接从头消费。
+                    // todo（2）如果为 -1 ，会接着判断判断 mq 的最小偏逻辑移量是否为 0 ，如果为 0（说明文件没有删除过），再判断该偏移量对应的消息索引关联的 CommitLog 是否还驻留在内存，如果驻存的化就直接从头消费。
                     // 其实针对这种情况，读取模式已经没用用了。
                     // 总结来说：consumequeue/topicName/queueNum的第一个消息消费队列文件为00000000000000000000,并且消息其对应的消息缓存在Broker端的内存中(pageCache)，
                     // 其返回给消费端的偏移量为0，故会从0开始消费，而不是从队列的最大偏移量处开始消费
@@ -308,6 +308,14 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
      * 从磁盘读取消费进度。
      * 消费进度是保存在 broker 哪个地方：
      * Broker端的offset管理参照 ConsumerOffsetManager，保存逻辑其实与广播模式差不多，offset保存的路径：/rocketmq_home/store/config/consumerOffset.json。
+     * 如下：
+     *
+     * {
+     * 	"offsetTable":{
+     * 		"%RETRY%demo_consumer@demo_consumer":{0:0},
+     * 		"hlb_topic@demo_consumer":{0:4,1:3,2:5,3:2}
+     *   }
+     * }
      *
      * @param mq
      * @return

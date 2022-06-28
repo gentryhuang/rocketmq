@@ -74,6 +74,10 @@ public class MessageExt extends Message {
      */
     private long commitLogOffset;
     private int bodyCRC;
+
+    /**
+     * 重新消费次数，第一次消费时为 0
+     */
     private int reconsumeTimes;
 
     private long preparedTransactionOffset;

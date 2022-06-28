@@ -96,7 +96,9 @@ public class RebalancePushImpl extends RebalanceImpl {
     public boolean removeUnnecessaryMessageQueue(MessageQueue mq, ProcessQueue pq) {
 
         // 同步队列的消费进度，并移除指定队列的缓存消费进度
-        // todo 为啥没有操作消息队列或消息处理队列？？？ 这里对消费进度进行处理
+        // todo 为啥没有操作消息队列或消息处理队列？而是仅对消费进度进行处理。
+        //  1）如果返回 true ，那么仅仅接着就会移除队列映射
+        //  2）如果返回 false ，那么移除映射关系是在队列均衡操作后
         this.defaultMQPushConsumerImpl.getOffsetStore().persist(mq);
         this.defaultMQPushConsumerImpl.getOffsetStore().removeOffset(mq);
 
@@ -116,6 +118,8 @@ public class RebalancePushImpl extends RebalanceImpl {
                     } finally {
                         pq.getConsumeLock().unlock();
                     }
+
+                    // 当前 mq 处于消费中
                 } else {
                     log.warn("[WRONG]mq is consuming, so can not unlock it, {}. maybe hanged for a while, {}",
                             mq,
@@ -129,6 +133,7 @@ public class RebalancePushImpl extends RebalanceImpl {
 
             return false;
         }
+
         return true;
     }
 
@@ -152,7 +157,11 @@ public class RebalancePushImpl extends RebalanceImpl {
                     // 解锁 mq
                     RebalancePushImpl.this.unlock(mq, true);
                 }
+
+                // 延迟 20s 后解锁
             }, UNLOCK_DELAY_TIME_MILLS, TimeUnit.MILLISECONDS);
+
+
         } else {
             this.unlock(mq, true);
         }

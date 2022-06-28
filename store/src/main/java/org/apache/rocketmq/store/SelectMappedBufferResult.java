@@ -18,10 +18,13 @@ package org.apache.rocketmq.store;
 
 import java.nio.ByteBuffer;
 
+/**
+ * 读取消息索引的结果
+ */
 public class SelectMappedBufferResult {
 
     /**
-     * 从哪个偏移量开始读取的
+     * 从哪个物理偏移量开始读取的
      */
     private final long startOffset;
 

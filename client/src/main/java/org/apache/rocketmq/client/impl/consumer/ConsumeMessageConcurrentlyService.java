@@ -49,6 +49,9 @@ import org.apache.rocketmq.common.utils.ThreadUtils;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
+/**
+ * 并发消费服务
+ */
 public class ConsumeMessageConcurrentlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
     private final DefaultMQPushConsumerImpl defaultMQPushConsumerImpl;
@@ -98,7 +101,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         this.defaultMQPushConsumer = this.defaultMQPushConsumerImpl.getDefaultMQPushConsumer();
         this.consumerGroup = this.defaultMQPushConsumer.getConsumerGroup();
         /**
-         * 消费消息任务队列
+         * 消费消息任务队列 - 无界队列
          */
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
@@ -113,7 +116,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 this.consumeRequestQueue,
                 new ThreadFactoryImpl("ConsumeMessageThread_"));
 
-        // 处理消费进度线程池
+        // 线程池
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("ConsumeMessageScheduledThread_"));
         // 清理过期消息线程池
         this.cleanExpireMsgExecutors = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("CleanExpireMsgScheduledThread_"));
@@ -396,7 +399,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                     boolean result = this.sendMessageBack(msg, context);
 
                     // 发回消息到 Broker 失败，则加入到 msgBackFiled 集合中
-                    // todo 注意，可能实际发到了 Broker ，但是 Consumer 以为发送失败了
+                    // todo 注意，可能实际发到了 Broker ，但是 Consumer 以为发送失败了，那么就会导致重复消费
                     if (!result) {
                         // 记录消息重消费次数
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
@@ -449,7 +452,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
           补充：
           例:多线程消费,一次拉取了10个消息,offset从 100 到110 ,如果最后一个先消费成功,第100还在消费中, 更改本地offset的时候 用的100(而不是110) . 这点实现保证了消费不丢失,但会出现多次消费的情况.
          ps:
-          1 不管消息消费是否返回消费成功状态,都会执行上面两步.消费失败了,先发回到broker的retry队列中. 如果发送成功,再从本地队列中删除掉.如果发回到broker 因为网络原因失败.就会重新放入到本地队列. 并删
+          1 不管消息消费是否返回消费成功状态,都会执行上面两步.消费失败了,先发回到broker的retry队列中. 如果发送成功,再从本地队列中删除掉.如果发回到broker 因为网络原因失败（broker 没有收到该消息）.就会重新放入到本地队列. 并删
           除该消息并递增前进消费进度offset.如果此时重启,由于消费进度已经前进,但消息没有被消费掉,也没有发回到broker,消息将丢失. 这算是个bug.
           2 offsetTable中存放的可能不是messageQueue真正消费的offset的最大值，但是consumer拉取消息时使用的是上一次拉取请求返回的nextBeginOffset，并不是依据offsetTable，正常情况下不会重复拉取数据。
             当发生宕机等异常时，与offsetTable未提交宕机异常一样，需要通过业务流程来保证幂等性。
@@ -477,7 +480,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         // Wrap topic with namespace before sending back message.
         msg.setTopic(this.defaultMQPushConsumer.withNamespace(msg.getTopic()));
         try {
-            // 2、发送给Broker
+            // 2、发送给当前 MessageQueue 所在的 Broker
             this.defaultMQPushConsumerImpl.sendMessageBack(msg, delayLevel, context.getMessageQueue().getBrokerName());
             return true;
         } catch (Exception e) {
@@ -488,7 +491,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
     }
 
     /**
-     * 提交延迟消费请求，5s
+     * 提交延迟消费请求，5s 后重新在消费端重新消费
      *
      * @param msgs         消息列表
      * @param processQueue 消息处理队列
@@ -662,7 +665,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());
             }
 
-            // todo 消费结果状态为空时(可能出现异常了)也则设置为稍后重新消费
+            // todo 消费结果状态为空时(可能出现异常了)也设置为稍后重新消费
             if (null == status) {
                 log.warn("consumeMessage return null, Group: {} Msgs: {} MQ: {}",
                         ConsumeMessageConcurrentlyService.this.consumerGroup,
@@ -684,10 +687,10 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                     .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
             // 处理消费结果
-            // 如果消费处理队列被置为无效，恰好消息被消费（此时消费进度不会更新），则可能导致消息重复消费
-            // 因此，消息消费要尽最大可能性实现幂等性
+            // 如果消费处理队列被置为无效，恰好消息被消费（此时消费进度不会更新），则可能导致消息重复消费。因此，消息消费要尽最大可能性实现幂等性
 
-            // todo 处理消费结果
+            // todo 消息处理队列有效的情况下处理消费结果，如果无效则不处理消费结果。
+            // 这也意味着，如果消息刚好被消费了后，消息处理队列被设置为无效了（情况很多，消费偏移量违法、拉取消息超时、队列负载时消息队列被分配给其他的消费者，等等），那么消费进度不会更新
             if (!processQueue.isDropped()) {
                 ConsumeMessageConcurrentlyService.this.processConsumeResult(status, context, this);
             } else {

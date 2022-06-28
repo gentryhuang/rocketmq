@@ -234,7 +234,7 @@ public class PullRequestHoldService extends ServiceThread {
                     // 4.2 todo 如果队列最大偏移量大于 pullFromThisOffset 说明有新的消息到达
                     if (newestOffset > request.getPullFromThisOffset()) {
 
-                        // 4.3  对消息根据 tag,属性进行一次消息过滤，如果 tag,属性为空，则消息过滤器会返回true
+                        // 4.3  对消息根据 tag 属性，使用 MessageFilter 进行一次消息过滤，如果 tag,属性为空，则消息过滤器会返回true
                         boolean match = request.getMessageFilter().isMatchedByConsumeQueue(tagsCode, new ConsumeQueueExt.CqExtUnit(tagsCode, msgStoreTime, filterBitMap));
                         // match by bit map, need eval again when properties is not null.
                         if (match && properties != null) {

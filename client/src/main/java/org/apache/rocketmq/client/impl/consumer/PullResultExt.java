@@ -30,6 +30,9 @@ public class PullResultExt extends PullResult {
      * 下次拉取消息建议拉取的 BrokerID
      */
     private final long suggestWhichBrokerId;
+    /**
+     * 二进制数据
+     */
     private byte[] messageBinary;
 
     public PullResultExt(PullStatus pullStatus, long nextBeginOffset, long minOffset, long maxOffset,

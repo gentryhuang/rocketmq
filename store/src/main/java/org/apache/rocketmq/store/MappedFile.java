@@ -129,7 +129,7 @@ public class MappedFile extends ReferenceResource {
 
 
     /**
-     * 该文件起始偏移量（对应了在 MappedFileQueue 中的偏移量）
+     * 该文件起始物理偏移量（对应了在 MappedFileQueue 中的偏移量）
      */
     private long fileFromOffset;
 
@@ -676,7 +676,7 @@ public class MappedFile extends ReferenceResource {
                 byteBufferNew.limit(size);
 
                 // byteBufferNew 保存的就是目标数据，
-                // 注意 startOffset 的值为 this.fileFromOffset + pos
+                // todo  注意 startOffset 的值为 this.fileFromOffset + pos，即转为物理偏移量
                 return new SelectMappedBufferResult(this.fileFromOffset + pos, byteBufferNew, size, this);
             }
         }

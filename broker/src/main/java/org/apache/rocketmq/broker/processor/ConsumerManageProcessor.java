@@ -170,17 +170,18 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
             // offset 为 -1 一般都是针对一个新的消费组
         } else {
 
-            // 获取该主题、消息队列当前在 Broker 服务器最小的 offset
+            // 获取该主题、消息队列当前在 Broker 服务器最小的逻辑偏移量
             // 如果返回 0 则表示该队列的文件还未曾删除
             long minOffset =
                     this.brokerController.getMessageStore().getMinOffsetInQueue(requestHeader.getTopic(),
                             requestHeader.getQueueId());
 
-            // 如果最小物理偏移为 0 ，并且该偏移量对应的 commitLog 仍然存储在内存，而不是磁盘中，则返回 0
-            // todo 这样情况下，意味着ConsumeFromWhere中定义的三种枚举类型都不会生效，直接从0开始消费
+            // 如果最小的逻辑偏移为 0 ，并且该偏移量对应的 commitLog 仍然贮存在内存中，而不是磁盘中，则返回 0
+            // todo 这样情况下（一个新的消费组），意味着ConsumeFromWhere中定义的三种枚举类型都不会生效，直接从0开始消费
             if (minOffset <= 0
                     && !this.brokerController.getMessageStore().checkInDiskByConsumeOffset(
                     requestHeader.getTopic(), requestHeader.getQueueId(), 0)) {
+
                 responseHeader.setOffset(0L);
                 response.setCode(ResponseCode.SUCCESS);
                 response.setRemark(null);

@@ -27,14 +27,31 @@ public abstract class ServiceThread implements Runnable {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.COMMON_LOGGER_NAME);
 
     private static final long JOIN_TIME = 90 * 1000;
-
+    /**
+     * 执行任务的线程
+     */
     private Thread thread;
+    /**
+     * 线程等待-通知实现，RocketMQ 自己实现的 CountDownLatch ，非 JDK 中的，但和 JDK 中的功能基本一致，唯一区别点是前者支持重置同步状态以保证 CountDownLatch 可重用。
+     */
     protected final CountDownLatch2 waitPoint = new CountDownLatch2(1);
+
+    /**
+     * 是否通知：false 为等待，true 为通知
+     */
     protected volatile AtomicBoolean hasNotified = new AtomicBoolean(false);
+
+    /**
+     * 是否终止任务
+     */
     protected volatile boolean stopped = false;
+    /**
+     * 是否后台线程
+     */
     protected boolean isDaemon = false;
 
     //Make it able to restart the thread
+    // 标记线程是否启动
     private final AtomicBoolean started = new AtomicBoolean(false);
 
     public ServiceThread() {
@@ -145,6 +162,7 @@ public abstract class ServiceThread implements Runnable {
         }
 
         //entry to wait
+        // 重置状态
         waitPoint.reset();
 
         try {

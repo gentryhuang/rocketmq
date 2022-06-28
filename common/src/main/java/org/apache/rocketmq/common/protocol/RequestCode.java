@@ -81,6 +81,9 @@ public class RequestCode {
 
     public static final int UNREGISTER_CLIENT = 35;
 
+    /**
+     * 消费失败，重新投递消息
+     */
     public static final int CONSUMER_SEND_MSG_BACK = 36;
 
     /**

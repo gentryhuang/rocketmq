@@ -91,9 +91,15 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;
     private final InternalLogger log = ClientLogger.getLog();
-    private final ClientConfig clientConfig;
-    private final int instanceIndex;
 
+    /**
+     * 配置信息
+     */
+    private final ClientConfig clientConfig;
+    /**
+     * MQClientInstance在同一台机器上的创建序号。
+     */
+    private final int instanceIndex;
     /**
      * 客户端id，可能是服务端id，也可能是消费端id
      */
@@ -101,7 +107,7 @@ public class MQClientInstance {
 
     private final long bootTimestamp = System.currentTimeMillis();
     /**
-     * 生产者组 到 消息生产者的映射，在客户端实例启动时
+     * 生产者组 到 消息生产者的映射
      */
     private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>();
     /**
@@ -109,15 +115,23 @@ public class MQClientInstance {
      */
     private final ConcurrentMap<String/* group */, MQConsumerInner> consumerTable = new ConcurrentHashMap<String, MQConsumerInner>();
 
-
+    /**
+     * 主要处理运维命令
+     */
     private final ConcurrentMap<String/* group */, MQAdminExtInner> adminExtTable = new ConcurrentHashMap<String, MQAdminExtInner>();
+    /**
+     * 网络通信配置
+     */
     private final NettyClientConfig nettyClientConfig;
 
     /**
-     * 网络通信客户端封装类
+     * MQ 网络通信客户端封装类
      */
     private final MQClientAPIImpl mQClientAPIImpl;
 
+    /**
+     * MQ 管理命令实现类
+     */
     private final MQAdminImpl mQAdminImpl;
 
     /**
@@ -133,7 +147,7 @@ public class MQClientInstance {
     private final Lock lockHeartbeat = new ReentrantLock();
 
     /**
-     * Topic 路由信息中的 Broker 信息，更新到本地
+     * Topic 路由信息中的 Broker 信息，存储在 NameServer ，缓存在本地客户端，供生产者、消费者共同使用
      * 即 Broker 名字和 Broker 地址相关 Map
      */
     private final ConcurrentMap<String/* Broker Name */, HashMap<Long/* brokerId */, String/* address */>> brokerAddrTable = new ConcurrentHashMap<String, HashMap<Long, String>>();
@@ -151,7 +165,7 @@ public class MQClientInstance {
     private final ClientRemotingProcessor clientRemotingProcessor;
 
     /**
-     * 拉取消息任务
+     * 拉取消息任务，一个 MQClientInstance 只会启动一个消息拉取任务
      */
     private final PullMessageService pullMessageService;
     /**
@@ -160,12 +174,22 @@ public class MQClientInstance {
      */
     private final RebalanceService rebalanceService;
     /**
-     * 生产者
+     * 默认的消息生产者
      */
     private final DefaultMQProducer defaultMQProducer;
 
+    /**
+     * 消费端统计
+     */
     private final ConsumerStatsManager consumerStatsManager;
+    /**
+     * 心跳包发送次数
+     */
     private final AtomicLong sendHeartbeatTimesTotal = new AtomicLong(0);
+
+    /**
+     * 客户端的状态
+     */
     private ServiceState serviceState = ServiceState.CREATE_JUST;
     private Random random = new Random();
 
@@ -357,27 +381,27 @@ public class MQClientInstance {
                         this.mQClientAPIImpl.fetchNameServerAddr();
                     }
 
-                    // 建立请求-响应通道，连接服务器端
+                    // 1、建立请求-响应通道，连接服务器端
                     // Start request-response channel
                     this.mQClientAPIImpl.start();
 
-                    // todo 开启各种定时任务
+                    // 2、todo 开启各种定时任务
                     // Start various schedule tasks
                     this.startScheduledTask();
 
                     // todo 注意，先启动 拉取消息线程 ，等待拉取消息任务的到来（没有则阻塞），后负载均衡消息队列，均衡后就为队列创建拉取消息任务 //
 
-                    // todo 启动拉取消息任务
+                    // 3、todo 启动拉取消息任务
                     // Start pull service
                     this.pullMessageService.start();
 
-                    // todo 启动均衡消息队列任务 - 负载均衡服务线程—RebalanceService的启动（每隔20s执行一次），
+                    // 4、todo 启动均衡消息队列任务 - 负载均衡服务线程—RebalanceService的启动（每隔20s执行一次），
                     // todo 最终调用的是 org.apache.rocketmq.client.impl.consumer.RebalanceImpl.rebalanceByTopic 方法，实现 Consumer 端负载均衡
                     // Start rebalance service
                     this.rebalanceService.start();
 
 
-                    // todo 启动内部默认的生产者，用于消费者 SendMessageBack ，但不会执行 MQClientInstance.start()
+                    // 5、todo 启动内部默认的生产者，用于消费者 SendMessageBack ，但不会执行 MQClientInstance.start()
                     // Start push service
                     this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
                     log.info("the client factory [{}] start OK", this.clientId);
@@ -444,7 +468,7 @@ public class MQClientInstance {
         /**
          * todo 定时将消费端消费进度上报到 Broker（Broker 也会使用后台线程定时将消费进度写入文件）或写入本地文件，这对应使用的两种消费进度策略
          *
-         * 默认 5s
+         * 默认消费端启动 10s 后，每隔 5s 的频率持久化一次
          */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
@@ -1237,7 +1261,7 @@ public class MQClientInstance {
      * 为 Consumer 分配队列，todo 注意是根据消费组来分配
      */
     public void doRebalance() {
-        // todo 遍历当前 Client 包含的 Consumer 集合，为每个消费着执行消息队列分配
+        // todo 遍历当前 Client 包含的 Consumer 集合，以消费组维度为每个消费者执行消息队列分配
         // 目前调试下来，consumerTable 只包含 Consumer 自己
         for (Map.Entry<String, MQConsumerInner> entry : this.consumerTable.entrySet()) {
             // 消费者

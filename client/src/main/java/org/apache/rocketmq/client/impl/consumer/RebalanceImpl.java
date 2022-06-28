@@ -73,9 +73,10 @@ public abstract class RebalanceImpl {
 
     /**
      * 消费者组
-     * todo 根据消费组做负载
+     * todo 根据消费组做负载：1）获取消费组下的消费者们 2）对于顺序消费，在 Broker 上的分布式的一个隔离标志
      */
     protected String consumerGroup;
+
     /**
      * 消息模式
      */
@@ -111,6 +112,7 @@ public abstract class RebalanceImpl {
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(), MixAll.MASTER_ID, true);
         if (findBrokerResult != null) {
             UnlockBatchRequestBody requestBody = new UnlockBatchRequestBody();
+            // 以消费组进行隔离
             requestBody.setConsumerGroup(this.consumerGroup);
             requestBody.setClientId(this.mQClientFactory.getClientId());
             requestBody.getMqSet().add(mq);
@@ -214,7 +216,7 @@ public abstract class RebalanceImpl {
 
             // 锁定 MessageQueue 的请求体
             LockBatchRequestBody requestBody = new LockBatchRequestBody();
-            // 消费组
+            // 以消费组进行隔离
             requestBody.setConsumerGroup(this.consumerGroup);
             // 消费组下的消费者客户端实例
             requestBody.setClientId(this.mQClientFactory.getClientId());
@@ -265,7 +267,7 @@ public abstract class RebalanceImpl {
         // 根据当前 Consumer 缓存的消息处理队列解析出消费队列
         HashMap<String, Set<MessageQueue>> brokerMqs = this.buildProcessQueueTableByBrokerName();
 
-        // 遍历消息处理队列解析后的消息队列
+        // 遍历
         Iterator<Entry<String, Set<MessageQueue>>> it = brokerMqs.entrySet().iterator();
         while (it.hasNext()) {
             Entry<String, Set<MessageQueue>> entry = it.next();
@@ -281,6 +283,7 @@ public abstract class RebalanceImpl {
             // 向对应的 Broker 发送锁定消息队列的请求
             if (findBrokerResult != null) {
                 LockBatchRequestBody requestBody = new LockBatchRequestBody();
+                // 那个消费组
                 requestBody.setConsumerGroup(this.consumerGroup);
                 // 当前消费者标识
                 requestBody.setClientId(this.mQClientFactory.getClientId());
@@ -303,6 +306,7 @@ public abstract class RebalanceImpl {
 
                             // todo 标记锁定
                             processQueue.setLocked(true);
+                            // 设置锁定时间
                             processQueue.setLastLockTimestamp(System.currentTimeMillis());
                         }
                     }
@@ -312,6 +316,7 @@ public abstract class RebalanceImpl {
                         if (!lockOKMQSet.contains(mq)) {
                             ProcessQueue processQueue = this.processQueueTable.get(mq);
                             if (processQueue != null) {
+                                // 标记非锁定
                                 processQueue.setLocked(false);
                                 log.warn("the message queue locked Failed, Group: {} {}", this.consumerGroup, mq);
                             }
@@ -353,7 +358,8 @@ public abstract class RebalanceImpl {
             }
         }
 
-        // 移除未订阅 Topic 对应的消息队列
+        // 移除未订阅 Topic 对应的消息队列，即清除 processQueueTable 缓存中的无效队列映射
+        // todo 重要，队列重分配后要把无效队列清除掉
         this.truncateMessageQueueNotMyTopic();
     }
 
@@ -382,10 +388,11 @@ public abstract class RebalanceImpl {
                 Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
 
                 if (mqSet != null) {
-
                     // todo 传入的是所有队列
                     // 更新该 Topic 下的队列，并返回是否改变
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, mqSet, isOrder);
+
+                    // 发生改变，调整主题下各个队列的拉取阈值，以及向 Broker 发送心跳
                     if (changed) {
                         this.messageQueueChanged(topic, mqSet, mqSet);
                         log.info("messageQueueChanged {} {} {} {}",
@@ -397,10 +404,11 @@ public abstract class RebalanceImpl {
                 } else {
                     log.warn("doRebalance, {}, but the topic[{}] not exist.", consumerGroup, topic);
                 }
+
                 break;
             }
 
-            // 集群模式 - 每条消息被同一消费者组的一个消费
+            // 集群模式
             case CLUSTERING: {
 
                 // 获取该Topic主题下的消息消费队列集合（mqSet），即读队列
@@ -408,6 +416,7 @@ public abstract class RebalanceImpl {
 
                 // todo 向Broker端发送获取订阅 topic 的消费组 consumerGroup 下的所有消费者ID列表的 RPC 通信请求
                 // （Broker端基于前面Consumer端上报的心跳包数据而构建的consumerTable做出响应返回，业务请求码：GET_CONSUMER_LIST_BY_GROUP）；
+                // todo 这里是订阅关系不一致发生消息丢失的一个问题点，在订阅时要保证同一个消费组下消费者们的订阅关系一致
                 List<String> cidAll = this.mQClientFactory.findConsumerIdList(topic, consumerGroup);
 
                 if (null == mqSet) {
@@ -458,7 +467,7 @@ public abstract class RebalanceImpl {
                     // todo 更新消息队列
                     boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
 
-                    // 发生改变
+                    // 发生改变，调整主题下各个队列的拉取阈值，以及向 Broker 发送心跳
                     if (changed) {
                         log.info(
                                 "rebalanced result changed. allocateMessageQueueStrategyName={}, group={}, topic={}, clientId={}, mqAllSize={}, cidAllSize={}, rebalanceResultSize={}, rebalanceResultSet={}",
@@ -489,6 +498,7 @@ public abstract class RebalanceImpl {
                 // 移除无效队列
                 ProcessQueue pq = this.processQueueTable.remove(mq);
                 if (pq != null) {
+                    // 废弃消息处理队列
                     pq.setDropped(true);
                     log.info("doRebalance, {}, truncateMessageQueueNotMyTopic remove unnecessary mq, {}", consumerGroup, mq);
                 }
@@ -509,10 +519,10 @@ public abstract class RebalanceImpl {
      * 3 todo 是不是消费端的 消息处理队列缓存大小（当前分配到的消息队列） <= 消息队列大小（消息队列缓存是针对 Topic 初始化的所有消息队列集合）
      * <p>
      * todo 关键一点：
-     * 消息消费队列在同一消费组不同消费者之间的负载均衡，其核心设计理念是在一个消息消费队列在同一时间只允许被同一消费组内的一个消费者消费，一个消息消费者能同时消费多个消息队列。
+     * 消息消费队列在同一消费组不同消费者之间的负载均衡，其核心设计理念是一个消息消费队列在同一时间只允许被同一消费组内的一个消费者消费，一个消息消费者能同时消费多个消息队列。
      *
      * @param topic   订阅的 topic
-     * @param mqSet   负载均衡结果后的消息队列数组
+     * @param mqSet   负载均衡结果后的消息队列数组（属于订阅 topic 下的队列）
      * @param isOrder 是否有序
      * @return
      */
@@ -530,6 +540,7 @@ public abstract class RebalanceImpl {
             ProcessQueue pq = next.getValue();
 
             // 判断消费者订阅的 Topic 和缓存中分配的队列是否匹配，如果匹配
+            // 即只处理 mq 的主题与传入主题相关的 ProcessQueue
             if (mq.getTopic().equals(topic)) {
 
                 // 该 Topic 分配的消息队列不包含 mq，说明该 mq 对应的消息处理队列不可用，废弃它
@@ -538,8 +549,7 @@ public abstract class RebalanceImpl {
                     // todo 废弃 ProcessQueue
                     pq.setDropped(true);
 
-                    // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息。
-                    // todo 如果是顺序消费，则尝试释放 mq 的分布式锁，释放依据是：没有正在消费该队列
+                    // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息。如果是顺序消费，还需尝试释放 mq 的分布式锁，释放依据是：没有正在消费该队列
                     if (this.removeUnnecessaryMessageQueue(mq, pq)) {
 
                         // todo 移除缓存中的该消息队列到消息处理队列的映射关系
@@ -550,20 +560,21 @@ public abstract class RebalanceImpl {
                         log.info("doRebalance, {}, remove unnecessary mq, {}", consumerGroup, mq);
                     }
 
-                    // 分配到的消息队列集合包含缓存中的消息队列，需要判断缓存中的消息处理队列是否过期
-                    // 队列拉取超时，进行清理
-                    // 队列拉取超时，即 当前时间 - 最后一次拉取消息时间 > 120s ( 120s 可配置)，判定发生 BUG，过久未进行消息拉取，移除消息队列
+                    // 分配到的消息队列集合包含缓存中的消息队列，还需要判断缓存中的消息处理队列是否过期，即
+                    // 队列拉取消息超时，即 当前时间 - 最后一次拉取消息时间 > 120s ( 120s 可配置)，判定发生 BUG，过久未进行消息拉取，移除消息队列
                     // todo 最后一次拉取消息时间的更新，是在 pullMessage 方法中更新的，主要用来判断 PullMessageService 是否空闲
                 } else if (pq.isPullExpired()) {
                     switch (this.consumeType()) {
-                        // 在 Pull 模式下不用管
+                        // 在 Pull 模式下不用管，因为 Pull 模式的拉取时间间隔是由业务方控制的
                         case CONSUME_ACTIVELY:
                             break;
+
                         // 在 Push 模式下，标记消息处理队列不可用，并尝试移除
                         case CONSUME_PASSIVELY:
 
-                            // todo 废弃 ProcessQueue
+                            // todo 废弃 ProcessQueue，及时阻止继续向 ProcessQueue 中拉取消息
                             pq.setDropped(true);
+
                             // todo 将 mq 消费进度持久化后，移除缓存中 mq 的消费进度信息。
                             // todo 如果是顺序消费，则尝试释放 mq 的分布式锁，释放依据是：没有正在消费该队列
                             if (this.removeUnnecessaryMessageQueue(mq, pq)) {
@@ -580,7 +591,7 @@ public abstract class RebalanceImpl {
             }
         }
 
-        // 2 增加不在 processQueueTable 且 存在 mqSet 中的消息队列
+        // 2 增加不在 processQueueTable 且 存在 mqSet 中的消息队列（注意，此时 processQueueTable 中的元素是过滤后的结果，里面的队列都是有效的）
         // todo 为新的 MessageQueue 创建对应的 PullRequest ，用于从对应的消息队列中拉取消息
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
 
@@ -638,7 +649,7 @@ public abstract class RebalanceImpl {
                         PullRequest pullRequest = new PullRequest();
                         pullRequest.setConsumerGroup(consumerGroup);
 
-                        // todo 待拉取的 MessageQueue 偏移量
+                        // todo 待拉取的 MessageQueue 逻辑偏移量
                         pullRequest.setNextOffset(nextOffset);
                         pullRequest.setMessageQueue(mq);
                         pullRequest.setProcessQueue(pq);

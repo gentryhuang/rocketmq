@@ -71,7 +71,7 @@ public class PullAPIWrapper {
      */
     private volatile boolean connectBrokerByUser = false;
     /**
-     * 默认 Broker 编号
+     * 默认 Broker 编号 ，是主 Broker
      */
     private volatile long defaultBrokerId = MixAll.MASTER_ID;
     private Random random = new Random(System.currentTimeMillis());
@@ -85,8 +85,8 @@ public class PullAPIWrapper {
 
     /**
      * 处理拉取结果
-     * 1. 更新 消息队列拉取消息Broker 编号的映射
-     * 2. 解析消息，并根据订阅信息消息 tagCode 匹配合适消息
+     * 1. 更新 消息队列拉取消息 Broker 编号的映射
+     * 2. 解析消息，并根据订阅信息消息 tagCode 匹配合适消息，即会过滤消息
      *
      * @param mq               消息队列
      * @param pullResult       拉取结果
@@ -110,12 +110,13 @@ public class PullAPIWrapper {
             ByteBuffer byteBuffer = ByteBuffer.wrap(pullResultExt.getMessageBinary());
             List<MessageExt> msgList = MessageDecoder.decodes(byteBuffer);
 
-            // todo 根据订阅信息消息tagCode匹配合适消息
+            // todo 根据订阅信息消息tag 匹配合适消息
             List<MessageExt> msgListFilterAgain = msgList;
+
             if (!subscriptionData.getTagsSet().isEmpty() && !subscriptionData.isClassFilterMode()) {
                 msgListFilterAgain = new ArrayList<MessageExt>(msgList.size());
 
-                // todo 遍历拉取的消息，根据订阅的 tag 过滤，留下消费方关注的 tag
+                // todo 遍历拉取的消息，根据订阅的 tag 过滤，留下消费方关注的消息
                 for (MessageExt msg : msgList) {
                     if (msg.getTags() != null) {
                         // tag 过滤
@@ -252,8 +253,9 @@ public class PullAPIWrapper {
                             + findBrokerResult.getBrokerVersion() + "] does not upgrade to support for filter message by " + expressionType, null);
                 }
             }
-            int sysFlagInner = sysFlag;
 
+            // 如果推荐的是从节点，那么就不能再提交消费进度了
+            int sysFlagInner = sysFlag;
             if (findBrokerResult.isSlave()) {
                 sysFlagInner = PullSysFlag.clearCommitOffsetFlag(sysFlagInner);
             }
@@ -263,8 +265,11 @@ public class PullAPIWrapper {
             requestHeader.setConsumerGroup(this.consumerGroup);
             requestHeader.setTopic(mq.getTopic());
             requestHeader.setQueueId(mq.getQueueId());
+            // 拉取消息的位置
             requestHeader.setQueueOffset(offset);
             requestHeader.setMaxMsgNums(maxNums);
+
+            // 拉取消息时的系统标志
             requestHeader.setSysFlag(sysFlagInner);
 
             // todo 提交到 Broker 的消费进度
@@ -283,6 +288,7 @@ public class PullAPIWrapper {
             // 如果消息过滤模式为 类过滤，则需要根据主题名称、Broker 地址找到注册在 Broker 上的 FilterServer 地址，
             // 从 FilterServer 上拉取消息，否则从 Broker 上拉取消息
             if (PullSysFlag.hasClassFilterFlag(sysFlagInner)) {
+                // 计算从哪个 FilterServer 中拉取消息
                 brokerAddr = computePullFromWhichFilterServer(mq.getTopic(), brokerAddr);
             }
 
@@ -308,7 +314,7 @@ public class PullAPIWrapper {
      * @return
      */
     public long recalculatePullFromWhichNode(final MessageQueue mq) {
-        // 若开启默认 Broker 开关，则返回默认 Broker 编号
+        // 若开启默认 Broker 开关，则返回默认 Broker 编号，即主节点
         if (this.isConnectBrokerByUser()) {
             return this.defaultBrokerId;
         }

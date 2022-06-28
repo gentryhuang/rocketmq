@@ -124,7 +124,7 @@ public class RebalanceLockManager {
     }
 
     /**
-     * 判断消费组 group 下的消息队列 mq 是否被锁定
+     * 判断消费组 group 下的消息队列 mq 是否被 clientID 锁定
      *
      * @param group    消费组
      * @param mq       消息队列

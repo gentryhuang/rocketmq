@@ -26,6 +26,8 @@ public class SubscriptionGroupConfig {
 
     /**
      * 消费组
+     *
+     * todo RocketMQ 消息消费重试不是以主题，而是以消费组。
      */
     private String groupName;
     /**

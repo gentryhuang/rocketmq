@@ -203,8 +203,8 @@ public class TopicConfigManager extends ConfigManager {
     /**
      * 在发送消息的方法中创建 Topic 并上报的 NameSrv。言外之意，以后就可以获取到了该 topic 的路由信息。
      * 说明：
-     *    这里也对应了开启自动创建主题的逻辑，当没有手动创建 Topic 时，客户端获取的路由信息时默认主题的，虽然拿到了路由信息，但是任何一个 Broker 上是没有该 Topic 的信息的，
-     *    这里正是来创建这个 Topic 的信息的。
+     * 这里也对应了开启自动创建主题的逻辑，当没有手动创建 Topic 时，客户端获取的路由信息时默认主题的，虽然拿到了路由信息，但是任何一个 Broker 上是没有该 Topic 的信息的，
+     * 这里正是来创建这个 Topic 的信息的。
      *
      * @param topic                       发送消息时的 Topic
      * @param defaultTopic                发送消息时默认的 Topic 是 TBW102
@@ -315,6 +315,8 @@ public class TopicConfigManager extends ConfigManager {
             final int perm,
             final int topicSysFlag) {
         TopicConfig topicConfig = this.topicConfigTable.get(topic);
+
+        // 存在则返回
         if (topicConfig != null)
             return topicConfig;
 

@@ -90,7 +90,7 @@ public class ConsumeQueue {
      */
     private long maxPhysicOffset = -1;
     /**
-     * 当最小物理偏移量
+     * 当前最小物理偏移量
      */
     private volatile long minLogicOffset = 0;
 
@@ -670,14 +670,14 @@ public class ConsumeQueue {
     /**
      * 根据 startIndex 获取消息消费队列条目
      *
-     * @param startIndex 逻辑偏移量（针对 ConsumeQueue 文件组）
+     * @param startIndex 逻辑偏移量（针对 ConsumeQueue 文件组），类似索引下标
      * @return
      */
     public SelectMappedBufferResult getIndexBuffer(final long startIndex) {
         int mappedFileSize = this.mappedFileSize;
 
-        // 1 通过 startIndex * 20 得到的在 ConsumeQueue 文件的物理偏移量
-        // todo 因为每个 ConsumeQueue条目的大小是固定的,所以只需要根据index*20则可以定位到物理偏移量offset的值
+        // 1 通过 startIndex * 20 得到的在 ConsumeQueue 文件（组）中的物理偏移量
+        // todo 因为每个 ConsumeQueue 条目的大小是固定的,所以只需要根据 index*20 则可以定位到物理偏移量 offset 的值
         long offset = startIndex * CQ_STORE_UNIT_SIZE;
 
         // 2 如果该偏移量 < minLogicOffset ，则返回 null，说明该消息已被删除
@@ -690,12 +690,13 @@ public class ConsumeQueue {
             // 获取对应的数据
             if (mappedFile != null) {
 
-                // todo 通过将该偏移量与物理文件大小取模获取在该文件的偏移量，从偏移量开始读取该文件所有数据
+                // todo 通过将该偏移量与物理文件大小取模获取在该文件的逻辑偏移量，从该逻辑偏移量开始读取该文件所有数据
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer((int) (offset % mappedFileSize));
 
                 return result;
             }
         }
+
         return null;
     }
 
@@ -721,9 +722,20 @@ public class ConsumeQueue {
         this.minLogicOffset = minLogicOffset;
     }
 
+    /**
+     * 根据逻辑偏移量获取下一个消息索引文件
+     *
+     * @param index
+     * @return
+     */
     public long rollNextFile(final long index) {
+        // 索引文件大小
         int mappedFileSize = this.mappedFileSize;
+
+        // 一个文件可以存储多个索引
         int totalUnitsInFile = mappedFileSize / CQ_STORE_UNIT_SIZE;
+
+        // 下一个文件的起始索引
         return index + totalUnitsInFile - index % totalUnitsInFile;
     }
 

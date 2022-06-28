@@ -188,6 +188,7 @@ public class BrokerOuterAPI {
             }
 
             try {
+                // 超时等待上报完成
                 countDownLatch.await(timeoutMills, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
             }

@@ -158,8 +158,10 @@ public class MappedFileQueue {
         return findMappedFileByOffset(offset, false);
     }
 
+
+
     /**
-     * 根据消息偏移量 offset 查找 MappedFile
+     * 根据消息物理偏移量 offset 查找 MappedFile
      * 说明：
      * 1 使用内存映射，只要是存在于存储目录下的文件，都需要对应创建内存映射文件
      * 2 如果不定时将已消费的消息从存储文件中删除，会造成极大的内存压力于资源浪费，因此 RocketMQ 采取定时删除存储文件的策略
@@ -181,7 +183,8 @@ public class MappedFileQueue {
 
             // 存在 MappedFile
             if (firstMappedFile != null && lastMappedFile != null) {
-                // 偏移量不在文件中
+
+                // 物理偏移量不在文件中
                 if (offset < firstMappedFile.getFileFromOffset() || offset >= lastMappedFile.getFileFromOffset() + this.mappedFileSize) {
                     LOG_ERROR.warn("Offset not matched. Request offset: {}, firstOffset: {}, lastOffset: {}, mappedFileSize: {}, mappedFiles count: {}",
                             offset,
@@ -197,6 +200,7 @@ public class MappedFileQueue {
                      * 注意：这里不能直接使用 offset/this.mappedFileSize，因为 RocketMQ 可能将文件名靠前的删除了，这样的话得到的文件下标就不准确了。
                      * 比如：通过 offset/this.mappedFileSize = 2，但是 00000000000000000000 文件已经被删除了，这个时候得到的 2 就不能作为正确的下标了，
                      *       必须通过计算：(int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize)) 得到正确文件所在的下标，即
+                     *
                      *       todo (消息物理偏移量 - 第一个MappedFile 的起始偏移量）/文件固定大小 即可得到所在文件下标
                      */
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
@@ -489,7 +493,7 @@ public class MappedFileQueue {
     }
 
     /**
-     * 获取存储文件的最大偏移量。返回最后一个 MappedFile 的 fileFromOffset ，加上该 MappedFile 当前的读指针
+     * 获取存储文件的最大的物理偏移量。返回最后一个 MappedFile 的 fileFromOffset ，加上该 MappedFile 当前的读指针
      *
      * @return
      */

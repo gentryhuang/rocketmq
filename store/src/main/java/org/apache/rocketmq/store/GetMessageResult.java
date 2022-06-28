@@ -31,10 +31,13 @@ public class GetMessageResult {
 
     private final List<ByteBuffer> messageBufferList = new ArrayList<ByteBuffer>(100);
 
+    /**
+     * 拉取消息的状态
+     */
     private GetMessageStatus status;
 
     /**
-     * 消费者下次拉取消息的 offset 信息，即消费者对 consumeQueue 的消费进度
+     * 消费者下次拉取消息的逻辑偏移量（类似下标），即消费者对 consumeQueue 的消费进度
      *
      * 是消费者在下一轮消息拉取时 offset 的重要依据，无论当次拉取的消息消费是否正常，nextBeginOffset都不会回滚，
      * 这是因为rocketMQ对消费异常的消息的处理是将消息重新发回broker端的重试队列（会为每个topic创建一个重试队列，以%RERTY%开头），达到重试时间后将消息投递到重试队列中进行消费重试。
@@ -50,6 +53,9 @@ public class GetMessageResult {
      */
     private long maxOffset;
 
+    /**
+     * 获取到的消息总大小
+     */
     private int bufferTotalSize = 0;
 
     /**
@@ -104,9 +110,13 @@ public class GetMessageResult {
     }
 
     public void addMessage(final SelectMappedBufferResult mapedBuffer) {
+        // 加入到 CommitLog 消息集合
         this.messageMapedList.add(mapedBuffer);
+        // 加入到消息集合中
         this.messageBufferList.add(mapedBuffer.getByteBuffer());
+        // 累加消息总大小
         this.bufferTotalSize += mapedBuffer.getSize();
+
         this.msgCount4Commercial += (int) Math.ceil(
                 mapedBuffer.getSize() / BrokerStatsManager.SIZE_PER_COUNT);
     }

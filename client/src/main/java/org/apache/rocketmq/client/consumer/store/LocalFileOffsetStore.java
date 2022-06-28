@@ -77,7 +77,16 @@ public class LocalFileOffsetStore implements OffsetStore {
     }
 
     /**
-     * 从本地文件加载消费进度，主要读取 offsets.json 或 offsets.json.bak 中的内容，然后将 json 转成 map
+     * 从本地文件加载消费进度，主要读取 offsets.json 或 offsets.json.bak 中的内容，然后将 json 转成 map。
+     * 具体的 json 文件内容如：
+     * {
+     * "offsetTable":{
+     * {"brokerName":"broker-a","queueId":3,"topic":"TopicTest"}:2,
+     * {"brokerName":"broker-a","queueId":2,"topic":"TopicTest"}:1,
+     * {"brokerName":"broker-a","queueId":1,"topic":"TopicTest"}:2,
+     * {"brokerName":"broker-a","queueId":0,"topic":"TopicTest"}:1,
+     * }
+     * }
      *
      * @throws MQClientException
      */
@@ -155,6 +164,7 @@ public class LocalFileOffsetStore implements OffsetStore {
 
     /**
      * 持久化消费进度。将消费进度以 JSON 字符串写入文件
+     *
      * @param mqs
      */
     @Override

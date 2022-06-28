@@ -119,18 +119,20 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         log.debug("receive PullMessage request command, {}", request);
 
-        // 校验 broker 是否可读
+        // 校验 broker 是否可读，不可读，就不能拉取消息
         if (!PermName.isReadable(this.brokerController.getBrokerConfig().getBrokerPermission())) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark(String.format("the broker[%s] pulling message is forbidden", this.brokerController.getBrokerConfig().getBrokerIP1()));
             return response;
         }
 
-        /*--- 消费者向 Broker 发起消息拉取请求时，如果broker上并没有存在该消费组的订阅消息时，如果不允许自动创建(autoCreateSubscriptionGroup 设置为 false)，默认为true，则不会返回消息给客户端 -----*/
+        /*--- 消费者向 Broker 发起消息拉取请求时，如果broker上并没有存在该消费组的订阅消息时，
+              如果不允许自动创建(autoCreateSubscriptionGroup 设置为 false)，默认为true，则不会返回消息给客户端 -----*/
 
         // todo 校验 consumer 分组配置是否存在。当不存在时，如果允许自动创建则根据当前 consumerGroup 创建一个基本的消费组配置信息
         SubscriptionGroupConfig subscriptionGroupConfig =
                 this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getConsumerGroup());
+
         // todo 如果还是为空，则不能拉取消息，直接报错 订阅组不存在
         // todo 如果不允许自动创建订阅组信息，必须手动向 Broker 创建订阅组信息，否则不能拉取消息
         if (null == subscriptionGroupConfig) {
@@ -139,7 +141,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 校验 consumer 分组配置是否可消费
+        // 校验 consumer 分组是否可消费
         if (!subscriptionGroupConfig.isConsumeEnable()) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark("subscription group no permission, " + requestHeader.getConsumerGroup());
@@ -148,11 +150,10 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         // todo 当没有消息时是否挂起请求
         final boolean hasSuspendFlag = PullSysFlag.hasSuspendFlag(requestHeader.getSysFlag());
-        // todo 是否提交消费进度（即消费端上报本地的消费进度过来了）
+        // todo 是否提交消费进度（即消费端上报本地的消费进度过来了，要不要接受）
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
         // todo 是否过滤订阅表达式(subscription)
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
-
 
         // todo 如果没有消息时挂起请求，则获取挂起请求超时时长
         final long suspendTimeoutMillisLong = hasSuspendFlag ? requestHeader.getSuspendTimeoutMillis() : 0;
@@ -277,7 +278,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // todo 构建消息过滤器
+        // todo 构建消息过滤器，用于在拉取消息时进行过滤不符合订阅的消息
         MessageFilter messageFilter;
 
         // 支持对重试主题的过滤
@@ -305,10 +306,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         // todo 根据获取消息的结果填充 response
         if (getMessageResult != null) {
-            // 设置响应结果
+            // 设置拉取消息请求的响应状态
             response.setRemark(getMessageResult.getStatus().name());
+            // 下次从哪个偏移量开始拉取消息
             responseHeader.setNextBeginOffset(getMessageResult.getNextBeginOffset());
+            // 当前 ConsumeQueue 的最小逻辑偏移量
             responseHeader.setMinOffset(getMessageResult.getMinOffset());
+            // 当前 ConsumeQueue 的最大逻辑偏移量
             responseHeader.setMaxOffset(getMessageResult.getMaxOffset());
 
             // todo 根据获取消息结果中是否建议从 slave 拉取消息，来设置 BrokerId
@@ -317,7 +321,6 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 // todo 建议从从服务器拉取消息，则使用消费组订阅配置中的 whichBrokerWhenConsumeSlowly，默认为 1，也就是从从服务器
                 // 可以通过客户端命令 updateSubGroup 指定当主服务器繁忙时，建议从哪个从服务器读取消息
                 responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getWhichBrokerWhenConsumeSlowly());
-
 
                 // 不建议从 slave 拉取消息，则设置 0 ，表示从主服务器拉取消息
             } else {
@@ -370,14 +373,14 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     break;
                 // 消息存放在下一个 commitLog 中
                 case MESSAGE_WAS_REMOVING:
-                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY); // 消息重试
+                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY); // 立即重试拉取消息
                     break;
                 // 未找到队列
                 case NO_MATCHED_LOGIC_QUEUE:
-                    // 队列中未包含消息
+
                 case NO_MESSAGE_IN_QUEUE:
                     if (0 != requestHeader.getQueueOffset()) {
-                        response.setCode(ResponseCode.PULL_OFFSET_MOVED);
+                        response.setCode(ResponseCode.PULL_OFFSET_MOVED); // 拉取偏移量变动
                         // XXX: warn and notify me
                         log.info("the broker store no queue data, fix the request offset {} to {}, Topic: {} QueueId: {} Consumer Group: {}",
                                 requestHeader.getQueueOffset(),
@@ -390,11 +393,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                         response.setCode(ResponseCode.PULL_NOT_FOUND);
                     }
                     break;
-                // 未找到消息
+
+                // 队列中未包含消息，在 Broker 端过滤后没有消息了
                 case NO_MATCHED_MESSAGE:
-                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY);
+                    response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY); // 立即重试拉取消息
                     break;
-                // 消息物理偏移量为空
+
+                // 没有对应的消息索引
                 case OFFSET_FOUND_NULL:
                     response.setCode(ResponseCode.PULL_NOT_FOUND);
                     break;
@@ -486,6 +491,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                                 (int) (this.brokerController.getMessageStore().now() - beginTimeMills));
                         response.setBody(r);
 
+                        // 零拷贝
                     } else { // zero-copy
                         try {
 
@@ -547,7 +553,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                                 channel,
                                 pollingTimeMills,
                                 this.brokerController.getMessageStore().now(),
-                                offset, // 待拉取消息的起始位置
+                                offset, // 待拉取消息的逻辑偏移量
                                 subscriptionData,
                                 messageFilter);
 

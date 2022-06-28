@@ -286,6 +286,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         // 同步向所有 Broker 发送心跳请求，上报信息
         this.mQClientFactory.sendHeartbeatToAllBrokerWithLock();
 
+        /**
+         * 定时扫描超时的发送请求，并结束它
+         */
         this.timer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {

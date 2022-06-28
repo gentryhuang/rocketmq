@@ -1528,13 +1528,13 @@ public class CommitLog {
     }
 
     /**
-     * todo 读取从偏移量到 size 大小的数据，如：size = 4，读取的就是消息的长度（因为 CommitLog 和 ConsumeQueue 存储不一样，前者是不定长的，后者是定长的 20字节）
+     * todo 读取从物理偏移量到 size 大小的数据，如：size = 4，读取的就是消息的长度（因为 CommitLog 和 ConsumeQueue 存储不一样，前者是不定长的，后者是定长的 20字节）
      * 说明：
-     * 主要根据偏移量，找到所在的commitlog文件，commitlog文件封装成MappedFile(内存映射文件)，然后直接从偏移量开始，读取指定的字节（消息的长度），
+     * 主要根据物理偏移量，找到所在的commitlog文件，commitlog文件封装成MappedFile(内存映射文件)，然后直接从偏移量开始，读取指定的字节（消息的长度），
      * 要是事先不知道消息的长度，只知道offset呢？其实也简单，先找到MapFile,然后从offset处先读取4个字节，就能获取该消息的总长度。
      *
-     * @param offset
-     * @param size
+     * @param offset 物理便宜量
+     * @param size 消息大小
      * @return
      */
     public SelectMappedBufferResult getMessage(final long offset, final int size) {
@@ -1559,7 +1559,7 @@ public class CommitLog {
     /**
      * 根据 offset ，返回 offset 所在 CommitLog 文件的下一个 CommitLog 文件的起始偏移量
      *
-     * @param offset 偏移量
+     * @param offset 物理偏移量
      * @return
      */
     public long rollNextFile(final long offset) {

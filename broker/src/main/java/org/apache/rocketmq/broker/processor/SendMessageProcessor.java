@@ -215,11 +215,15 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             topicSysFlag = TopicSysFlag.buildSysFlag(false, true);
         }
 
-        // todo 创建重试 Topic，存在则直接返回
-        TopicConfig topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
-                newTopic,
-                subscriptionGroupConfig.getRetryQueueNums(), // 重试队列个数 为1
-                PermName.PERM_WRITE | PermName.PERM_READ, topicSysFlag);
+        // todo 创建重试 Topic，存在则直接返回，可以看到，在哪个 Broker 上创建重试队列和具体的消息队列有关，即重试队列创建在消息队列所在的 Broker 上。
+        //  也可以知道，消息重试的消息主题是基于消费组，而不是每一个主题都有一个重试主题，而是每一个消费组由一个重试主题。
+        TopicConfig topicConfig = this.brokerController.getTopicConfigManager()
+                .createTopicInSendMessageBackMethod(
+                        newTopic,// 主题
+                        subscriptionGroupConfig.getRetryQueueNums(), // 重试队列个数 为1
+                        PermName.PERM_WRITE | PermName.PERM_READ, // 权限
+                        topicSysFlag);
+
         if (null == topicConfig) {
             response.setCode(ResponseCode.SYSTEM_ERROR);
             response.setRemark("topic[" + newTopic + "] not exist");
@@ -244,7 +248,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
         // todo 将原始 Topic 保存到消息的 RETRY_TOPIC 属性中。注意，第一次重试消息 这里为 null
         final String retryTopic = msgExt.getProperty(MessageConst.PROPERTY_RETRY_TOPIC);
         if (null == retryTopic) {
-            // RETRY_TOPIC 属性保存 Topic
+            // RETRY_TOPIC 属性保存原 Topic
             MessageAccessor.putProperty(msgExt, MessageConst.PROPERTY_RETRY_TOPIC, msgExt.getTopic());
         }
         msgExt.setWaitStoreMsgOK(false);
@@ -259,7 +263,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             maxReconsumeTimes = requestHeader.getMaxReconsumeTimes();
         }
 
-        // 如果消息重试次数 >= 16(默认)。更新消息的 Topic 为死信队列的 Topic ："%DLQ%" + group ，消费队列为 1（死信队列只有一个消费队列）
+        // 如果消息重试次数 >= 16(默认)。更新消息的 Topic 为死信队列的 Topic ："%DLQ%" + group ，消费队列为 1（死信队列只有一个消费队列）。也就是消息可以被投递 1 + 15 次。
         // todo 死信：以"%DLQ%" + group为Topic名，存到CommitLog中：存到死信队列中的消息不会被Consumer消费了
         if (msgExt.getReconsumeTimes() >= maxReconsumeTimes || delayLevel < 0) {
 
@@ -297,6 +301,8 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             if (0 == delayLevel) {
                 delayLevel = 3 + msgExt.getReconsumeTimes();
             }
+
+            // 设置延迟级别
             msgExt.setDelayTimeLevel(delayLevel);
         }
 
