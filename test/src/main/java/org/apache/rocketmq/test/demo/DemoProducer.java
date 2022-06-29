@@ -30,18 +30,18 @@ public class DemoProducer {
 
         //Create a message instance, specifying topic, tag and message body.
 
-        // TopicTest
-        Message msg = new Message("hlb_topic" /* Topic */,
-                "TagA" /* Tag */,
-                ("Hello RocketMQ " +
-                        0).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
-        );
+        for (int i = 1; i < 1000; i++) {
+            Message msg = new Message("hlb_topic" /* Topic */,
+                    "TagA" /* Tag */,
+                    ("Hello RocketMQ " +
+                            i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+            );
+            //  msg.setDelayTimeLevel(3);
 
-        //  msg.setDelayTimeLevel(3);
-
-        //Call send message to deliver message to one of brokers.
-        SendResult sendResult = producer.send(msg, 50000);
-        System.out.printf("%s%n", sendResult);
+            //Call send message to deliver message to one of brokers.
+            SendResult sendResult = producer.send(msg, 50000);
+            System.out.printf("%s%n", sendResult);
+        }
 
 
         //Shut down once the producer instance is not longer in use.

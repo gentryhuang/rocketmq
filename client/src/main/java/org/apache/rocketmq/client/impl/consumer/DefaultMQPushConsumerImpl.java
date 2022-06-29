@@ -710,6 +710,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     : RemotingHelper.parseSocketAddressAddr(msg.getStoreHost());
 
             // Consumer 发回消息
+            // todo Broker 端可以自动创建重试主题
             this.mQClientFactory.getMQClientAPIImpl().consumerSendMessageBack(brokerAddr, msg,
                     this.defaultMQPushConsumer.getConsumerGroup(), delayLevel, 5000, getMaxReconsumeTimes());
 
@@ -718,6 +719,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             log.error("sendMessageBack Exception, " + this.defaultMQPushConsumer.getConsumerGroup(), e);
 
             // 基于原来消息 msg 构建新的消息，设置新的主题，即重试主题
+            // todo Broker 端可以自动创建重试主题，即使不开始自动创建主题的情况下
             Message newMsg = new Message(MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup()), msg.getBody());
 
             // 原有消息 id

@@ -104,9 +104,10 @@ public class CommitLog {
     private final AppendMessageCallback appendMessageCallback;
     private final ThreadLocal<MessageExtBatchEncoder> batchEncoderThreadLocal;
     /**
-     * todo Topic 下 queue 的 逻辑偏移量，类似数组下标记(注意，不是物理偏移量)
-     * todo 特别说明：在进行 CommitLog 转发时，对应消息队列的逻辑偏移量就是从这里取的
+     * todo Topic 下 queue 的 逻辑偏移量，类似数组下标记(注意，不是物理偏移量)。在 Broker 启动时会根据 ConsumeQueue 计算获得，之后根据消息进行更新。
+     * todo 特别说明：在进行 CommitLog 转发时，对应消息队列的逻辑偏移量就是从这里取的，以及处理消息写入时的队列逻辑偏移量也需要这个缓存
      *
+     * @see DefaultMessageStore#load()
      * @see DefaultMessageStore#recoverTopicQueueTable()
      */
     protected HashMap<String/* topic-queueid */, Long/* offset */> topicQueueTable = new HashMap<String, Long>(1024);
@@ -232,7 +233,7 @@ public class CommitLog {
      * Read CommitLog data, use data replication
      */
     public SelectMappedBufferResult getData(final long offset) {
-        // 如果 offset == 0 ，那返回第一个就可以
+        // 如果 offset == 0 ，没有找到就返回第一个就可以
         return this.getData(offset, offset == 0);
     }
 
@@ -266,36 +267,51 @@ public class CommitLog {
 
 
     /**
-     * Broker 正常停止文件恢复：
-     * 1 从倒数第 3 个 CommitLog 文件开始恢复，如果不足 3 个文件，则从第一个文件开始恢复
+     * Broker 正常停止文件恢复: 从倒数第 3 个 CommitLog 文件开始恢复，如果不足 3 个文件，则从第一个文件开始恢复
      * <p>
      * When the normal exit, data recovery, all memory data have been flush
+     *
+     * @param maxPhyOffsetOfConsumeQueue ConsumeQueue 记录消息的最大物理偏移量
      */
     public void recoverNormally(long maxPhyOffsetOfConsumeQueue) {
         // 是否验证 CRC
         boolean checkCRCOnRecover = this.defaultMessageStore.getMessageStoreConfig().isCheckCRCOnRecover();
+
+        // 获取 CommitLog 的内存文件列表
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
         if (!mappedFiles.isEmpty()) {
+
+            // 从哪个内存文件开始恢复，文件数 >= 3 时则从倒数第 3 个文件开始
             // Began to recover from the last third file
             int index = mappedFiles.size() - 3;
             if (index < 0)
                 index = 0;
-
             MappedFile mappedFile = mappedFiles.get(index);
+
+            // 内存映射文件对应的 ByteBuffer
             ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
+
+            // 该文件的起始物理偏移量，默认从 CommitLog 中存放的第一个条目开始。
             long processOffset = mappedFile.getFileFromOffset();
             long mappedFileOffset = 0;
+
             while (true) {
-                // 创建转发对象
+
+                // 使用 byteBuffer 逐条消息构建请求转发对象，直到出现异常或者当前文件读取完（换下一个文件）
+                // todo 使用能否构建消息转发对象作为有效性的标准，因为后续消息要重放到 ConsumeQueue 和 IndexFile ，任何一个异常都是不允许的
                 DispatchRequest dispatchRequest = this.checkMessageAndReturnSize(byteBuffer, checkCRCOnRecover);
+                // 消息大小
                 int size = dispatchRequest.getMsgSize();
+
                 // Normal data
+                // 数据正常
                 if (dispatchRequest.isSuccess() && size > 0) {
                     mappedFileOffset += size;
                 }
                 // Come the end of the file, switch to the next file Since the
                 // return 0 representatives met last hole,
                 // this can not be included in truncate offset
+                // 来到文件末尾，切换到下一个文件
                 else if (dispatchRequest.isSuccess() && size == 0) {
                     index++;
                     if (index >= mappedFiles.size()) {
@@ -311,22 +327,30 @@ public class CommitLog {
                     }
                 }
                 // Intermediate file read error
+                // 文件读取错误
                 else if (!dispatchRequest.isSuccess()) {
                     log.info("recover physics file end, " + mappedFile.getFileName());
                     break;
                 }
             }
 
+            // processOffset 代表了当前 CommitLog 有效偏移量
             processOffset += mappedFileOffset;
             this.mappedFileQueue.setFlushedWhere(processOffset);
             this.mappedFileQueue.setCommittedWhere(processOffset);
+
+            // 删除有效偏移量后的文件 ，保留文件中有效数据（本质上：更新 MappedFile 的写指针、提交指针、刷盘指针）
+            // 即 截断无效的 CommitLog 文件，只保留到 processOffset 位置的有效文件
             this.mappedFileQueue.truncateDirtyFiles(processOffset);
 
             // Clear ConsumeQueue redundant data
+            // 清除 ConsumeQueue 冗余数据「ConsumeQueue 中记录的最大物理偏移量大于了 CommitLog 中最大有效物理偏移量」
             if (maxPhyOffsetOfConsumeQueue >= processOffset) {
                 log.warn("maxPhyOffsetOfConsumeQueue({}) >= processOffset({}), truncate dirty logic files", maxPhyOffsetOfConsumeQueue, processOffset);
+                // todo 只保留记录物理偏移量 < processOffset 的 MappedFile（本质上：更新 MappedFile 的写指针、提交指针、刷盘指针）
                 this.defaultMessageStore.truncateDirtyLogicFiles(processOffset);
             }
+
         } else {
             // Commitlog case files are deleted
             log.warn("The commitlog files are deleted, and delete the consume queue files");
@@ -359,7 +383,7 @@ public class CommitLog {
 
             // 1 TOTAL SIZE 消息条目总长度
             int totalSize = byteBuffer.getInt();
-            // 2 MAGIC CODE
+            // 2 MAGIC CODE 魔数
             int magicCode = byteBuffer.getInt();
             switch (magicCode) {
                 case MESSAGE_MAGIC_CODE:
@@ -482,6 +506,7 @@ public class CommitLog {
 
             // 计算消息长度
             int readLength = calMsgLength(sysFlag, bodyLen, topicLen, propertiesLength);
+            // 校验消息长度
             if (totalSize != readLength) {
                 doNothingForDeadCode(reconsumeTimes);
                 doNothingForDeadCode(flag);
@@ -498,13 +523,13 @@ public class CommitLog {
              * 构建转发请求对象 DispatchRequest
              */
             return new DispatchRequest(
-                    topic,
-                    queueId,
-                    physicOffset,
-                    totalSize,
-                    tagsCode, // 延时时间
-                    storeTimestamp,
-                    queueOffset,
+                    topic, // 消息主题
+                    queueId, // 队列id
+                    physicOffset, // 消息在 CommitLog 文件中的物理偏移量
+                    totalSize, // 消息大小
+                    tagsCode, // 如果是延时消息，就是延时时间
+                    storeTimestamp, // 消息存储时间
+                    queueOffset, // 消息逻辑队列偏移量
                     keys,
                     uniqKey,
                     sysFlag,
@@ -1534,7 +1559,7 @@ public class CommitLog {
      * 要是事先不知道消息的长度，只知道offset呢？其实也简单，先找到MapFile,然后从offset处先读取4个字节，就能获取该消息的总长度。
      *
      * @param offset 物理便宜量
-     * @param size 消息大小
+     * @param size   消息大小
      * @return
      */
     public SelectMappedBufferResult getMessage(final long offset, final int size) {
@@ -1632,7 +1657,7 @@ public class CommitLog {
     /**
      * 刷盘任务
      * 说明：MappedFile 落盘方式：
-     * 1 开启使用对外内存：数据先追加到堆外内存 -> 提交堆外内存数据到与物理文件的内存映射中 -> 物理文件的内存映射 flush 到磁盘
+     * 1 开启使用堆外内存：数据先追加到堆外内存 -> 提交堆外内存数据到与物理文件的内存映射中 -> 物理文件的内存映射 flush 到磁盘
      * 2 没有开启使用堆外内存：数据直接追加到与物理文件直接映射的内存中 -> 物理文件的内存映射 flush 到磁盘
      */
     abstract class FlushCommitLogService extends ServiceThread {
@@ -1954,7 +1979,7 @@ public class CommitLog {
                             flushOK = CommitLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
                         }
 
-                        // 2 todo 通知等待同步刷盘的线程，刷盘完成。即标记 flushOKFuture 完成
+                        // 2 todo 通知等待同步刷盘的线程刷盘完成，避免其一直等待。即标记 flushOKFuture 完成
                         req.wakeupCustomer(flushOK ? PutMessageStatus.PUT_OK : PutMessageStatus.FLUSH_DISK_TIMEOUT);
                     }
 
@@ -2183,9 +2208,9 @@ public class CommitLog {
             // Determines whether there is sufficient free space
             if ((msgLen + END_FILE_MIN_BLANK_LENGTH) > maxBlank) {
                 this.resetByteBuffer(this.msgStoreItemMemory, maxBlank);
-                // 1 TOTALSIZE
+                // 1 TOTALSIZE - 消息总长度，4 个字节
                 this.msgStoreItemMemory.putInt(maxBlank);
-                // 2 MAGICCODE
+                // 2 MAGICCODE - 魔数，4 个字节
                 this.msgStoreItemMemory.putInt(CommitLog.BLANK_MAGIC_CODE);
                 // 3 The remaining space may be any value
                 // Here the length of the specially set maxBlank
@@ -2233,11 +2258,11 @@ public class CommitLog {
             this.msgStoreItemMemory.putInt(msgInner.getReconsumeTimes());
             // 14 Prepared Transaction Offset  8字节
             this.msgStoreItemMemory.putLong(msgInner.getPreparedTransactionOffset());
-            // 15 BODY 消息体长度 4字节
+            // 15 BODY 消息体长度和具体的消息内容 4字节
             this.msgStoreItemMemory.putInt(bodyLength);
             if (bodyLength > 0)
                 this.msgStoreItemMemory.put(msgInner.getBody());
-            // 16 TOPIC  TOPIC 主题存储长度，1字节
+            // 16 TOPIC  TOPIC 主题存储长度和内容，1字节
             this.msgStoreItemMemory.put((byte) topicLength);
             this.msgStoreItemMemory.put(topicData);
             // 17 PROPERTIES 消息属性长度，2字节
@@ -2265,6 +2290,7 @@ public class CommitLog {
                 case MessageSysFlag.TRANSACTION_PREPARED_TYPE:
                 case MessageSysFlag.TRANSACTION_ROLLBACK_TYPE:
                     break;
+
                 case MessageSysFlag.TRANSACTION_NOT_TYPE:
                 case MessageSysFlag.TRANSACTION_COMMIT_TYPE:
                     // The next update ConsumeQueue information

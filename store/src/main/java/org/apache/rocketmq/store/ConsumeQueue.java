@@ -87,10 +87,12 @@ public class ConsumeQueue {
     /**
      * 记录当前 ConsumeQueue 中存放的消息索引对象消息的最大物理偏移量（是在 CommitLog 中）
      * todo 该属性主要作用是判断当前 ConsumeQueue 已经保存消息索引对应消息的物理偏移量，和 ConsumeQueue 物理偏移量没有关系
+     *
+     * @see ConsumeQueue#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
      */
     private long maxPhysicOffset = -1;
     /**
-     * 当前最小物理偏移量
+     * 当前 ConsumeQueue 最小物理偏移量
      */
     private volatile long minLogicOffset = 0;
 
@@ -151,6 +153,9 @@ public class ConsumeQueue {
         return result;
     }
 
+    /**
+     * 恢复消息队列
+     */
     public void recover() {
         // 1 获取该消息队列的所有内存映射文件
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
@@ -161,16 +166,16 @@ public class ConsumeQueue {
             if (index < 0)
                 index = 0;
 
-            // 3 consumequeue 逻辑大小
+            // 3 ConsumeQueue 逻辑大小
             int mappedFileSizeLogics = this.mappedFileSize;
 
-            // 内存映射文件
+            // 倒数第 3 个内存映射文件，或者是第 1 个内存映射文件
             MappedFile mappedFile = mappedFiles.get(index);
 
             // 内存映射文件对应的 ByteBuffer
             ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
 
-            // 处理的 offset,默认从 consumequeue 中存放的第一个条目开始。
+            // 该文件的起始物理偏移量，默认从 ConsumeQueue 中存放的第一个条目开始。
             long processOffset = mappedFile.getFileFromOffset();
             long mappedFileOffset = 0;
             long maxExtAddr = 1;
@@ -178,7 +183,7 @@ public class ConsumeQueue {
 
             while (true) {
 
-                // 4 循环验证 consumeque 包含条目的有效性（如果offset大于等于0并且size大于0，则表示是一个有效的条目）
+                // 4 循环验证 ConsumeQueue 包含条目的有效性（如果offset大于等于0并且size大于0，则表示是一个有效的条目）
                 for (int i = 0; i < mappedFileSizeLogics; i += CQ_STORE_UNIT_SIZE) {
 
                     // 5 读取一个条目的内容
@@ -189,9 +194,9 @@ public class ConsumeQueue {
                     // 5.3 tag hashcode
                     long tagsCode = byteBuffer.getLong();
 
-                    // 如果 offset大于0并且size大于0，则表示是一个有效的条目
+                    // 如果 offset 大于 0 & size 大于 0，则表示是一个有效的条目
                     if (offset >= 0 && size > 0) {
-                        // 更新 consumequeue 中有效的 mappedFileOffset
+                        // 更新 ConsumeQueue 中有效的 mappedFileOffset
                         mappedFileOffset = i + CQ_STORE_UNIT_SIZE;
                         this.maxPhysicOffset = offset + size;
                         if (isExtAddr(tagsCode)) {
@@ -206,7 +211,7 @@ public class ConsumeQueue {
                     }
                 }
 
-                // 6 如果该 consumeque 文件中所有条目全部有效，则继续验证下一个文件，index++）,如果发现条目不合法，后面的文件不需要再检测。
+                // 6 如果该 ConsumeQueue 文件中所有条目全部有效，则继续验证下一个文件，index++）,如果发现条目不合法，后面的文件不需要再检测。
                 if (mappedFileOffset == mappedFileSizeLogics) {
                     index++;
                     if (index >= mappedFiles.size()) {
@@ -233,7 +238,8 @@ public class ConsumeQueue {
             // 8 设置 flushedWhere，committedWhere 为当前有效的偏移量
             this.mappedFileQueue.setFlushedWhere(processOffset);
             this.mappedFileQueue.setCommittedWhere(processOffset);
-            // 9 截断无效的consumeque文件
+
+            // 9 截断无效的 ConsumeQueue 文件，只保留到 processOffset 位置的有效文件
             this.mappedFileQueue.truncateDirtyFiles(processOffset);
 
             if (isExtReadEnable()) {
@@ -323,49 +329,71 @@ public class ConsumeQueue {
         return 0;
     }
 
+    /**
+     * 根据 CommitLog 有效的物理偏移量，清除无效的 ConsumeQueue 数据
+     *
+     * @param phyOffet CommitLog 最大有效的物理偏移量
+     */
     public void truncateDirtyLogicFiles(long phyOffet) {
 
         int logicFileSize = this.mappedFileSize;
-
         this.maxPhysicOffset = phyOffet;
         long maxExtAddr = 1;
+
+        // 从最后一个文件开始遍历
         while (true) {
+            // 获取最后一个内存文件
             MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
             if (mappedFile != null) {
                 ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
 
+                // 重置三个指针「清除无效的数据，本质上就是修改指针到有效数据位置」
                 mappedFile.setWrotePosition(0);
                 mappedFile.setCommittedPosition(0);
                 mappedFile.setFlushedPosition(0);
 
+                // 逐条遍历记录
                 for (int i = 0; i < logicFileSize; i += CQ_STORE_UNIT_SIZE) {
                     long offset = byteBuffer.getLong();
                     int size = byteBuffer.getInt();
                     long tagsCode = byteBuffer.getLong();
 
+                    // 如果是第一条记录
                     if (0 == i) {
+
+                        // 记录的消息物理偏移量达到了最大有效偏移量，那么说明整个 ConsumeQueue 文件都是无效的，删除物理文件已经内存文件。然后就像前一个文件
                         if (offset >= phyOffet) {
                             this.mappedFileQueue.deleteLastMappedFile();
                             break;
+
+                            // 更新三个指针位置
                         } else {
                             int pos = i + CQ_STORE_UNIT_SIZE;
                             mappedFile.setWrotePosition(pos);
                             mappedFile.setCommittedPosition(pos);
                             mappedFile.setFlushedPosition(pos);
+
+                            // 变更 ConsumeQueue 记录的消息最大物理偏移量
                             this.maxPhysicOffset = offset + size;
                             // This maybe not take effect, when not every consume queue has extend file.
                             if (isExtAddr(tagsCode)) {
                                 maxExtAddr = tagsCode;
                             }
                         }
+
+                        // 非第一条记录
                     } else {
 
+                        // 如果当前消息索引有效，那么继续判断。否则，就无需更新三大指针
                         if (offset >= 0 && size > 0) {
 
+                            // 记录的消息物理偏移量达到了最大有效偏移量，那么直接结束。
+                            // todo 此时遍历到的文件 MappedFile 是有效的文件，三大指针记录的是有效的位置
                             if (offset >= phyOffet) {
                                 return;
                             }
 
+                            // 更新大三指针，以及变更 ConsumeQueue 记录的消息最大物理偏移量
                             int pos = i + CQ_STORE_UNIT_SIZE;
                             mappedFile.setWrotePosition(pos);
                             mappedFile.setCommittedPosition(pos);
@@ -375,6 +403,7 @@ public class ConsumeQueue {
                                 maxExtAddr = tagsCode;
                             }
 
+                            // 当前文件遍历完毕，说明此时遍历到的文件 MappedFile 是有效的文件，三大指针记录的是有效的位置
                             if (pos == logicFileSize) {
                                 return;
                             }
@@ -486,6 +515,11 @@ public class ConsumeQueue {
 
     /**
      * 根据 commitlog 信息写消息队列信息
+     * <p>
+     * 为了保证重放消息成功：
+     * 1 进行重试，最大 30次
+     * 2 写入失败，设置队列不可写，后续再来重放就不可写
+     * 3 打印异常日志
      *
      * @param request
      */
@@ -494,6 +528,7 @@ public class ConsumeQueue {
         final int maxRetries = 30;
 
         // 1 判断 ConsumeQueue 是否可写
+        // 当写入失败，会标记 ConsumeQueue 写入异常，不允许继续写入
         boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable();
 
         // todo 多次循环写，直到成功
@@ -517,12 +552,13 @@ public class ConsumeQueue {
 
             // 2 调用添加位置信息
             boolean result = this.putMessagePositionInfo(
-                    request.getCommitLogOffset(),
-                    request.getMsgSize(),
-                    tagsCode,
-                    request.getConsumeQueueOffset());
+                    request.getCommitLogOffset(), // 消息在 CommitLog 中的物理偏移量
+                    request.getMsgSize(), // 消息大小
+                    tagsCode, // 消息的 tag
+                    request.getConsumeQueueOffset() // 消息在消息队列的逻辑偏移量
+            );
 
-            // 添加成功，使用消息存储时间 作为 存储check point。
+            // 添加成功，使用消息存储时间 作为 存储 check point。
             if (result) {
                 if (this.defaultMessageStore.getMessageStoreConfig().getBrokerRole() == BrokerRole.SLAVE ||
                         this.defaultMessageStore.getMessageStoreConfig().isEnableDLegerCommitLog()) {
@@ -570,6 +606,7 @@ public class ConsumeQueue {
                                            final long cqOffset) {
 
         // 如果已经重放过，直接返回成功
+        // 注意 maxPhysicOffset 值的由来
         if (offset + size <= this.maxPhysicOffset) {
             log.warn("Maybe try to build consume queue repeatedly maxPhysicOffset={} phyOffset={}", maxPhysicOffset, offset);
             return true;
@@ -585,7 +622,7 @@ public class ConsumeQueue {
         // tag 哈希吗 （注意如果是延时消息，则是计划消费时）
         this.byteBufferIndex.putLong(tagsCode);
 
-        // 2 todo 根据 cqOffset 逻辑地址计算消息索引在 ConsumeQueue 中的物理偏移量
+        // 2 todo 根据 cqOffset 逻辑偏移量计算消息索引在 ConsumeQueue 中的物理偏移量开始位置
         // cqOffset=0 -> expectLogicOffset = 0
         // cqOffset=1 -> expectLogicOffset = 20
         // cqOffset=2 -> expectLogicOffset = 40
@@ -644,6 +681,7 @@ public class ConsumeQueue {
             // 即将消息条目缓存区写入到 FileChannel
             return mappedFile.appendMessage(this.byteBufferIndex.array());
         }
+
         return false;
     }
 

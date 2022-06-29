@@ -380,7 +380,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                                                                 SendMessageContext mqtraceContext,
                                                                 SendMessageRequestHeader requestHeader) {
         // 1 发送消息前的处理
-        // todo 包括 Topic 的创建与上报
+        // todo 包括 Topic 的创建与上报到 NameSrv
         final RemotingCommand response = preSend(ctx, request, requestHeader);
         final SendMessageResponseHeader responseHeader = (SendMessageResponseHeader) response.readCustomHeader();
 
@@ -907,8 +907,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
      */
     private RemotingCommand preSend(ChannelHandlerContext ctx, RemotingCommand request,
                                     SendMessageRequestHeader requestHeader) {
+        // 创建响应对象
         final RemotingCommand response = RemotingCommand.createResponseCommand(SendMessageResponseHeader.class);
 
+        // 设置请求唯一标志，用于关联是哪个请求
         response.setOpaque(request.getOpaque());
         response.addExtField(MessageConst.PROPERTY_MSG_REGION, this.brokerController.getBrokerConfig().getRegionId());
         response.addExtField(MessageConst.PROPERTY_TRACE_SWITCH, String.valueOf(this.brokerController.getBrokerConfig().isTraceOn()));
@@ -925,7 +927,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
         response.setCode(-1);
 
-        // todo 消息校验，其中包括 Topic 在 Broker 中的创建与缓存，以及上报到 NameSrv
+        // todo 消息校验，其中包括 Topic 在 Broker 中的创建与缓存以及上报到 NameSrv
         super.msgCheck(ctx, requestHeader, response);
         if (response.getCode() != -1) {
             return response;

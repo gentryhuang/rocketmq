@@ -29,6 +29,7 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.ConsumeQueueExt;
+import org.apache.rocketmq.store.DefaultMessageStore;
 
 /**
  * PullRequestHoldService方式实现长轮询：
@@ -196,10 +197,11 @@ public class PullRequestHoldService extends ServiceThread {
      * @param topic        主题明
      * @param queueId      队列ID
      * @param maxOffset    消息队列当前最大的逻辑偏移量
-     * @param tagsCode     tag hash 码（用于基于 tag 消息过滤）
+     * @param tagsCode     tag hash 码（用于基于 tag 消息过滤），或是延时消息的投递时间
      * @param msgStoreTime 消息存储时间
      * @param filterBitMap 过滤位图
      * @param properties   消息属性
+     * @see DefaultMessageStore.ReputMessageService#doReput()
      */
     public void notifyMessageArriving(final String topic,
                                       final int queueId,

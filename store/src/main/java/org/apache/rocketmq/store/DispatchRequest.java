@@ -39,7 +39,7 @@ public class DispatchRequest {
      */
     private int msgSize;
     /**
-     * 消息过滤 tag 哈希码
+     * 消息过滤 tag 哈希码，如果是延时消息，则为投递的时间
      */
     private final long tagsCode;
     /**
@@ -48,6 +48,7 @@ public class DispatchRequest {
     private final long storeTimestamp;
     /**
      * 消息在消息队列的逻辑偏移量
+     *
      * @see CommitLog.DefaultAppendMessageCallback#doAppend(long, java.nio.ByteBuffer, int, org.apache.rocketmq.store.MessageExtBrokerInner)
      */
     private final long consumeQueueOffset;

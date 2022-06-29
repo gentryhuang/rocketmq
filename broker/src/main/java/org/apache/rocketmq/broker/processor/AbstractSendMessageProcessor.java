@@ -182,7 +182,8 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
      * @return
      */
     protected RemotingCommand msgCheck(final ChannelHandlerContext ctx,
-                                       final SendMessageRequestHeader requestHeader, final RemotingCommand response) {
+                                       final SendMessageRequestHeader requestHeader,
+                                       final RemotingCommand response) {
 
         // 1 检查 Broker 是否有写入权限
         if (!PermName.isWriteable(this.brokerController.getBrokerConfig().getBrokerPermission())
@@ -211,7 +212,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
         TopicConfig topicConfig =
                 this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());
 
-        // 3.2 todo 没有，则自动创建topic，实际就是创建一个topicConfig对象，存放到本地map，并同步到NameSrv
+        // 3.2 todo 没有，则尝试自动创建topic，实际就是创建一个topicConfig对象，存放到本地map，并同步到NameSrv
         if (null == topicConfig) {
             int topicSysFlag = 0;
             if (requestHeader.isUnitMode()) {
@@ -224,6 +225,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
             }
 
             // todo 创建 Topic 在 Broker 中缓存并上报 Topic
+            // 如果不支持自动创建 Topic，那么 topicConfig 就会返回 null
             log.warn("the topic {} not exist, producer: {}", requestHeader.getTopic(), ctx.channel().remoteAddress());
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageMethod(
                     requestHeader.getTopic(),
@@ -232,11 +234,17 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
                     requestHeader.getDefaultTopicQueueNums(), topicSysFlag);
 
 
+            // 创建重试主题
             if (null == topicConfig) {
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
+
+                    // todo 创建重试主题，可以处理消费消息失败时，消息者通过持有的生产者重新投递消息的场景
+                    // @see org.apache.rocketmq.client.impl.consumer.DefaultMQPushConsumerImpl.sendMessageBack
                     topicConfig =
                             this.brokerController.getTopicConfigManager().createTopicInSendMessageBackMethod(
-                                    requestHeader.getTopic(), 1, PermName.PERM_WRITE | PermName.PERM_READ,
+                                    requestHeader.getTopic(), // 重试主题
+                                    1, // 队列数为 1
+                                    PermName.PERM_WRITE | PermName.PERM_READ, // 权限
                                     topicSysFlag);
                 }
             }
@@ -253,6 +261,8 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
         // 4 检查队列
         int queueIdInt = requestHeader.getQueueId();
         int idValid = Math.max(topicConfig.getWriteQueueNums(), topicConfig.getReadQueueNums());
+
+        // 发送消息的队列编号不能超过最大消息队列的编号
         if (queueIdInt >= idValid) {
             String errorInfo = String.format("request queueId[%d] is illegal, %s Producer: %s",
                     queueIdInt,

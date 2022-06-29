@@ -796,7 +796,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                 break;
                         }
 
-                        // todo 如果在发送过程中抛出了异常，则调用更新失败策略,主要用于规避发生故障的 broker，更新Broker可用性信息，继续循环
+                        // todo 如果在发送过程中抛出了异常，则调用更新失败策略,主要用于规避发生故障的 broker，更新Broker可用性信息。
+                        //  并根据不同的异常信息，选择是否进行重试。一般是消息发送方的问题才会重试，如网络异常，客户端异常
                     } catch (RemotingException e) {
                         endTimestamp = System.currentTimeMillis();
                         // 发送失败队列对应的 BrokerName
@@ -815,6 +816,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         log.warn(msg.toString());
                         exception = e;
                         continue;
+
+
                     } catch (MQBrokerException e) {
                         endTimestamp = System.currentTimeMillis();
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, true);
@@ -1081,7 +1084,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 是否是批量消息
                 requestHeader.setBatch(msg instanceof MessageBatch);
 
-                // todo 如果是重试的 topic，设置重试次数
+                // todo 如果是重试的 topic，设置重试次数。其中在消费失败时，消费者可能会使用内部维护的生产者发送消息，这里就是处理。
                 if (requestHeader.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                     // 重试消费次数
                     String reconsumeTimes = MessageAccessor.getReconsumeTime(msg);

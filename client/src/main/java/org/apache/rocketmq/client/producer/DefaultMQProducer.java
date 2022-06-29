@@ -128,7 +128,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     /**
      * 是否在内部发送失败时重试另一个broker：
      * 同步模式下，消息保存失败时是否重试其他broker。默认值：false
-     * 注意：此配置关闭时，非投递时产生异常情况下（也是正常投递失败），会忽略retryTimesWhenSendFailed配置。
+     * 注意：此配置关闭时，非投递时产生异常情况下（正常投递失败），会忽略retryTimesWhenSendFailed配置。
      */
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 

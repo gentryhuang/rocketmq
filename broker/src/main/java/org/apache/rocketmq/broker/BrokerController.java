@@ -201,8 +201,8 @@ public class BrokerController {
             final BrokerConfig brokerConfig,
             final NettyServerConfig nettyServerConfig,
             final NettyClientConfig nettyClientConfig,
-            final MessageStoreConfig messageStoreConfig
-    ) {
+            final MessageStoreConfig messageStoreConfig) {
+
         this.brokerConfig = brokerConfig;
         this.nettyServerConfig = nettyServerConfig;
         this.nettyClientConfig = nettyClientConfig;
@@ -292,6 +292,7 @@ public class BrokerController {
      *
      * @return
      * @throws CloneNotSupportedException
+     * @see BrokerStartup#start(org.apache.rocketmq.broker.BrokerController)
      */
     public boolean initialize() throws CloneNotSupportedException {
         // 1 主要加载 Topic 的基本属性文件，如队列信息 org.apache.rocketmq.broker.topic.TopicConfigManager.topicConfigTable
@@ -342,7 +343,7 @@ public class BrokerController {
             fastConfig.setListenPort(nettyServerConfig.getListenPort() - 2);
             this.fastRemotingServer = new NettyRemotingServer(fastConfig, this.clientHousekeepingService);
 
-            /*--------- 创建不同的线程池，用于支持不同请求处理器 ---------*/
+            /*--------- 8 创建不同的线程池，用于支持不同请求处理器 ---------*/
             // 处理发送来的消息请求
             this.sendMessageExecutor = new BrokerFixedThreadPoolExecutor(
                     this.brokerConfig.getSendMessageThreadPoolNums(),
@@ -415,12 +416,11 @@ public class BrokerController {
                     Executors.newFixedThreadPool(this.brokerConfig.getConsumerManageThreadPoolNums(), new ThreadFactoryImpl(
                             "ConsumerManageThread_"));
 
-            // todo 注册处理各种请求（码）的请求处理器，并关联对应的线程池。
-            //  非常重要
+            // todo 注册处理各种请求（码）的请求处理器，并关联对应的线程池。非常重要
             this.registerProcessor();
 
 
-            /*------------------------------- 定义系列定时线程池 ---------------------------------*/
+            /*------------------------------- 9 定义系列定时线程池 ---------------------------------*/
             final long initialDelay = UtilAll.computeNextMorningTimeMillis() - System.currentTimeMillis();
             final long period = 1000 * 60 * 60 * 24;
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
@@ -575,13 +575,15 @@ public class BrokerController {
                 }
             }
 
-            // todo 事务消息相关类的创建
+
+            // 10 todo 事务消息相关类的创建
             initialTransaction();
 
-            // ACL 相关逻辑
+            // 11 ACL 相关逻辑
             initialAcl();
             initialRpcHooks();
         }
+
         return result;
     }
 
@@ -965,6 +967,7 @@ public class BrokerController {
             this.messageStore.start();
         }
 
+        // 通信
         if (this.remotingServer != null) {
             this.remotingServer.start();
         }

@@ -159,7 +159,6 @@ public class MappedFileQueue {
     }
 
 
-
     /**
      * 根据消息物理偏移量 offset 查找 MappedFile
      * 说明：
@@ -239,15 +238,30 @@ public class MappedFileQueue {
     }
 
 
+    /**
+     * 删除异常的文件
+     *
+     * @param offset 有效物理偏移量
+     */
     public void truncateDirtyFiles(long offset) {
         List<MappedFile> willRemoveFiles = new ArrayList<MappedFile>();
+
+        // 遍历内存文件集合
         for (MappedFile file : this.mappedFiles) {
+
+            // 当前文件的最大物理偏移量
             long fileTailOffset = file.getFileFromOffset() + this.mappedFileSize;
+
+            // 如果当前文件的最大物理偏移量大于有效偏移量，那么说明该文件有问题，需要判断是整个文件删除还是保留有效的数据位
             if (fileTailOffset > offset) {
+
+                // 文件部分有问题，保留有效的数据位
                 if (offset >= file.getFileFromOffset()) {
                     file.setWrotePosition((int) (offset % this.mappedFileSize));
                     file.setCommittedPosition((int) (offset % this.mappedFileSize));
                     file.setFlushedPosition((int) (offset % this.mappedFileSize));
+
+                    // 整个文件无效，需要删除对应的物理文件
                 } else {
                     file.destroy(1000);
                     willRemoveFiles.add(file);
@@ -255,6 +269,7 @@ public class MappedFileQueue {
             }
         }
 
+        // 删除缓存中的内存文件
         this.deleteExpiredFile(willRemoveFiles);
     }
 

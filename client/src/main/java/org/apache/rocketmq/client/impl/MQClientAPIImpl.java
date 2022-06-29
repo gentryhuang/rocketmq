@@ -458,14 +458,14 @@ public class MQClientAPIImpl {
     /**
      * 同步或 oneway 方式发送消息
      *
-     * @param addr
-     * @param brokerName
-     * @param msg
-     * @param requestHeader
-     * @param timeoutMillis
-     * @param communicationMode
-     * @param context
-     * @param producer
+     * @param addr              要请求的 Broker 地址
+     * @param brokerName        Broker 名
+     * @param msg               消息
+     * @param requestHeader     发送消息请求信息
+     * @param timeoutMillis     发送超时时间
+     * @param communicationMode 消息发送方式
+     * @param context           上下文
+     * @param producer          消息发送者
      * @return
      * @throws RemotingException
      * @throws MQBrokerException
@@ -550,11 +550,12 @@ public class MQClientAPIImpl {
 
         // 根据对应的模式发送消息
         switch (communicationMode) {
+            // oneway 发送
             case ONEWAY:
-
-                // oneway 发送
                 this.remotingClient.invokeOneway(addr, request, timeoutMillis);
                 return null;
+
+            // 异步发送
             case ASYNC:
                 final AtomicInteger times = new AtomicInteger();
                 long costTimeAsync = System.currentTimeMillis() - beginStartTime;
@@ -566,13 +567,14 @@ public class MQClientAPIImpl {
                 this.sendMessageAsync(addr, brokerName, msg, timeoutMillis - costTimeAsync, request, sendCallback, topicPublishInfo, instance,
                         retryTimesWhenSendFailed, times, context, producer);
                 return null;
+
+            // 同步发送
             case SYNC:
                 long costTimeSync = System.currentTimeMillis() - beginStartTime;
                 if (timeoutMillis < costTimeSync) {
                     throw new RemotingTooMuchRequestException("sendMessage call timeout");
                 }
 
-                // 同步发送
                 return this.sendMessageSync(addr, brokerName, msg, timeoutMillis - costTimeSync, request);
             default:
                 assert false;
@@ -605,7 +607,7 @@ public class MQClientAPIImpl {
         // 发送
         RemotingCommand response = this.remotingClient.invokeSync(addr, request, timeoutMillis);
         assert response != null;
-        // 处理响应
+        // 处理响应并返回结果
         return this.processSendResponse(brokerName, msg, response, addr);
     }
 
@@ -774,6 +776,17 @@ public class MQClientAPIImpl {
         }
     }
 
+    /**
+     * 处理响应结果
+     *
+     * @param brokerName 请求 Broker 名
+     * @param msg        消息
+     * @param response   响应结果
+     * @param addr       请求 Broker 地址
+     * @return
+     * @throws MQBrokerException
+     * @throws RemotingCommandException
+     */
     private SendResult processSendResponse(
             final String brokerName,
             final Message msg,
@@ -781,28 +794,39 @@ public class MQClientAPIImpl {
             final String addr
     ) throws MQBrokerException, RemotingCommandException {
         SendStatus sendStatus;
+
         switch (response.getCode()) {
+            // 刷盘超时
             case ResponseCode.FLUSH_DISK_TIMEOUT: {
                 sendStatus = SendStatus.FLUSH_DISK_TIMEOUT;
                 break;
             }
+
+            // 刷从节点超时
             case ResponseCode.FLUSH_SLAVE_TIMEOUT: {
                 sendStatus = SendStatus.FLUSH_SLAVE_TIMEOUT;
                 break;
             }
+
+            // 从节点不可用
             case ResponseCode.SLAVE_NOT_AVAILABLE: {
                 sendStatus = SendStatus.SLAVE_NOT_AVAILABLE;
                 break;
             }
+
+            // 发送消息成功
             case ResponseCode.SUCCESS: {
                 sendStatus = SendStatus.SEND_OK;
                 break;
             }
+
+            // Broker 异常
             default: {
                 throw new MQBrokerException(response.getCode(), response.getRemark(), addr);
             }
         }
 
+        // 封装响应结果
         SendMessageResponseHeader responseHeader =
                 (SendMessageResponseHeader) response.decodeCommandCustomHeader(SendMessageResponseHeader.class);
 

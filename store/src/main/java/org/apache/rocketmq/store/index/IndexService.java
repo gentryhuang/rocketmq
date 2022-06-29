@@ -43,10 +43,26 @@ public class IndexService {
      * Maximum times to attempt index file creation.
      */
     private static final int MAX_TRY_IDX_CREATE = 3;
+
+    /**
+     * 消息存储核心类
+     */
     private final DefaultMessageStore defaultMessageStore;
+    /**
+     * hash 槽数量，默认为 5 百万个
+     */
     private final int hashSlotNum;
+    /**
+     * index 条目个数，默认为 2 千万个
+     */
     private final int indexNum;
+
+    /**
+     * index 存储路径
+     */
     private final String storePath;
+
+
     private final ArrayList<IndexFile> indexFileList = new ArrayList<IndexFile>();
     private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 
@@ -203,13 +219,21 @@ public class IndexService {
         return topic + "#" + key;
     }
 
+    /**
+     * 构建 IndexFile
+     *
+     * @param req
+     */
     public void buildIndex(DispatchRequest req) {
+        // 创建或获取当前写入的 IndexFile
         IndexFile indexFile = retryGetAndCreateIndexFile();
         if (indexFile != null) {
             long endPhyOffset = indexFile.getEndPhyOffset();
             DispatchRequest msg = req;
             String topic = msg.getTopic();
             String keys = msg.getKeys();
+
+            // 如果 IndexFile 中的最大偏移量大于该消息的 commitLog 物理偏移量，则互联本地构建
             if (msg.getCommitLogOffset() < endPhyOffset) {
                 return;
             }
@@ -224,6 +248,7 @@ public class IndexService {
                     return;
             }
 
+            // 将消息中的 keys,uniq_keys 写入 index 文件中
             if (req.getUniqKey() != null) {
                 indexFile = putKey(indexFile, msg, buildKey(topic, req.getUniqKey()));
                 if (indexFile == null) {
