@@ -424,11 +424,17 @@ public class DefaultMessageStore implements MessageStore {
 
 
             /*--------- todo  重放消息开始位置 & 启动重放消息的 CommitLog 的任务构建 ConsumeQueue 和 IndexFile & 启动 CommitLog 和 ConsumeQueue 刷盘任务 -----------*/
-
+            /*
+               todo  CommitLog 和 ConsumeQueue 是如何保证一致性的？
+               - 在 Broker 启动时，会对 CommitLog 和 ConsumeQueue 进行恢复，把无效的 CommitLog 和 ConsumeQueue 数据删除掉，其中 ConsumeQueue 以 CommitLog 为准，保证消息关系正确、一致
+                  @see org.apache.rocketmq.store.DefaultMessageStore.recover
+               - RocketMQ 在运行期间，可以认为消息重放不会有问题的，在重放 ConsumeQueue 会重试 30 次，即使这期间失败的话，会将对象设置为不可写。
+               - ReputMessageService 任务会马不停蹄地做消息重放
+               总结来说，RocketMQ 在 Broker 启动时就把一致性问题解决了，运行期间不会发生问题。即使断电异常，下次启动又会校验、恢复。
+             */
 
             // todo 设置从 CommitLog 哪个物理偏移量开始转发消息给 ConsumeQueue 和 Index 文件
             this.reputMessageService.setReputFromOffset(maxPhysicalPosInLogicQueue);
-
 
             // todo 启动 Commitlog 转发到 Consumequeue、Index文件 的任务，该任务基本不停歇地执行
             this.reputMessageService.start();
