@@ -65,12 +65,15 @@ public class MappedFileQueue {
 
     /**
      * 当前刷盘指针，表示该指针之前的所有数据全部持久化到磁盘。针对该 MappedFileQueue
+     * <p>
+     * 即针对 MappedFileQueue 下的所有 MappedFile
      */
     private long flushedWhere = 0;
 
     /**
-     * 当前数据提交指针，该值大于、等于 flushedWhere
-     * commit (已提交)位置，针对该 MappedFileQueue
+     * 当前数据提交指针，该值大于、等于 flushedWhere ；commit (已提交)位置，针对该 MappedFileQueue
+     * <p>
+     * 即针对 MappedFileQueue 下的所有 MappedFile
      */
     private long committedWhere = 0;
 
@@ -325,10 +328,11 @@ public class MappedFileQueue {
                 }
 
                 try {
-                    // 还原
+                    // 根据物理文件创建对应的内存文件 MappedFile
                     MappedFile mappedFile = new MappedFile(file.getPath(), mappedFileSize);
 
                     // 将 wrotePosition、flushedPosition、committedPosition 三个指针都设置为文件大小
+                    // todo 不慌，在恢复过程会重置指针(只要文件非满就会设置正确的）  {@see org.apache.rocketmq.store.MappedFileQueue.truncateDirtyFiles}
                     mappedFile.setWrotePosition(this.mappedFileSize);
                     mappedFile.setFlushedPosition(this.mappedFileSize);
                     mappedFile.setCommittedPosition(this.mappedFileSize);
@@ -695,7 +699,7 @@ public class MappedFileQueue {
             long where = mappedFile.getFileFromOffset() + offset;
             result = where == this.flushedWhere;
 
-            // 3 更新刷新的位置
+            // 3 更新刷盘的位置
             this.flushedWhere = where;
             if (0 == flushLeastPages) {
                 this.storeTimestamp = tmpTimeStamp;

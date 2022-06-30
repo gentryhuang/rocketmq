@@ -30,7 +30,7 @@ public enum AppendMessageStatus {
      */
     END_OF_FILE,
     /**
-     * 消息长度唱过最大允许长度
+     * 消息长度超过最大允许长度
      */
     MESSAGE_SIZE_EXCEEDED,
     /**

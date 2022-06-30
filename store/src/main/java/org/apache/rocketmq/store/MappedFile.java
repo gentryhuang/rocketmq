@@ -112,6 +112,8 @@ public class MappedFile extends ReferenceResource {
 
     /**
      * 物理文件对应的内存映射 Buffer，对应操作系统的 PageCache
+     *
+     * java nio 中引入基于 MappedByteBuffer 操作大文件的方式，其读写性能极高
      */
     private MappedByteBuffer mappedByteBuffer;
 
@@ -416,7 +418,7 @@ public class MappedFile extends ReferenceResource {
     }
 
     /**
-     * 刷盘：将内存中的数据写入磁盘。
+     * 刷盘：将内存中的数据写入磁盘
      * 说明：
      * 0 flushedPosition 应该等于 MappedByteBuffer 中的指针
      * 1 刷写的逻辑就是调用 FileChannel 或 MappedByteBuffer 的 force 方法将数据写入磁盘
@@ -429,7 +431,6 @@ public class MappedFile extends ReferenceResource {
         // 判断是否可以刷盘
         if (this.isAbleToFlush(flushLeastPages)) {
             if (this.hold()) {
-
                 /**
                  * todo 刷盘
                  * 1 如果 writeBuffer 不为空，说明开启了使用堆外内存，那么对于刷盘来说，刷盘 flushedPosition 应该等于上一次提交指针 committedPosition，
@@ -532,7 +533,7 @@ public class MappedFile extends ReferenceResource {
                 byteBuffer.limit(writePos);
 
 
-                // 将 committedPosition 到 wrotePosition 的数据复制（写入）到 FileChannel 中
+                // 将 committedPosition 到 wrotePosition 的数据复制（写入）到 FileChannel 中，即将上一次 commitedPosition + 当前写位置这些数据全部写入到 FileChannel中
                 // todo commit 的作用原来是将 writeBuffer 中的数据写入到 FileChannel 中。
                 this.fileChannel.position(lastCommittedPosition);
                 this.fileChannel.write(byteBuffer);

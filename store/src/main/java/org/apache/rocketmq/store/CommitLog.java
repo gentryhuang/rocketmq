@@ -1337,11 +1337,11 @@ public class CommitLog {
      */
     public void handleDiskFlush(AppendMessageResult result, PutMessageResult putMessageResult, MessageExt messageExt) {
 
-        // Synchronization flush  同步刷盘
+        // Synchronization flush  同步刷盘 「将刷盘任务提交给刷盘线程，等待其执行完成」
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
 
             // todo 一、同步刷盘服务类
-            // todo 里面包含刷盘执行逻辑，等待-通知机制
+            // todo 里面包含刷盘执行逻辑，等待-通知机制  -- RocketMQ 自实现的可重复使用的 CountDownLatch
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
 
             // 如果要等待存储结果
@@ -1371,7 +1371,7 @@ public class CommitLog {
                     //flushOK=false;
                 }
 
-                // 如果刷盘不成功
+                // 如果刷盘不成功，则设置刷盘超时
                 if (flushStatus != PutMessageStatus.PUT_OK) {
                     log.error("do groupcommit, wait for flush failed, topic: " + messageExt.getTopic() + " tags: " + messageExt.getTags()
                             + " client address: " + messageExt.getBornHostString());
@@ -1674,7 +1674,7 @@ public class CommitLog {
     /**
      * 提交到物理文件的内存映射中，相当于：
      * 异步刷盘 && 开启内存字节缓冲区
-     * 说明：消息插入成功时，刷盘时使用，和 FlushRealTimeService 类似，性能更好
+     * 说明：消息插入成功时，刷盘时使用，和 FlushRealTimeService 过程类似。提交的消息会被刷盘线程定时刷盘。
      */
     class CommitRealTimeService extends FlushCommitLogService {
 
@@ -1876,8 +1876,13 @@ public class CommitLog {
      */
     public static class GroupCommitRequest {
         /**
-         * 提交的刷盘点(就是预计刷到哪里)，和怎么刷盘没有关系。主要用来判断，一次刷盘是否能完成本次刷盘任务
-         * todo 即：可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次
+         * 提交的刷盘点(就是预计刷到哪里)，和怎么刷盘没有关系。主要用来判断，一次刷盘是否能完成本次刷盘任务。
+         * todo 即：可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
+         * <p>
+         * 额外说明：同步刷盘和异步刷盘的区别：
+         * 1 同步刷盘，调用方会提交一个同步刷盘请求，请求中指定了预计的刷盘点，要求立即刷盘，然后等待；
+         * 2 异步刷盘，调用方尝试唤醒刷盘的线程就返回了，由刷盘线程根据刷盘页和刷盘周期决定什么时候真正刷盘。
+         * 两者差不多的，区别在于同步刷盘是立即刷盘，异步刷盘可能不是立即刷盘而是需求达到一定的条件。
          */
         private final long nextOffset;
 
@@ -1904,6 +1909,11 @@ public class CommitLog {
             return nextOffset;
         }
 
+        /**
+         * 通知等待刷盘的线程任务完成（如有有等待的话）
+         *
+         * @param putMessageStatus
+         */
         public void wakeupCustomer(final PutMessageStatus putMessageStatus) {
             this.flushOKFuture.complete(putMessageStatus);
         }
@@ -1937,6 +1947,13 @@ public class CommitLog {
             }
 
             // 有任务就创造立即刷盘条件，即唤醒可能阻塞等待的 GroupCommitService
+            /*
+               public void wakeup() {
+                      if (hasNotified.compareAndSet(false, true)) {
+                           waitPoint.countDown(); // notify
+                          }
+                  }
+             */
             this.wakeup();
         }
 
@@ -1972,7 +1989,7 @@ public class CommitLog {
 
                         // todo 考虑到有可能每次循环写入的消息，可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
                         for (int i = 0; i < 2 && !flushOK; i++) {
-                            // 1 执行刷盘操作
+                            // 1 执行刷盘操作，这里刷盘页设置为 0 ，表示立即刷盘
                             CommitLog.this.mappedFileQueue.flush(0);
 
                             // 是否满足需要 flush 条件，即请求的 offset 超过 fLush 的 offset
