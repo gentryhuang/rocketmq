@@ -18,6 +18,7 @@
 package org.apache.rocketmq.broker.filter;
 
 import java.util.concurrent.ConcurrentMap;
+
 import org.apache.rocketmq.broker.BrokerController;
 import org.apache.rocketmq.broker.BrokerPathConfigHelper;
 import org.apache.rocketmq.common.ConfigManager;
@@ -59,23 +60,30 @@ public class ConsumerFilterManager extends ConfigManager {
     public ConsumerFilterManager(BrokerController brokerController) {
         this.brokerController = brokerController;
         this.bloomFilter = BloomFilter.createByFn(
-            brokerController.getBrokerConfig().getMaxErrorRateOfBloomFilter(),
-            brokerController.getBrokerConfig().getExpectConsumerNumUseFilter()
+                brokerController.getBrokerConfig().getMaxErrorRateOfBloomFilter(),
+                brokerController.getBrokerConfig().getExpectConsumerNumUseFilter()
         );
         // then set bit map length of store config.
         brokerController.getMessageStoreConfig().setBitMapLengthConsumeQueueExt(
-            this.bloomFilter.getM()
+                this.bloomFilter.getM()
         );
     }
 
     /**
      * Build consumer filter data.Be care, bloom filter data is not included.
      *
+     * @param topic         主题
+     * @param consumerGroup 消费组
+     * @param expression    表达式
+     * @param type          消息过滤类型,TAG或SQL92
+     * @param clientVersion 客户端版本号
      * @return maybe null
      */
     public static ConsumerFilterData build(final String topic, final String consumerGroup,
-        final String expression, final String type,
-        final long clientVersion) {
+                                           final String expression, final String type,
+                                           final long clientVersion) {
+
+        // 如果是 Tag 模式，返回 null ，表明 ConsumerFilterData 不针对TAG模式
         if (ExpressionType.isTagType(type)) {
             return null;
         }
@@ -89,9 +97,8 @@ public class ConsumerFilterManager extends ConfigManager {
         consumerFilterData.setExpressionType(type);
         consumerFilterData.setClientVersion(clientVersion);
         try {
-            consumerFilterData.setCompiledExpression(
-                FilterFactory.INSTANCE.get(type).compile(expression)
-            );
+            // 编译表达式，如 a >= 1 and b <= 10
+            consumerFilterData.setCompiledExpression(FilterFactory.INSTANCE.get(type).compile(expression));
         } catch (Throwable e) {
             log.error("parse error: expr={}, topic={}, group={}, error={}", expression, topic, consumerGroup, e.getMessage());
             return null;
@@ -103,11 +110,11 @@ public class ConsumerFilterManager extends ConfigManager {
     public void register(final String consumerGroup, final Collection<SubscriptionData> subList) {
         for (SubscriptionData subscriptionData : subList) {
             register(
-                subscriptionData.getTopic(),
-                consumerGroup,
-                subscriptionData.getSubString(),
-                subscriptionData.getExpressionType(),
-                subscriptionData.getSubVersion()
+                    subscriptionData.getTopic(),
+                    consumerGroup,
+                    subscriptionData.getSubString(),
+                    subscriptionData.getExpressionType(),
+                    subscriptionData.getSubVersion()
             );
         }
 
@@ -134,7 +141,7 @@ public class ConsumerFilterManager extends ConfigManager {
     }
 
     public boolean register(final String topic, final String consumerGroup, final String expression,
-        final String type, final long clientVersion) {
+                            final String type, final long clientVersion) {
         if (ExpressionType.isTagType(type)) {
             return false;
         }
@@ -218,7 +225,7 @@ public class ConsumerFilterManager extends ConfigManager {
     public String configFilePath() {
         if (this.brokerController != null) {
             return BrokerPathConfigHelper.getConsumerFilterPath(
-                this.brokerController.getMessageStoreConfig().getStorePathRootDir()
+                    this.brokerController.getMessageStoreConfig().getStorePathRootDir()
             );
         }
         return BrokerPathConfigHelper.getConsumerFilterPath("./unit_test");
@@ -245,7 +252,7 @@ public class ConsumerFilterManager extends ConfigManager {
 
                     try {
                         filterData.setCompiledExpression(
-                            FilterFactory.INSTANCE.get(filterData.getExpressionType()).compile(filterData.getExpression())
+                                FilterFactory.INSTANCE.get(filterData.getExpressionType()).compile(filterData.getExpression())
                         );
                     } catch (Exception e) {
                         log.error("load filter data error, " + filterData, e);
@@ -265,7 +272,7 @@ public class ConsumerFilterManager extends ConfigManager {
                         // we think all consumers are dead when load
                         long deadTime = System.currentTimeMillis() - 30 * 1000;
                         filterData.setDeadTime(
-                            deadTime <= filterData.getBornTime() ? filterData.getBornTime() : deadTime
+                                deadTime <= filterData.getBornTime() ? filterData.getBornTime() : deadTime
                         );
                     }
                 }
@@ -292,7 +299,7 @@ public class ConsumerFilterManager extends ConfigManager {
             Map.Entry<String, FilterDataMapByTopic> filterDataMapByTopic = topicIterator.next();
 
             Iterator<Map.Entry<String, ConsumerFilterData>> filterDataIterator
-                = filterDataMapByTopic.getValue().getGroupFilterData().entrySet().iterator();
+                    = filterDataMapByTopic.getValue().getGroupFilterData().entrySet().iterator();
 
             while (filterDataIterator.hasNext()) {
                 Map.Entry<String, ConsumerFilterData> filterDataByGroup = filterDataIterator.next();
@@ -321,8 +328,7 @@ public class ConsumerFilterManager extends ConfigManager {
 
     public static class FilterDataMapByTopic {
 
-        private ConcurrentMap<String/*consumer group*/, ConsumerFilterData>
-            groupFilterData = new ConcurrentHashMap<String, ConsumerFilterData>();
+        private ConcurrentMap<String/*consumer group*/, ConsumerFilterData> groupFilterData = new ConcurrentHashMap<String, ConsumerFilterData>();
 
         private String topic;
 
@@ -352,7 +358,7 @@ public class ConsumerFilterManager extends ConfigManager {
         }
 
         public boolean register(String consumerGroup, String expression, String type, BloomFilterData bloomFilterData,
-            long clientVersion) {
+                                long clientVersion) {
             ConsumerFilterData old = this.groupFilterData.get(consumerGroup);
 
             if (old == null) {
@@ -370,10 +376,10 @@ public class ConsumerFilterManager extends ConfigManager {
                     if (clientVersion <= old.getClientVersion()) {
                         if (!type.equals(old.getExpressionType()) || !expression.equals(old.getExpression())) {
                             log.warn("Ignore consumer({} : {}) filter(concurrent), because of version {} <= {}, but maybe info changed!old={}:{}, ignored={}:{}",
-                                consumerGroup, topic,
-                                clientVersion, old.getClientVersion(),
-                                old.getExpressionType(), old.getExpression(),
-                                type, expression);
+                                    consumerGroup, topic,
+                                    clientVersion, old.getClientVersion(),
+                                    old.getExpressionType(), old.getExpression(),
+                                    type, expression);
                         }
                         if (clientVersion == old.getClientVersion() && old.isDead()) {
                             reAlive(old);
@@ -391,10 +397,10 @@ public class ConsumerFilterManager extends ConfigManager {
                 if (clientVersion <= old.getClientVersion()) {
                     if (!type.equals(old.getExpressionType()) || !expression.equals(old.getExpression())) {
                         log.info("Ignore consumer({}:{}) filter, because of version {} <= {}, but maybe info changed!old={}:{}, ignored={}:{}",
-                            consumerGroup, topic,
-                            clientVersion, old.getClientVersion(),
-                            old.getExpressionType(), old.getExpression(),
-                            type, expression);
+                                consumerGroup, topic,
+                                clientVersion, old.getClientVersion(),
+                                old.getExpressionType(), old.getExpression(),
+                                type, expression);
                     }
                     if (clientVersion == old.getClientVersion() && old.isDead()) {
                         reAlive(old);
@@ -425,7 +431,7 @@ public class ConsumerFilterManager extends ConfigManager {
                     this.groupFilterData.put(consumerGroup, consumerFilterData);
 
                     log.info("Consumer filter info change, old: {}, new: {}, change: {}",
-                        old, consumerFilterData, change);
+                            old, consumerFilterData, change);
 
                     return true;
                 } else {

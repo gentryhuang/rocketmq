@@ -30,15 +30,39 @@ import java.util.Collections;
  * Filter data of consumer.
  */
 public class ConsumerFilterData {
-
+    /**
+     * 消费组
+     */
     private String consumerGroup;
+    /**
+     * 消息主题
+     */
     private String topic;
+    /**
+     * 消息过滤表达式，例如 SQL92表达式，或过滤类全路径名
+     */
     private String expression;
+    /**
+     * 表达式类型，可取值TAG、SQL92
+     */
     private String expressionType;
+    /**
+     * 编译后的表达式对象
+     */
     private transient Expression compiledExpression;
+    /**
+     * ConsumerFilterData 对象创建创建时间
+     */
     private long bornTime;
+    /**
+     * ConsumerFilterData 对象死亡时间，默认0，表示一直有效。
+     */
     private long deadTime = 0;
     private BloomFilterData bloomFilterData;
+
+    /**
+     * 客户端版本
+     */
     private long clientVersion;
 
     public boolean isDead() {

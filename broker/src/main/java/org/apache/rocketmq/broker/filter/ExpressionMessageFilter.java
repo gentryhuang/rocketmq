@@ -32,7 +32,7 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 
 /**
- * 表达式模式过滤
+ * 表达式模式过滤器
  */
 public class ExpressionMessageFilter implements MessageFilter {
 
@@ -46,6 +46,11 @@ public class ExpressionMessageFilter implements MessageFilter {
     protected final ConsumerFilterManager consumerFilterManager;
     protected final boolean bloomDataValid;
 
+    /**
+     * @param subscriptionData      订阅表达式转换的订阅数据
+     * @param consumerFilterData    SQL92 过滤对象
+     * @param consumerFilterManager
+     */
     public ExpressionMessageFilter(SubscriptionData subscriptionData, ConsumerFilterData consumerFilterData,
                                    ConsumerFilterManager consumerFilterManager) {
 
@@ -66,26 +71,31 @@ public class ExpressionMessageFilter implements MessageFilter {
 
     @Override
     public boolean isMatchedByConsumeQueue(Long tagsCode, ConsumeQueueExt.CqExtUnit cqExtUnit) {
+        // 如果 subscriptionData 为空，说明此模式不是 Expression模式，直接返回true
         if (null == subscriptionData) {
             return true;
         }
 
+        // 如果 classFilterMode, 直接返回 true，这里也表明，isMatchedByConsumeQueue 不处理class filter mode
         if (subscriptionData.isClassFilterMode()) {
             return true;
         }
 
-        // by tags code.
+        // 如果是 TAG 模式，只需要比对 tag 的 hashcode, 因为 consumequeue 只包含了tag hashcode
         if (ExpressionType.isTagType(subscriptionData.getExpressionType())) {
 
             if (tagsCode == null) {
                 return true;
             }
 
+            // 如果订阅表达式为 * ，那么就是全匹配
             if (subscriptionData.getSubString().equals(SubscriptionData.SUB_ALL)) {
                 return true;
             }
 
+            // 比对 tag 的 hashcode
             return subscriptionData.getCodeSet().contains(tagsCode.intValue());
+
         } else {
             // no expression or no bloom
             if (consumerFilterData == null || consumerFilterData.getExpression() == null
@@ -121,8 +131,16 @@ public class ExpressionMessageFilter implements MessageFilter {
         return true;
     }
 
+    /**
+     * isMatchedByCommitLog 只为 ExpressionType.SQL92 服务；SQL92 是基于 SQL 表达式，根据存储在 CommitLog 文件中的内存判断消息是否匹配
+     *
+     * @param msgBuffer  message buffer in commit log, may be null if not invoked in store. 如果为空，该方法返回 true
+     * @param properties message properties, should decode from buffer if null by yourself.
+     * @return
+     */
     @Override
     public boolean isMatchedByCommitLog(ByteBuffer msgBuffer, Map<String, String> properties) {
+        // 如果 subscriptionData 为空，说明此模式是 classFilter，直接返回true
         if (subscriptionData == null) {
             return true;
         }
@@ -146,6 +164,7 @@ public class ExpressionMessageFilter implements MessageFilter {
             return true;
         }
 
+        // 从消息体中解码出属性
         if (tempProperties == null && msgBuffer != null) {
             tempProperties = MessageDecoder.decodeProperties(msgBuffer);
         }
@@ -154,6 +173,7 @@ public class ExpressionMessageFilter implements MessageFilter {
         try {
             MessageEvaluationContext context = new MessageEvaluationContext(tempProperties);
 
+            // 使用过滤数据对象对消息中的属性进行匹配
             ret = realFilterData.getCompiledExpression().evaluate(context);
         } catch (Throwable e) {
             log.error("Message Filter error, " + realFilterData + ", " + tempProperties, e);

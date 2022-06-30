@@ -369,7 +369,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     // 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
                     pullRequest.setPreviouslyLocked(true);
 
-                    // 设置消息拉取点
+                    // 重置消息拉取点
                     pullRequest.setNextOffset(offset);
                 }
 
@@ -404,6 +404,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                     // 处理拉取消息的结果，即提取 ByteBuffer 生成 List<MessageExt>，并使用 tag 过滤消息
                     // 注意，在拉取的时候指定了哪个队列、从哪个位置拉取、拉取的消息多大
+                    // todo 消费方过滤消息
                     pullResult = DefaultMQPushConsumerImpl.this.pullAPIWrapper.processPullResult(pullRequest.getMessageQueue(), pullResult,
                             subscriptionData);
 

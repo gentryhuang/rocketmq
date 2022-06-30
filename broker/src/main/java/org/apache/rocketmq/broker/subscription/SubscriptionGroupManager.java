@@ -104,6 +104,11 @@ public class SubscriptionGroupManager extends ConfigManager {
         }
     }
 
+    /**
+     * 消费组订阅配置信息，通过 RocketMQ 控制台可以修改，消费消息时如果没有会根据消费组创建一个默认的订阅配置信息
+     *
+     * @param config
+     */
     public void updateSubscriptionGroupConfig(final SubscriptionGroupConfig config) {
         SubscriptionGroupConfig old = this.subscriptionGroupTable.put(config.getGroupName(), config);
         if (old != null) {
@@ -114,6 +119,7 @@ public class SubscriptionGroupManager extends ConfigManager {
 
         this.dataVersion.nextVersion();
 
+        // 持久化到本地文件
         this.persist();
     }
 

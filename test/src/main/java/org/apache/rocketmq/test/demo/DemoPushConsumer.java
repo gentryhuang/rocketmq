@@ -29,6 +29,8 @@ public class DemoPushConsumer {
         // 订阅主题
         consumer.subscribe("hlb_topic", "*");
 
+        consumer.subscribe("","","");
+
         // Register callback to execute on arrival of messages fetched from brokers.
         // 注册要在从代理获取的消息到达时执行的回调，即注册消息监听器
         // 当从 Broker 拉取到消息时，会执行该监听器的回调方法

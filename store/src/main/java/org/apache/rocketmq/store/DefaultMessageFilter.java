@@ -41,16 +41,16 @@ public class DefaultMessageFilter implements MessageFilter {
      */
     @Override
     public boolean isMatchedByConsumeQueue(Long tagsCode, ConsumeQueueExt.CqExtUnit cqExtUnit) {
-        // 消息tagsCode 空
         if (null == tagsCode || null == subscriptionData) {
             return true;
         }
 
-        // 订阅数据 空
+        // 类过滤的话，那么 Tag 过滤就不生效了
         if (subscriptionData.isClassFilterMode()) {
             return true;
         }
 
+        // 如果订阅数据中的订阅表达式为 * ，或者订阅数据中的 Tag 的哈希码包含当前消息索引中的 tag 的哈希码，说明是匹配的
         return subscriptionData.getSubString().equals(SubscriptionData.SUB_ALL)
                 || subscriptionData.getCodeSet().contains(tagsCode.intValue());
     }

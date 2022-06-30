@@ -48,7 +48,10 @@ public class ConsumerManager {
     private static final long CHANNEL_EXPIRED_TIMEOUT = 1000 * 120;
 
     /**
-     * 消费分组信息，这个分组信息量很大
+     * 消费分组信息，这个分组信息量很大。
+     * <p>
+     * todo 最要说明：
+     *    1）同一个消费组下的不同消费者如果订阅的 Topic 相同，最终会进行覆盖式（版本更新的）替换之前的 Topic 对应的订阅信息，也就是以最后一个上报的消费者的订阅信息为主，忽略 tag 不一致
      */
     private final ConcurrentMap<String/* Group */, ConsumerGroupInfo> consumerTable = new ConcurrentHashMap<String, ConsumerGroupInfo>(1024);
 
@@ -139,6 +142,7 @@ public class ConsumerManager {
                         consumeFromWhere);
 
         // 3 尝试更新分组信息中的订阅信息，若变动则返回 true
+        // todo 相同 Topic 覆盖式不属于变动
         boolean r2 = consumerGroupInfo.updateSubscription(subList);
 
         if (r1 || r2) {

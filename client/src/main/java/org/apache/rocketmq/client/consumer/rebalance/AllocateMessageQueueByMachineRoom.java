@@ -24,7 +24,8 @@ import org.apache.rocketmq.client.consumer.AllocateMessageQueueStrategy;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
- * 根据 Broker 部署机房名，对每个消费者负载不同的 Broker 上的队列
+ * 根据 Broker 部署机房名，对每个消费者负载不同的 Broker 上的队列。
+ * 即 根据指定的 Broker 名，从队列中选出属于这些 Broker 的队列"平均"分配给消费者
  * <p>
  * Computer room Hashing queue algorithm, such as Alipay logic room
  */

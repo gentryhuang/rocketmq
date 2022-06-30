@@ -42,6 +42,11 @@ public class AllocateMessageQueueByConfig implements AllocateMessageQueueStrateg
         return messageQueueList;
     }
 
+    /**
+     * 为指定的消费者指定策略，并设置队列
+     *
+     * @param messageQueueList
+     */
     public void setMessageQueueList(List<MessageQueue> messageQueueList) {
         this.messageQueueList = messageQueueList;
     }

@@ -35,7 +35,8 @@ public class SubscriptionData implements Comparable<SubscriptionData> {
      */
     public final static String SUB_ALL = "*";
     /**
-     * 是否是类过滤模式，默认 false
+     * 是否是类过滤模式，默认 false。
+     * 如果为 true ，表示使用上传过滤器类来进行消息过滤，默认使用 Tag 来进行消息过滤；
      */
     private boolean classFilterMode = false;
     /**
@@ -43,19 +44,24 @@ public class SubscriptionData implements Comparable<SubscriptionData> {
      */
     private String topic;
     /**
-     * 消息过滤表达式，多个用 || 隔开，如 tagA||tagB
+     * 消息过滤表达式
+     * 1）如果 classFilterMode = true ，则表示过滤类的全路径名
+     * 2）如果 classFilterMode = false，则表示订阅子模式（Tag 或 SQL92表达式）。Tag 的情况下，多个用 || 隔开，如 tagA||tagB
      */
     private String subString;
     /**
-     * 消息过滤达式中分离的 tag
+     * 使用订阅子模式 - Tag ，消息过滤达式中分离的 tag ，因为可以使用多个 tag
      * todo 是消费端过滤时进行消息过滤的依据
      */
     private Set<String> tagsSet = new HashSet<String>();
     /**
-     * 消息过滤达式中分离的 tag 的哈希码
+     * 使用订阅子模式 - Tag，消息过滤达式中分离的 tag 的哈希码，因为可以使用多个 tag
      * todo 是 Broker 端过滤时的依据
      */
     private Set<Integer> codeSet = new HashSet<Integer>();
+    /**
+     * 版本
+     */
     private long subVersion = System.currentTimeMillis();
 
     /**

@@ -807,7 +807,7 @@ public class DefaultMessageStore implements MessageStore {
      * @param queueId       消息队列id
      * @param offset        拉取的消息队列逻辑偏移量
      * @param maxMsgNums    一次拉取消息条数，默认为 32
-     * @param messageFilter 消息过滤器 - 根据 tag 过滤「注意什么时候创建的」
+     * @param messageFilter 消息过滤器 - 如根据 tag 过滤「注意什么时候创建的」
      * @return
      */
     public GetMessageResult getMessage(final String group,
@@ -838,7 +838,7 @@ public class DefaultMessageStore implements MessageStore {
         // 拉取消息的结果
         GetMessageResult getResult = new GetMessageResult();
 
-        // 3 获取 commitlog 文件中的最大物理偏移量
+        // 3 获取 CommitLog 文件中的最大物理偏移量
         final long maxOffsetPy = this.commitLog.getMaxOffset();
 
         // 4 根据 topic、queueId 获取消息队列（ConsumeQueue）
@@ -885,9 +885,10 @@ public class DefaultMessageStore implements MessageStore {
                     nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
                 }
 
+                // offset 大于minOffset 并小于 maxOffset ，正常情况。
             } else {
 
-                // 7 从 consuequeue 中根据 offset 这个逻辑偏移量获取消息索引信息
+                // 7 从 consuequeue 中根据 offset 这个逻辑偏移量获取消息索引信息，信息量是从 offset（会转为对应的物理偏移量） 到当前 ConsumeQueue 中最大可读消息
                 SelectMappedBufferResult bufferConsumeQueue = consumeQueue.getIndexBuffer(offset);
 
                 if (bufferConsumeQueue != null) {
@@ -895,12 +896,14 @@ public class DefaultMessageStore implements MessageStore {
                         status = GetMessageStatus.NO_MATCHED_MESSAGE;
 
                         // 8 初始化基本变量。
+
+                        // 下一个开始 offset
                         long nextPhyFileStartOffset = Long.MIN_VALUE;
                         long maxPhyOffsetPulling = 0;
 
-
-                        int i = 0;
-                        // 根据传入的拉取最大消息数，计算要过滤的消息索引长度
+                        // 根据传入的拉取最大消息数，计算要过滤的消息索引长度。即最大过滤消息字节数。
+                        // todo 注意，为什么不直接 maxFilterMessageCount = maxMsgNums * 20 ，因为拉取到的消息可能不满足过滤条件，导致拉取的消息小于 maxMsgNums，
+                        //  那这里一定会返回maxMsgNums条消息吗？不一定，这里是尽量返回这么多条消息。
                         final int maxFilterMessageCount = Math.max(16000, maxMsgNums * ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
                         final boolean diskFallRecorded = this.messageStoreConfig.isDiskFallRecorded();
@@ -908,6 +911,7 @@ public class DefaultMessageStore implements MessageStore {
 
                         // 对读取的消息索引进行逐条遍历直到达到预期的消息数，从遍历条件：i += ConsumeQueue.CQ_STORE_UNIT_SIZE 也可以看出
                         // 注意，即使没有够传入的拉取最大消息数，但是获取的消息索引遍历完了，那么不用管了，等待下次拉取请求。
+                        int i = 0;
                         for (; i < bufferConsumeQueue.getSize() && i < maxFilterMessageCount; i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
 
                             /*读取一个消息索引的 3 个属性：在 CommitLog 中的物理偏移量、消息长度、tag 的哈希值*/
@@ -929,7 +933,7 @@ public class DefaultMessageStore implements MessageStore {
                                     continue;
                             }
 
-                            // 13 校验当前物理偏移量 offsetPy 对应的消息是否还在内存，即校验 commitLog 是否需要硬盘，因为一半消息过大无法全部放在内存
+                            // 13 校验当前物理偏移量 offsetPy 对应的消息是否还在内存，即校验 commitLog 是否需要硬盘，因为一般消息过大无法全部放在内存
                             boolean isInDisk = checkInDiskByCommitOffset(offsetPy, maxOffsetPy);
 
                             // 14 本次是否已拉取到足够的消息，如果足够则结束
@@ -937,7 +941,7 @@ public class DefaultMessageStore implements MessageStore {
                                 break;
                             }
 
-                            // todo 根据偏移量拉取消息索引后，根据 ConsuneQueue 条目进行消息过滤。如果不匹配则直接跳过该条消息，继续拉取下一条消息。
+                            // todo 根据偏移量拉取消息索引后，根据 ConsunmeQueue 条目进行消息过滤。如果不匹配则直接跳过该条消息，继续拉取下一条消息。
                             boolean extRet = false, isTagsCodeLegal = true;
                             if (consumeQueue.isExtAddr(tagsCode)) {
                                 extRet = consumeQueue.getExt(tagsCode, cqExtUnit);
@@ -953,17 +957,22 @@ public class DefaultMessageStore implements MessageStore {
 
                             // 15 todo 执行消息过滤，如果符合过滤条件,则直接进行消息拉取，如果不符合过滤条件，则进入继续执行逻辑。如果最终符合条件，则将该消息添加到拉取结果中。
                             if (messageFilter != null
-                                    // todo 根据 tag 哈希码 过滤
+                                    // todo 根据 tag 哈希码匹配当前的消息索引
                                     && !messageFilter.isMatchedByConsumeQueue(isTagsCodeLegal ? tagsCode : null, extRet ? cqExtUnit : null)) {
 
                                 if (getResult.getBufferTotalSize() == 0) {
                                     status = GetMessageStatus.NO_MATCHED_MESSAGE;
                                 }
 
+                                // 不符合过滤条件，不拉取消息，继续遍历下一个消息索引
                                 continue;
                             }
 
-                            // 16 有了消息物理偏移量和消息大小，就可以从 commitlog 文件中读取消息，根据偏移量与消息大小
+                            /*
+                               todo 注意： Tag 过滤不需要访问 CommitLog 数据，可以保证高效过滤；此外，即使存在 Tag 的 hash 冲突，也没关系，因为在 Consume 端还会进行一次过滤以修正，保证万无一失。
+                             */
+
+                            // 16 有了消息物理偏移量和消息大小，就可以从 CommitLog 文件中读取消息，根据偏移量与消息大小
                             SelectMappedBufferResult selectResult = this.commitLog.getMessage(offsetPy, sizePy);
                             if (null == selectResult) {
 
@@ -978,7 +987,8 @@ public class DefaultMessageStore implements MessageStore {
                                 continue;
                             }
 
-                            // 18 todo 从commitlog（全量消息）再次过滤，consumeque 中只能处理 TAG 模式的过滤
+                            // 18 todo 从 CommitLog（全量消息）再次过滤，ConsumeQueue 中只能处理 TAG 模式的过滤，SQL92 这种模式无法过滤，
+                            //   因为SQL92 需要依赖消息中的属性，故在这里再做一次过滤。如果消息符合条件，则加入到拉取结果中。
                             if (messageFilter != null
                                     && !messageFilter.isMatchedByCommitLog(selectResult.getByteBuffer().slice(), null)) {
 
@@ -1012,15 +1022,15 @@ public class DefaultMessageStore implements MessageStore {
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
 
-                        /*--------- 22 建议消息拉取从哪个 Broker 。-------*/
+                        /*--------------------- 22 建议消息拉取从哪个 Broker 。-------*/
 
-                        // 当前未被拉取到消费端的消息长度
+                        // 当前未被拉取到消费端的 CommitLog 中的消息长度
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
 
                         // RocketMQ 消息常驻内存的大小：40% * (机器物理内存)；超过该大小，RocketMQ 会将旧的消息置换回磁盘。
                         long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE // RocketMQ 所在服务器的总内存大小
-                                * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio()  // RocketMQ 所能使用内存的最大比例，默认 40 。
-                                / 100.0));
+                                * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0)// RocketMQ 所能使用内存的最大比例，默认 40 。
+                        );
 
                         /**
                          * todo 触发下次从从服务器拉取的条件：剩余可拉取的消息大小 > RocketMQ 消息常驻内存的大小。
@@ -1659,7 +1669,8 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 校验当前物理偏移量 offsetPy 对应的消息是否还在内存
+     * 校验当前物理偏移量 offsetPy 对应的消息是否还在内存。
+     * 即：如果 maxOffsetPy-offsetPy > memory 的话，说明 offsetPy 这个偏移量的消息已经从内存中置换到磁盘中了。
      *
      * @param offsetPy    commitLog 物理偏移量
      * @param maxOffsetPy commitLog 最大物理偏移量
@@ -1674,13 +1685,13 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * 判断获取消息是否已经满
+     * 判断本次拉取任务是否完成
      *
-     * @param sizePy
-     * @param maxMsgNums
-     * @param bufferTotal
-     * @param messageTotal
-     * @param isInDisk
+     * @param sizePy       当前消息字节长度
+     * @param maxMsgNums   一次拉取消息条数，默认为 32
+     * @param bufferTotal  截止到当前，已拉取消息字节总长度，不包含当前消息
+     * @param messageTotal 截止到当前，已拉取消息总条数
+     * @param isInDisk     当前消息是否存在于磁盘中
      * @return
      */
     private boolean isTheBatchFull(int sizePy, int maxMsgNums, int bufferTotal, int messageTotal, boolean isInDisk) {
@@ -1689,23 +1700,31 @@ public class DefaultMessageStore implements MessageStore {
             return false;
         }
 
+        // 达到预期的拉取消息条数
         if (maxMsgNums <= messageTotal) {
             return true;
         }
 
+        // 消息在磁盘上
         if (isInDisk) {
+            // 已拉取消息字节数 + 待拉取消息的长度，达到了磁盘消息的传输上限（默认 64K)
             if ((bufferTotal + sizePy) > this.messageStoreConfig.getMaxTransferBytesOnMessageInDisk()) {
                 return true;
             }
 
+            // 已拉取消息条数，达到了磁盘消息传输的数量上限（默认 8）
             if (messageTotal > this.messageStoreConfig.getMaxTransferCountOnMessageInDisk() - 1) {
                 return true;
             }
+
+            // 消息在内存中，逻辑同上
         } else {
+            // 默认 256K
             if ((bufferTotal + sizePy) > this.messageStoreConfig.getMaxTransferBytesOnMessageInMemory()) {
                 return true;
             }
 
+            // 默认 32
             if (messageTotal > this.messageStoreConfig.getMaxTransferCountOnMessageInMemory() - 1) {
                 return true;
             }

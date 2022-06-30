@@ -141,7 +141,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 校验 consumer 分组是否可消费
+        // 校验 consumer 分组是否可消费，默认都是可以消费的，除非通过控制台修改
         if (!subscriptionGroupConfig.isConsumeEnable()) {
             response.setCode(ResponseCode.NO_PERMISSION);
             response.setRemark("subscription group no permission, " + requestHeader.getConsumerGroup());
@@ -184,20 +184,36 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             return response;
         }
 
-        // 校验 订阅关系
+        /*----------------------- 构建过滤器 -----------------------*/
+        /*
+           RocketMQ 消息过滤有两种模式：
+           1. 类过滤 ClassFilterModel 和 表达式模式(Expression)，其中表达式模式又可分为 ExpressionType.TAG 和 ExpressionType.SQL92
+           2. TAG过滤，在服务端拉取时，会根据 ConsumeQueue 条目中存储的 tag hashcode 与订阅的 tag (hashcode 集合)进行匹配，匹配成功则放入待返回消息结果中，然后在消息消费端（消费者，还会对消息的订阅消息字符串进行再一次过滤。
+               为什么需要进行两次过滤呢？
+               2.1 为什么不在服务端直接对消息订阅 tag 进行匹配呢？
+                  主要就还是为了提高服务端消费消费队列（文件存储）的性能，如果直接进行字符串匹配，那么 consumequeue 条目就无法设置为定长结构，检索 consuequeue 就不方便。
+               2.2 为什么不只在消费端进行过滤呢？
+                  在服务端根据 Tag hash 可以快速过滤掉不符合过滤条件的消息索引，尽可能避免从 CommitLog 获取消息。
+         */
+
+        /*----------------------- 构建过滤器 -----------------------*/
+
+
+        // Tag 过滤信息
         SubscriptionData subscriptionData = null;
+        // ConsumerFilterData 过滤消息对象
         ConsumerFilterData consumerFilterData = null;
 
-        // todo 是否要过滤订阅表达式
+        // todo 是否要过滤订阅表达式，如 consumer.subscribe("TopicA","tag1");
         if (hasSubscriptionFlag) {
             try {
-                // todo 根据拉取消息请求中的 topic、subscription、expressionType ，构建 SubscriptionData
+                // todo 根据拉取消息请求中的 topic、subscription、expressionType ，构建 SubscriptionData 订阅信息，以过滤消息
                 subscriptionData = FilterAPI.build(requestHeader.getTopic(), requestHeader.getSubscription(), requestHeader.getExpressionType());
 
-                // 判断是否是 Tag 过滤
+                // 判断是否是 Tag 过滤，主要针对 SQL92 模式
                 if (!ExpressionType.isTagType(subscriptionData.getExpressionType())) {
 
-                    // todo 不是 Tag 模式，则 构建 ConsumerFilterData  过滤对象
+                    // SQL92 模式，则 构建 ConsumerFilterData  过滤对象
                     consumerFilterData = ConsumerFilterManager.build(
                             requestHeader.getTopic(),
                             requestHeader.getConsumerGroup(),
@@ -205,6 +221,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                             requestHeader.getExpressionType(),
                             requestHeader.getSubVersion()
                     );
+
                     assert consumerFilterData != null;
                 }
             } catch (Exception e) {
@@ -216,6 +233,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             }
 
 
+            // 无子订阅模式，走的是 ClassFilter 过滤模式
         } else {
             // 校验 消费分组信息 是否存在
             // todo 客户端，包括消息生产者和消息消费者都会定时向 Broker 心跳
@@ -235,7 +253,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 return response;
             }
 
-            // todo  校验 订阅信息 是否存在。
+            // todo  校验 订阅信息 是否存在。注意，同一个消费组下，同一个 Topic 的订阅信息只有一份，以最后上报的消费者为准（版本更新）
             subscriptionData = consumerGroupInfo.findSubscriptionData(requestHeader.getTopic());
             if (null == subscriptionData) {
                 log.warn("the consumer's subscription not exist, group: {}, topic:{}", requestHeader.getConsumerGroup(), requestHeader.getTopic());
@@ -244,7 +262,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 return response;
             }
 
-            // 校验 订阅信息版本 是否合法
+            // 校验 订阅信息版本 是否合法，不能比请求的订阅信息版本低
             if (subscriptionData.getSubVersion() < requestHeader.getSubVersion()) {
                 log.warn("The broker's subscription is not latest, group: {} {}", requestHeader.getConsumerGroup(),
                         subscriptionData.getSubString());
@@ -253,9 +271,11 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                 return response;
             }
 
+            // 走 ClassFilter 模式
+            // 直接从brokerController.getConsumerFilterManager() 中根据 topic、consumerGroup或取，如果取不到直接提示错误。
+            // 因为消费方使用的是 subscribe(String topic, String fullClassName, String filterClassSource) 方法时进行订阅的，此时会立即上报到 Broker 中，并随着定时任务和心跳一样不断上报
             if (!ExpressionType.isTagType(subscriptionData.getExpressionType())) {
-                consumerFilterData = this.brokerController.getConsumerFilterManager().get(requestHeader.getTopic(),
-                        requestHeader.getConsumerGroup());
+                consumerFilterData = this.brokerController.getConsumerFilterManager().get(requestHeader.getTopic(), requestHeader.getConsumerGroup());
                 if (consumerFilterData == null) {
                     response.setCode(ResponseCode.FILTER_DATA_NOT_EXIST);
                     response.setRemark("The broker's consumer filter data is not exist!Your expression may be wrong!");
@@ -271,6 +291,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             }
         }
 
+        // 如果非 Tag 过滤，需要打开 enablePropertyFilter = true
         if (!ExpressionType.isTagType(subscriptionData.getExpressionType())
                 && !this.brokerController.getBrokerConfig().isEnablePropertyFilter()) {
             response.setCode(ResponseCode.SYSTEM_ERROR);
@@ -286,7 +307,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
             messageFilter = new ExpressionForRetryMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());
 
-            // 不支持对重试主题的过滤
+            // 不支持对重试主题的过滤，创建表达式模式过滤
         } else {
             messageFilter = new ExpressionMessageFilter(subscriptionData, consumerFilterData,
                     this.brokerController.getConsumerFilterManager());

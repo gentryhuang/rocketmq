@@ -22,13 +22,32 @@ package org.apache.rocketmq.common.protocol.heartbeat;
 
 import java.util.HashSet;
 import java.util.Set;
+
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 
+/**
+ * 消费方心跳数据
+ */
 public class ConsumerData {
+    /**
+     * 所在消费组
+     */
     private String groupName;
+    /**
+     * 消费类型：push / pull
+     */
     private ConsumeType consumeType;
+    /**
+     * 消息模型：广播 / 集群
+     */
     private MessageModel messageModel;
+    /**
+     * 从哪里开始消费
+     */
     private ConsumeFromWhere consumeFromWhere;
+    /**
+     * 订阅组装信息
+     */
     private Set<SubscriptionData> subscriptionDataSet = new HashSet<SubscriptionData>();
     private boolean unitMode;
 
@@ -83,7 +102,7 @@ public class ConsumerData {
     @Override
     public String toString() {
         return "ConsumerData [groupName=" + groupName + ", consumeType=" + consumeType + ", messageModel="
-            + messageModel + ", consumeFromWhere=" + consumeFromWhere + ", unitMode=" + unitMode
-            + ", subscriptionDataSet=" + subscriptionDataSet + "]";
+                + messageModel + ", consumeFromWhere=" + consumeFromWhere + ", unitMode=" + unitMode
+                + ", subscriptionDataSet=" + subscriptionDataSet + "]";
     }
 }

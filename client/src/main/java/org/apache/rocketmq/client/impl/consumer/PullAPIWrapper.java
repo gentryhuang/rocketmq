@@ -87,6 +87,12 @@ public class PullAPIWrapper {
      * 处理拉取结果
      * 1. 更新 消息队列拉取消息 Broker 编号的映射
      * 2. 解析消息，并根据订阅信息消息 tagCode 匹配合适消息，即会过滤消息
+     * <p>
+     * todo 特别说明：
+     * 1） 基于 Tag 模式会在服务端拉取消息的过程先过滤一次（过滤过程不会访问 CommitLog 数据，可以保证高效过滤），使用的是 tag 的 hashCode ，但是不是绝对的准确，
+     * 在消费端又根据 tag 进行过滤。（为什么在 Broker 服务端不使用 tag 过滤呢？ Message Tag 其实是字符串形式，ConsumeQueue 中存储的是其对应的 hashCode，
+     * 是为了在 ConsumeQueue 中定长存储，节省空间）；
+     * 2） 采用 Broker 端和消费端都过滤，这样的情况下，即使存在 Tag 的 hash 冲突，也可以在 Consumer 端进行修正，保证正确性。
      *
      * @param mq               消息队列
      * @param pullResult       拉取结果

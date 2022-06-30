@@ -25,7 +25,7 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 /**
- * 队列分配策略 - 平均分配
+ * 队列分配策略 - 平均分配，这个是默认的分配策略
  * 如果队列数和消费者数量相除有余数时，余数按照顺序 1 个 1个 分配消费者。
  * 举例:8个队列q1,q2,q3,q4,q5,a6,q7,q8,消费者3个:c1,c2,c3
  * 分配如下:

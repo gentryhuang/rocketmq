@@ -46,6 +46,8 @@ public class ConsumerGroupInfo {
     private final String groupName;
     /**
      * 消费者订阅关系集合
+     * <p>
+     * todo 注意：同一个消费组下的不同消费者如果订阅的 Topic 相同，最终会进行覆盖式（版本更新的）替换之前的 Topic 对应的订阅信息，也就是以最后一个上报的消费者的订阅信息为主，忽略 tag 不一致
      */
     private final ConcurrentMap<String/* Topic */, SubscriptionData> subscriptionTable = new ConcurrentHashMap<String, SubscriptionData>();
     /**
@@ -171,8 +173,12 @@ public class ConsumerGroupInfo {
     public boolean updateSubscription(final Set<SubscriptionData> subList) {
         boolean updated = false;
 
+        // 遍历消费组下消费方的订阅信息
         for (SubscriptionData sub : subList) {
+            // 如果 Broker 已经存在 Topic 的订阅信息，则进行覆盖式
             SubscriptionData old = this.subscriptionTable.get(sub.getTopic());
+
+            // 没有则创建
             if (old == null) {
                 SubscriptionData prev = this.subscriptionTable.putIfAbsent(sub.getTopic(), sub);
                 if (null == prev) {
@@ -181,6 +187,9 @@ public class ConsumerGroupInfo {
                             this.groupName,
                             sub.toString());
                 }
+
+                // 存在则覆盖
+                // todo 即 如果同一个消费组下的不同消费者订阅相同的 Topic ，但 Tag 不一样，则以最后上报的消费方订阅信息为准
             } else if (sub.getSubVersion() > old.getSubVersion()) {
                 if (this.consumeType == ConsumeType.CONSUME_PASSIVELY) {
                     log.info("subscription changed, group: {} OLD: {} NEW: {}",

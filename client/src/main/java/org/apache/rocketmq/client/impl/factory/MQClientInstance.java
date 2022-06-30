@@ -664,7 +664,11 @@ public class MQClientInstance {
     public void sendHeartbeatToAllBrokerWithLock() {
         if (this.lockHeartbeat.tryLock()) {
             try {
+
+                // 心跳
                 this.sendHeartbeatToAllBroker();
+
+                // 上报 ClassFilter 过滤信息到 Broker
                 this.uploadFilterClassSource();
             } catch (final Exception e) {
                 log.error("sendHeartbeatToAllBroker exception", e);
@@ -977,7 +981,7 @@ public class MQClientInstance {
                 consumerData.setConsumeType(impl.consumeType());
                 consumerData.setMessageModel(impl.messageModel());
                 consumerData.setConsumeFromWhere(impl.consumeFromWhere());
-                // 消费者的订阅信息
+                // 消费者的订阅信息 - 由订阅表达式解析而来
                 consumerData.getSubscriptionDataSet().addAll(impl.subscriptions());
                 consumerData.setUnitMode(impl.isUnitMode());
 
@@ -991,7 +995,6 @@ public class MQClientInstance {
             if (impl != null) {
                 ProducerData producerData = new ProducerData();
                 producerData.setGroupName(entry.getKey());
-
                 heartbeatData.getProducerDataSet().add(producerData);
             }
         }

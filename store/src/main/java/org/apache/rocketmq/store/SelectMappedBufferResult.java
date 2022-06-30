@@ -29,7 +29,7 @@ public class SelectMappedBufferResult {
     private final long startOffset;
 
     /**
-     * 读取数据缓存区
+     * 读取数据缓存区，即数据部分
      */
     private final ByteBuffer byteBuffer;
 

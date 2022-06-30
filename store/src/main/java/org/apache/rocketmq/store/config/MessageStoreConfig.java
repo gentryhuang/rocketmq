@@ -165,12 +165,26 @@ public class MessageStoreConfig {
      */
     private int commitCommitLogThoroughInterval = 200;
     private int flushConsumeQueueThoroughInterval = 1000 * 60;
+
+    /**
+     * 消息在内存中，最大传输大小，默认 256K
+     */
     @ImportantField
     private int maxTransferBytesOnMessageInMemory = 1024 * 256;
+    /**
+     * 消息在内存中，最大传输消息数量，默认 32
+     */
     @ImportantField
     private int maxTransferCountOnMessageInMemory = 32;
+
+    /**
+     * 消息在磁盘上的情况下，最大传输大小，默认 64K
+     */
     @ImportantField
     private int maxTransferBytesOnMessageInDisk = 1024 * 64;
+    /**
+     * 消息在磁盘上的情况下，最大传输消息数量，默认 8
+     */
     @ImportantField
     private int maxTransferCountOnMessageInDisk = 8;
     @ImportantField
