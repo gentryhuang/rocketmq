@@ -22,6 +22,9 @@ public abstract class ReferenceResource {
     protected final AtomicLong refCount = new AtomicLong(1);
     protected volatile boolean available = true;
     protected volatile boolean cleanupOver = false;
+    /**
+     * MappedFile 第一次关闭时设置的时间戳
+     */
     private volatile long firstShutdownTimestamp = 0;
 
     public synchronized boolean hold() {
@@ -43,7 +46,7 @@ public abstract class ReferenceResource {
     /**
      * 关闭
      *
-     * @param intervalForcibly
+     * @param intervalForcibly 拒绝被销毁的最大存活时间
      */
     public void shutdown(final long intervalForcibly) {
         // 如果可用，则设置为非可用
@@ -59,7 +62,7 @@ public abstract class ReferenceResource {
             // 如果当前该文件被其它线程引用，则本次不强制删除
         } else if (this.getRefCount() > 0) {
 
-            // 在拒绝被删除保护期内，每执行一次清理任务，将引用次数减去 1000，引用数小于 1 后，该文件最终将被删除
+            // 在拒绝被删除保护期外，每执行一次清理任务，将引用次数减去 1000，引用数小于 1  后，该文件最终将被删除
             if ((System.currentTimeMillis() - this.firstShutdownTimestamp) >= intervalForcibly) {
                 this.refCount.set(-1000 - this.getRefCount());
                 this.release();

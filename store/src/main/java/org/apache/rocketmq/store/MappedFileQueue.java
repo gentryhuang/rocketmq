@@ -630,7 +630,15 @@ public class MappedFileQueue {
         return deleteCount;
     }
 
+    /**
+     * 删除 ConsumeQueue 中无效的文件
+     *
+     * @param offset   CommitLog 最小物理偏移量
+     * @param unitSize CQ_STORE_UNIT_SIZE 20
+     * @return
+     */
     public int deleteExpiredFileByOffset(long offset, int unitSize) {
+        // 某个 ConsumeQueue 下的所有 MappedFile 内存文件
         Object[] mfs = this.copyMappedFiles(0);
 
         List<MappedFile> files = new ArrayList<MappedFile>();
@@ -639,14 +647,18 @@ public class MappedFileQueue {
 
             // 从倒数第 2 个 MappedFile 开始
             int mfsLength = mfs.length - 1;
-
             for (int i = 0; i < mfsLength; i++) {
                 boolean destroy;
                 MappedFile mappedFile = (MappedFile) mfs[i];
+
+                // 获取每个 MappedFile 最后一个条目，也就是消息索引
                 SelectMappedBufferResult result = mappedFile.selectMappedBuffer(this.mappedFileSize - unitSize);
                 if (result != null) {
+                    // 获取记录的消息物理偏移量
                     long maxOffsetInLogicQueue = result.getByteBuffer().getLong();
                     result.release();
+
+                    // 如果记录的消息的物理偏移量 < CommitLog 最小偏移量，那么就可以删除了
                     destroy = maxOffsetInLogicQueue < offset;
                     if (destroy) {
                         log.info("physic min offset " + offset + ", logics in current mappedFile max offset "
@@ -660,7 +672,7 @@ public class MappedFileQueue {
                     break;
                 }
 
-                // 删除物理文件
+                // 尝试删除物理文件，如果存在拒绝被删除的情况，那么就等待保护期过才能删除
                 if (destroy && mappedFile.destroy(1000 * 60)) {
                     files.add(mappedFile);
                     deleteCount++;

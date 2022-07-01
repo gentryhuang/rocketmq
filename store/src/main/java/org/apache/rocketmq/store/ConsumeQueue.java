@@ -461,24 +461,46 @@ public class ConsumeQueue {
         return result;
     }
 
+    /**
+     * 删除 ConsumeQueue 中无效的文件
+     *
+     * @param offset CommitLog 最小物理偏移量
+     * @return
+     */
     public int deleteExpiredFile(long offset) {
+        // 删除无效的文件
         int cnt = this.mappedFileQueue.deleteExpiredFileByOffset(offset, CQ_STORE_UNIT_SIZE);
+
+        // 修正当前 ConsumeQueue 最小物理偏移量。
+        // 因为前面是根据每个文件最后一个消息条目决定是否删除文件，因此对于剩余的文件中的第一个可能存在无效的条目。
         this.correctMinOffset(offset);
+
         return cnt;
     }
 
+
+    /**
+     * 修正 ConsumeQueue 最小的物理偏移量
+     *
+     * @param phyMinOffset CommitLog 最小物理偏移量
+     */
     public void correctMinOffset(long phyMinOffset) {
+        // 获取第一个 MappedFile 内存文件
         MappedFile mappedFile = this.mappedFileQueue.getFirstMappedFile();
         long minExtAddr = 1;
         if (mappedFile != null) {
+            // 读取该内存文件消息索引条目
             SelectMappedBufferResult result = mappedFile.selectMappedBuffer(0);
             if (result != null) {
                 try {
+                    // 遍历消息索引条目
                     for (int i = 0; i < result.getSize(); i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
+                        // 获取消息物理偏移量
                         long offsetPy = result.getByteBuffer().getLong();
                         result.getByteBuffer().getInt();
                         long tagsCode = result.getByteBuffer().getLong();
 
+                        // 如果当前消息索引条目中记录的物理偏移量 >= CommitLog 最小物理偏移量，那么此时就可以知道当前 ConsumeQueue 最小物理便宜量
                         if (offsetPy >= phyMinOffset) {
                             this.minLogicOffset = mappedFile.getFileFromOffset() + i;
                             log.info("Compute logical min offset: {}, topic: {}, queueId: {}",

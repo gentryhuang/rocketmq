@@ -103,13 +103,32 @@ public class MessageStoreConfig {
     private int flushIntervalConsumeQueue = 1000;
 
 
-    // Resource reclaim interval
+    /**
+     * Resource reclaim interval
+     * 清理资源的时间间隔，默认 10s
+     */
     private int cleanResourceInterval = 10000;
-    // CommitLog removal interval
+
+    /**
+     * CommitLog removal interval
+     * CommitLog 删除时间间隔
+     */
     private int deleteCommitLogFilesInterval = 100;
-    // ConsumeQueue removal interval
+
+    /**
+     * ConsumeQueue removal interval
+     * ConsumeQueue 删除时间间隔
+     */
     private int deleteConsumeQueueFilesInterval = 100;
+
+    /**
+     * 第一次拒绝删除之后能保留文件的最大时间，在此时间内，同样地可以被拒绝删除，超过该时间后，会将引用次数设置为负数，文件将被强制删除
+     */
     private int destroyMapedFileIntervalForcibly = 1000 * 120;
+
+    /**
+     * 由于在拒绝被删除保护期内的文件不能删除，可以开始删除的是时间端
+     */
     private int redeleteHangedFileInterval = 1000 * 120;
 
 
