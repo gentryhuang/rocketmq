@@ -268,8 +268,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             return;
         }
 
-        // todo 设置消息处理队列最后拉取消息时间
-        // 根据该值，判断 PullMessageService 是否空闲
+        // todo 设置消息处理队列最后拉取消息时间，根据该值，判断 PullMessageService 是否空闲（没有拉取消息请求要处理就会阻塞等待）
         pullRequest.getProcessQueue().setLastPullTimestamp(System.currentTimeMillis());
 
         // 判断 Consumer 状态是否运行中，如果不是，则延迟拉取消息。
@@ -312,7 +311,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             return;
         }
 
-        // 从消息大小进行流控
+        // 从消息大小进行流控，默认 100M
         if (cachedMessageSizeInMiB > this.defaultMQPushConsumer.getPullThresholdSizeForQueue()) {
             this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
             if ((queueFlowControlTimes++ % 1000) == 0) {
@@ -342,9 +341,11 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
             // 有序消费
         } else {
-            // 消息处理队列是否被锁定
+
+            // todo 消费队列必须处于锁定状态（当前消费者持有消费队列所在 Broker 上的分布式锁），才能保证消费队列消费顺序
             if (processQueue.isLocked()) {
-                // 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
+
+                // 保证 PullRequest 的初始拉取点在拉取消息时只在第一次拉取时设置
                 if (!pullRequest.isPreviouslyLocked()) {
                     long offset = -1L;
                     try {
@@ -356,7 +357,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                         return;
                     }
 
-                    // 如果获取的 offset 小于下一个 offset ，说明要拉取消息的进度有问题
+                    // 如果获取的 offset 小于拉取消息请求中的逻辑偏移量 offset ，说明要拉取消息的进度有问题，需要修正拉取消息的逻辑偏移量
                     // 默认消费方式 CONSUME_FROM_LAST_OFFSET
                     boolean brokerBusy = offset < pullRequest.getNextOffset();
                     log.info("the first time to pull message, so fix offset from broker. pullRequest: {} NewOffset: {} brokerBusy: {}",
@@ -369,7 +370,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     // 保证 PullReuqest 的初始拉取点在拉取时只在第一次拉取时设置
                     pullRequest.setPreviouslyLocked(true);
 
-                    // 重置消息拉取点
+                    // 修正消息拉取点
                     pullRequest.setNextOffset(offset);
                 }
 
@@ -417,7 +418,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                             // 保存当前拉取消息是从那个位置拉取的
                             long prevRequestOffset = pullRequest.getNextOffset();
-                            // 更新下次拉取消息的逻辑偏移量「类似下标」
+                            // 更新下次拉取消息的逻辑偏移量「类似下标」，复用拉取消息请求 PullRequest
                             pullRequest.setNextOffset(pullResult.getNextBeginOffset());
 
                             // 统计消息消费的响应时间
@@ -445,7 +446,9 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                 DefaultMQPushConsumerImpl.this.getConsumerStatsManager().incPullTPS(pullRequest.getConsumerGroup(),
                                         pullRequest.getMessageQueue().getTopic(), pullResult.getMsgFoundList().size());
 
-                                // todo 提交拉取到的消息存放到消息处理队列中，作为快照
+                                // todo 提交拉取到的消息存放到消息处理队列中，作为快照:
+                                //   并发消费服务中的消费请求任务，是直接处理拉取到的消息集合，后续会通过这个快照处理消息消费情况（每次"消费完"都从快照中移除）
+                                //   有序消费服务中的消费请求任务，不是直接处理拉取到的消息集合，而是从消息处理队列中的消息快照中取消息并消费。
                                 boolean dispatchToConsume = processQueue.putMessage(pullResult.getMsgFoundList());
 
                                 // todo 提交消费请求到消费方的 ConsumeMessageService（在消费端持有该对象），这里可能提交到普通消费服务，也可以提交到有序消费服务
@@ -523,7 +526,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                                 pullRequest.getNextOffset(), false);
                                         DefaultMQPushConsumerImpl.this.offsetStore.persist(pullRequest.getMessageQueue());
 
-                                        // 移除消费处理队列
+                                        // 移除消费处理队列并持久化消费进度
+                                        // todo 如果是有序消费，那么还需要解除当前消费者对该消费队列的锁定（解除分布式锁）
                                         DefaultMQPushConsumerImpl.this.rebalanceImpl.removeProcessQueue(pullRequest.getMessageQueue());
 
                                         log.warn("fix the pull request offset, {}", pullRequest);
@@ -567,7 +571,6 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             }
         }
 
-
         // todo 计算请求的 订阅表达式 和 是否进行类过滤消息
         String subExpression = null;
         boolean classFilter = false;
@@ -585,8 +588,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
         // todo 设置拉取消息时的系统标识
         // 1 是否要提交消费进度
-        // 2 是否 suspend
-        // 3 是否进行订阅过滤
+        // 2 是否支持没有消息挂起请求
+        // 3 是否进行订阅表达式过滤
         // 4 是否进行类过滤
         int sysFlag = PullSysFlag.buildSysFlag(
                 commitOffsetEnable, // commitOffsetEnable 提交消费进度到 Broker
@@ -603,14 +606,14 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     pullRequest.getMessageQueue(),
                     subExpression, // 订阅表达式
                     subscriptionData.getExpressionType(), // 过滤类型，默认 Tag
-                    subscriptionData.getSubVersion(),
+                    subscriptionData.getSubVersion(), // 订阅信息版本
                     pullRequest.getNextOffset(), // 本次拉取消息的逻辑偏移量
                     // Consumer 从 Broker 拉取的待消费消息最大数量，默认是 32 「注意，从 Broker 拉取的时候不一定就是 32，原因多种具体看 Broker」
                     this.defaultMQPushConsumer.getPullBatchSize(),
                     sysFlag, // 系统标识
                     commitOffsetValue, // 要提交到 Broker 的消费进度（逻辑偏移量）
                     BROKER_SUSPEND_MAX_TIME_MILLIS, // Broker 挂起请求最大时间，默认 15s
-                    CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND,
+                    CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND, // 拉取消息超时时间，默认 30s
                     CommunicationMode.ASYNC,
                     pullCallback
             );
@@ -1138,7 +1141,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     // todo 为当前消费者组自动创建一个重试 Topic
                     final String retryTopic = MixAll.getRetryTopic(this.defaultMQPushConsumer.getConsumerGroup());
 
-                    // 为重试 Topic 构建订阅数据并缓存起来
+                    // 为重试 Topic 构建订阅数据并缓存起来，注意重试主题订阅表达式为 *
                     SubscriptionData subscriptionData = FilterAPI.buildSubscriptionData(retryTopic, SubscriptionData.SUB_ALL);
                     this.rebalanceImpl.getSubscriptionInner().put(retryTopic, subscriptionData);
                     break;

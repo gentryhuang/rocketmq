@@ -44,7 +44,9 @@ import org.apache.rocketmq.common.protocol.body.ProcessQueueInfo;
  * PullMessageService然后将消息提交到消费者消费线程池，消息成功消费后从ProcessQueue中移除。
  */
 public class ProcessQueue {
-    // 30s
+    /**
+     * 消费队列分布式在消费端的最大有效时间 30s，在 Broker 端默认是 60s
+     */
     public final static long REBALANCE_LOCK_MAX_LIVE_TIME =
             Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockMaxLiveTime", "30000"));
     /**
@@ -52,7 +54,9 @@ public class ProcessQueue {
      */
     public final static long REBALANCE_LOCK_INTERVAL = Long.parseLong(System.getProperty("rocketmq.client.rebalance.lockInterval", "20000"));
 
-    // 队列的过期时间，默认 2min
+    /**
+     * 队列的过期时间，默认 2min；即在 2min 内没有拉取消息就废弃该队列
+     */
     private final static long PULL_MAX_IDLE_TIME = Long.parseLong(System.getProperty("rocketmq.client.pull.pullMaxIdleTime", "120000"));
 
     private final InternalLogger log = ClientLogger.getLog();
@@ -78,12 +82,12 @@ public class ProcessQueue {
     private final AtomicLong msgSize = new AtomicLong();
 
     /**
-     * 消费锁
+     * todo 消费锁
      */
     private final Lock consumeLock = new ReentrantLock();
 
     /**
-     * msgTreeMap的一个子集，只在有序消费时使用。
+     * msgTreeMap 的一个子集，只在有序消费时使用。
      * todo 用于临时存放从 ProcessQueue 中取出的消息，在消费失败时作为还原数据源，在消费成功时删除即可。
      * <p>
      * A subset of msgTreeMap, will only be used when orderly consume
@@ -386,7 +390,7 @@ public class ProcessQueue {
     }
 
     /**
-     * 将consumingMsgOrderlyTreeMap消息清除,表示成功处理该批消息，并返回消费进度
+     * 将 consumingMsgOrderlyTreeMap 消息清除，表示成功处理该批消息，并返回消费进度
      *
      * @return
      */
@@ -394,7 +398,7 @@ public class ProcessQueue {
         try {
             this.treeMapLock.writeLock().lockInterruptibly();
             try {
-                // 获取消费进度，也就是消费队列的逻辑偏移量，类似于数组的下标
+                // 获取 consumingMsgOrderlyTreeMap 中最大的消息偏移量 offset，也就是消费队列的逻辑偏移量，类似于数组的下标。该属性中存储的是本批消费的消息。
                 Long offset = this.consumingMsgOrderlyTreeMap.lastKey();
 
                 // 维护消息处理队列中的消息条数
@@ -465,7 +469,7 @@ public class ProcessQueue {
                 // 如果消费快照不为空
                 if (!this.msgTreeMap.isEmpty()) {
 
-                    // 获取指定大小的消息
+                    // 获取指定数目的消息
                     for (int i = 0; i < batchSize; i++) {
                         Map.Entry<Long, MessageExt> entry = this.msgTreeMap.pollFirstEntry();
                         if (entry != null) {

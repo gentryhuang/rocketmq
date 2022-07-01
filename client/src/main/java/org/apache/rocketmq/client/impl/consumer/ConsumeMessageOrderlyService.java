@@ -53,20 +53,23 @@ import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
 /**
- * 有序消息处理服务 - 严格顺序消息 （todo 局部还是全局？？？）
+ * 有序消息处理服务 - 严格顺序消息 （todo 注意是局部的，因为只解决 Topic 下一个 MessageQueue 的顺序，无法解决 Topic 级别的有序，除非 Topic 只有一个 MessageQueue）
  * 说明：Consumer 在严格顺序消费时，通过三把锁保证
  * 1 Broker 消息队列锁（分布式锁）
- * - 集群模式下，Consumer 从 Broker 获得该锁后，才能进行消息拉取、消费
- * - 广播模式下，Consumer 无需该锁
+ * - 集群模式下，Consumer 从 Broker 获得该锁后，才能进行消息拉取、消费；
+ * - 广播模式下，Consumer 无需分布式锁，因为每个消费者都有相同的队列，只需要保证同一个消费队列同一时刻只能被一个线程消费即可；
  * 2 Consumer 消息队列锁（本地锁）：Consumer 获得该锁才能操作消息队列
- * 3 Consumer 消息处理队列锁（本地锁）：Consumer 获得该锁才能消费消息队列
+ * 3 Consumer 消息处理队列消费锁（本地锁）：Consumer 获得该锁才能消费消息队列
  * 小结：
- * ConsumeMessageOrderlyService 在消费的时候，会先获取每一个 ConsumerQueue 的锁，然后从 processQueue 获取消息消费，这也就意味着，对于每一个 ConsumerQueue 的消息来说，消费的逻辑也是顺序的。
+ * 1 ConsumeMessageOrderlyService 在消费的时候，会先获取每一个 ConsumerQueue 的锁，然后从 processQueue 获取消息消费，这也就意味着，对于每一个 ConsumerQueue 的消息来说，消费的逻辑也是顺序的。
+ * 2 todo 对消息队列做什么事情之前，先申请该消息队列的锁。无论是创建消息队列拉取任务「分布式锁」、拉取消息「分布式锁」、消息消费「分布式锁、消息队列锁、消息处理队列消费锁」，无不如此。
  */
 public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
 
-    // 消费任务一次运行的最大时间，默认为 60s
+    /**
+     * 消费任务一次运行的最大时间，默认为 60s
+     */
     private final static long MAX_TIME_CONSUME_CONTINUOUSLY =
             Long.parseLong(System.getProperty("rocketmq.client.maxTimeConsumeContinuously", "60000"));
 
@@ -96,7 +99,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
      */
     private final String consumerGroup;
     /**
-     * 消息消费队列锁
+     * 消息消费队列锁对象
      */
     private final MessageQueueLock messageQueueLock = new MessageQueueLock();
 
@@ -125,13 +128,15 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                 this.consumeRequestQueue,
                 new ThreadFactoryImpl("ConsumeMessageThread_"));
 
+        // 定时线程池，用于延迟提交消费请求任务
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("ConsumeMessageScheduledThread_"));
     }
 
     /**
      * 在消费者启动时会调用该方法，在集群模式下，默认每隔20s执行一次锁定分配给自己的消息消费队列。
      * todo 特别说明：
-     * 每个 MQ 客户端，会定时发送 LOCK_BATCH_MQ 请求，并且在本地维护获取到锁的所有队列，即在消息处理队列 ProcessQueue 中使用 locked 和 lastLockTimestamp 进行标记。
+     * 1 每个 MQ 客户端，会定时发送 LOCK_BATCH_MQ 请求，并且在本地维护获取到锁的所有队列，即在消息处理队列 ProcessQueue 中使用 locked 和 lastLockTimestamp 进行标记。
+     * 2 Broker 端锁的有效时间为 60s
      */
     public void start() {
         // 集群消费
@@ -141,7 +146,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
-                    // todo 锁定 broker 上当前消费的队列
+                    // todo 锁定 broker 上当前消费者分配到的队列（可能对应多个 Broker )
                     ConsumeMessageOrderlyService.this.lockMQPeriodically();
                 }
             }, 1000 * 1, ProcessQueue.REBALANCE_LOCK_INTERVAL, TimeUnit.MILLISECONDS);
@@ -342,6 +347,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     ) {
         long timeMillis = suspendTimeMillis;
         if (timeMillis == -1) {
+            // 默认 1000ms
             timeMillis = this.defaultMQPushConsumer.getSuspendCurrentQueueTimeMillis();
         }
 
@@ -364,7 +370,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
      * 处理顺序消费结果，并返回是否继续消费
      * 说明：
      * 1 在并发消费场景时，如果消费失败，Consumer 会将消费失败消息发回到 Broker 重试队列，跳过当前消息，等待下次拉取该消息再进行消费。
-     * 2 在完全严格顺序消费消费时，如果消费失败，这样做显然不行。也因此，消费失败的消息，会挂起队列一会会，稍后继续消费。todo 即将消息重新放入缓存中，因为它们使用 TreeMap 保存的，根据消费进度排序
+     * 2 在完全严格顺序消费消息时，如果消费失败，这样做显然不行。也因此，消费失败的消息，会挂起队列一会会，稍后继续消费。todo 即将消息重新放入缓存中，因为它们使用 TreeMap 保存的，根据消费进度排序
      * 3 不过消费失败的消息一直失败，也不可能一直消费。当超过消费重试上限时，Consumer 会将消费失败超过上限的消息发回到 Broker ，放入死信队列中（todo 以发送普通消息的形式发送达到最大重试次数的重试消息）
      *
      * @param msgs           消息
@@ -384,7 +390,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         // 执行重试时，将不更新消息消费进度
         long commitOffset = -1L;
 
-        // 自动提交
+        // 自动提交，默认就是自动提交
         if (context.isAutoCommit()) {
             switch (status) {
                 // 考虑到 ROLLBACK 、COMMIT 暂时只使用在 MySQL binlog 场景，官方将这两状态标记为 @Deprecated。
@@ -396,7 +402,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     // 消费成功
                 case SUCCESS:
 
-                    // 提交消息已消费成功到消息处理队列
+                    // 提交消息已消费成功到消息处理队列，即将临时消息清理掉-这些消息被消费了，并返回下次应该从哪里消费（从 consumingMsgOrderlyTreeMap 中取最大的消息偏移量 offset，然后 + 1)
                     commitOffset = consumeRequest.getProcessQueue().commit();
                     // 统计
                     this.getConsumerStatsManager().incConsumeOKTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
@@ -407,7 +413,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     // 统计
                     this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
 
-                    // todo 检查消息的重试次数，计算是否暂时挂起（暂停）消费N毫秒，默认：10ms，然后继续消费
+                    // todo 检查消息的重试次数，计算是否暂时挂起（暂停）消费N毫秒，默认：1000ms，然后继续消费。没有达到最大次数，就属于无效消费，不更新消费进度。
                     if (checkReconsumeTimes(msgs)) {
                         /*------------- 消息消费重试 ---------*/
 
@@ -423,11 +429,11 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                                 context.getSuspendCurrentQueueTimeMillis());
                         continueConsume = false;
 
-                        // 消息重试次数 >= 允许的最大重试次数，则将消息发送到 Broker，该消息最终会放入 DLQ （死信队列）。
-                        // 这种情况，提交该批消息，表示消息消费成功
+                        // 消息重试次数 >= 允许的最大重试次数，则将消息发送到 Broker，该消息最终会放入 DLQ （死信队列），RocketMQ 不会再次消费，需要人工干预。
+                        // todo 这种情况，提交该批消息，表示消息消费成功
                     } else {
 
-                        // 返回待保存的消息消费进度
+                        // 返回待保存的消息消费进度，即将临时消息清理掉-这些消息被消费了，并返回下次应该从哪里消费
                         commitOffset = consumeRequest.getProcessQueue().commit();
                     }
                     break;
@@ -459,6 +465,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                 // 计算是否暂时挂起（暂停）消费N毫秒，默认：10ms
                 case SUSPEND_CURRENT_QUEUE_A_MOMENT:
                     this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
+
+                    // todo 检查消息的重试次数，计算是否暂时挂起（暂停）消费N毫秒，默认：1000ms，然后继续消费
                     if (checkReconsumeTimes(msgs)) {
                         // 设置消息重新消费，存储消息时会根据消费进度排序
                         consumeRequest.getProcessQueue().makeMessageToConsumeAgain(msgs);
@@ -524,11 +532,12 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
                     // todo  达到重试上限，将消息发回 Broker 后放入死信队列。因为完全严格顺序消费时，不能发回到 Broker 进行重试。
                     if (!sendMessageBack(msg)) {
-                        // 暂停消费
+                        // 发送失败，则暂停消费
                         suspend = true;
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
                     }
 
+                    // 没有达到最大消费次数，累加重复消费次数，并暂停消费
                 } else {
                     suspend = true;
                     msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
@@ -590,6 +599,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
      * todo 特别说明：
      * 1 并发消息消费指消费线程池中的线程可以并发对同一个消费队列的消息进行消费
      * 2 顺序消息是指消费线程池中的线程对消息队列只能串行消费。消息消费时必须成功锁定消息队列，在 Broker 端会存储消息队列的锁占用情况。
+     * 3 有序消费服务中的消费请求任务，不是直接处理拉取到的消息集合，而是从消息处理队列中的消息快照中取消息并消费。
+     * 4 并发消费服务中是一次处理完消息集合，而有序消费服务则超时处理消息，默认一个线程消费 1min 就歇息，不再继续消费，把剩余的消息再次提交到线程池中。
      */
     class ConsumeRequest implements Runnable {
         /**
@@ -630,7 +641,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             // JVM 加锁（这里加 JVM 锁就够了，因为每个消费方都有自己的队列）
             synchronized (objLock) {
 
-                // todo (广播模式) 或者 (集群模式 && 消息处理队列锁有效)
+                // todo (广播模式-不需要分布式锁) 或者 (集群模式 && 消息处理队列锁有效)；广播模式的话直接进入消费，无需使用分布式锁锁定消费队列，因为相互直接无竞争
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                         // 2 todo 第二把锁，其实就是 Broker 分布式锁的体现
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
@@ -648,17 +659,17 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             break;
                         }
 
-                        // todo 消息队列锁未锁定，提交延迟获得锁并消费请求
+                        // 集群消费 -  todo 消息队列锁未锁定，提交延迟获得锁并消费请求
                         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                                 && !this.processQueue.isLocked()) {
                             log.warn("the message queue not locked, so consume later, {}", this.messageQueue);
 
-                            // 提交延迟获得锁，后续会再次执行该进入到 run() 方法流程
+                            // 提交延迟获得锁，后续获得锁会再次执行该进入到 run() 方法流程；即获得分布式锁会重新提交消费任务。
                             ConsumeMessageOrderlyService.this.tryLockLaterAndReconsume(this.messageQueue, this.processQueue, 10);
                             break;
                         }
 
-                        // 消息队列锁已经过期，提交延迟获得锁并消费请求
+                        // 集群消费 - 消息队列锁已经过期，提交延迟获得锁并消费请求
                         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                                 && this.processQueue.isLockExpired()) {
                             log.warn("the message queue lock expired, so consume later, {}", this.messageQueue);
@@ -668,7 +679,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             break;
                         }
 
-                        // todo 当前周期消费时间超过连续时长，默认：60s，提交延迟消费请求。每一个ConsumeRequest消费任务不是以消费消息条数来计算，而是根据消费时间，默认当消费时长大于MAX_TIME_CONSUME_CONTINUOUSLY，默认60s后，本次消费任务结束，由消费组内其他线程继续消费。
+                        // todo 当前周期消费时间超过连续时长，默认：60s，提交延迟消费请求任务。每一个ConsumeRequest消费任务不是以消费消息条数来计算，而是根据消费时间（超过消费时间，把剩余消息交给其它线程消费），
+                        //  默认当消费时长大于MAX_TIME_CONSUME_CONTINUOUSLY，默认60s后，本次消费任务结束，由消费组内其他线程继续消费。
                         // 默认情况下，每消费1分钟休息10ms
                         long interval = System.currentTimeMillis() - beginTime;
                         if (interval > MAX_TIME_CONSUME_CONTINUOUSLY) {
@@ -680,8 +692,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         final int consumeBatchSize =
                                 ConsumeMessageOrderlyService.this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 
-                        // 从消息处理队列 ProcessQueue 中获取指定大小的消息
-                        // todo 注意，从ProceessQueue中取出的消息，会临时存储在 ProceeQueue的consumingMsgOrderlyTreeMap 属性中
+                        // 从消息处理队列 ProcessQueue 中的消息快照中获取指定条数的消息
+                        // todo 注意，从 ProcessQueue 中取出的消息，会临时存储在 ProcessQueue 的 consumingMsgOrderlyTreeMap 属性中
                         List<MessageExt> msgs = this.processQueue.takeMessages(consumeBatchSize);
 
                         // todo 处理消息的 Topic，还原 Topic,针对重试 Topic
@@ -718,11 +730,14 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
                             try {
 
-                                // todo 锁定队列消费锁
-                                // todo 说明：相比 MessageQueue 锁，其粒度较小。这也是为什么有了 MessageQueue 锁还需要消息处理队列 ProcessQueue 锁的原因
+                                // 3 todo 第三把锁，消息处理队列 ProcessQueue 消费锁 - AQS
+                                // todo 说明：
+                                //  1) 相比 MessageQueue 锁，其粒度较小
+                                //  2) 在释放 MessageQueue 分布式锁时，可以根据消费锁快速判断是否有线程还在消费消息，只有确定没有线程消费消息时才能尝试释放 MessageQueue 的分布式锁，否则可能导致两个消费者消费同一个队列消息，
+                                //     同时，在释放分布锁时，这里也不能获取到消费锁，会阻塞，直到释放了分布式锁。释放了分布式后，对应消息处理队列会被作废、丢弃。
                                 this.processQueue.getConsumeLock().lock();
 
-                                // 消息处理队列被丢弃，则直接结束本次消息消费
+                                // 消息处理队列被丢弃，则直接结束本次消息消费。
                                 if (this.processQueue.isDropped()) {
                                     log.warn("consumeMessage, the message queue not be able to consume, because it's dropped. {}",
                                             this.messageQueue);
@@ -799,10 +814,10 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeMessageOrderlyService.this.getConsumerStatsManager()
                                     .incConsumeRT(ConsumeMessageOrderlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
-                            // todo 处理消费结果，返回是否继续消费
+                            // todo 处理消费结果，返回是否继续消费（消费失败 & 没有达到最大重新消费次数，就会延时提交重新消费任务，就会返回 false，不再继续消费）
                             continueConsume = ConsumeMessageOrderlyService.this.processConsumeResult(msgs, status, context, this);
 
-                            // 没有消息，则结束
+                            // 消息被消费完了，也结束本次消费
                         } else {
                             continueConsume = false;
                         }
@@ -817,12 +832,11 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         return;
                     }
 
-                    // 延迟重试
+                    // 尝试获取 ConsumeQueue 的分布锁并再次提交消费任务
                     ConsumeMessageOrderlyService.this.tryLockLaterAndReconsume(this.messageQueue, this.processQueue, 100);
                 }
             }
         }
-
     }
 
 }

@@ -107,6 +107,9 @@ public class RequestCode {
      */
     public static final int LOCK_BATCH_MQ = 41;
 
+    /**
+     * 释放指定的 MessageQueue（们）的锁
+     */
     public static final int UNLOCK_BATCH_MQ = 42;
     public static final int GET_ALL_CONSUMER_OFFSET = 43;
 

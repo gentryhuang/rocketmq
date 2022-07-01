@@ -57,7 +57,8 @@ public abstract class RebalanceImpl {
 
     /**
      * 订阅 Topic 下的消息队列
-     * 从 NameSrv 更新路由配置到本地，设置该属性的情况如下（todo 注意：起始的时候是全部的队列，主要作为分配队列的数据源）：
+     * 1) 从 NameSrv 更新路由配置到本地，设置该属性的情况如下（todo 注意：起始的时候是全部的队列，主要作为分配队列的数据源）：
+     * 2) 包括重试主题对应的队列信息，默认情况下，重试主题只有一个队列。具体的重试主题队列信息分布在哪个 Broker，要看重试消息发送到哪个 Broker 上了，和消息的消费队列有关。
      *
      * @see MQClientInstance#updateTopicRouteInfoFromNameServer(java.lang.String, boolean, org.apache.rocketmq.client.producer.DefaultMQProducer)
      */
@@ -83,7 +84,7 @@ public abstract class RebalanceImpl {
     protected MessageModel messageModel;
 
     /**
-     * 分配消息队列的策略
+     * 分配消息队列的策略，默认平均分配策略
      */
     /* 负载算法的具体实现，究竟如何分配就是由这个总指挥决定的 */
     protected AllocateMessageQueueStrategy allocateMessageQueueStrategy;
@@ -609,7 +610,11 @@ public abstract class RebalanceImpl {
 
                 /**
                  * todo 说明：
-                 * 顺序消费时，锁定消息队列。如果锁定失败，就不会新增消息处理队列。也就是在顺序消费时，只有锁定队列才能拉取消息。
+                 * 1 顺序消费时，锁定消息队列。如果锁定失败，就不会新增消息处理队列，因为此时虽然消费队列 mq 分配给了当前消费者，但是该消费组下存在其它的消费者还在使用该队列，如果当前消费者也开始通过该消费队列拉取消息，那么就可能导致乱序消费。
+                 * 也就是在顺序消费时，只有锁定队列才能拉取消息。
+                 * 2 问题：发生消息队列重新负载时，原先由自己处理的消息队列被另外一个消费者分配，此时如果还未来的及将ProceeQueue解除锁定，就被另外一个消费者添加进去，此时会存储多个消息消费者同时消费个消息队列？
+                 *   答案：不会的，因为当一个新的消费队列分配给消费者时，在添加其拉取任务之前必须先向Broker发送对该消息队列加锁请求，只有加锁成功后，才能添加拉取消息，否则等到下一次负载后，该消费队列被原先占有的解锁后，
+                 *   才能开始新的拉取任务。但是并发消费可能会出现这种情况的。
                  */
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);

@@ -57,7 +57,8 @@ public class RebalanceLockManager {
      */
     public boolean tryLock(final String group, final MessageQueue mq, final String clientId) {
 
-        // 判断有没有已经锁住
+        // 判断有没有已经锁住，锁住的话刷新过期时间 60s
+        // 没有锁住的情况：1）当前 group-mq 下的锁对象中的客户端不是传入的 clientId   2）是传入的 clientId 但是锁过期了
         if (!this.isLocked(group, mq, clientId)) {
             try {
                 // 获取 JVM 实例锁
@@ -73,6 +74,7 @@ public class RebalanceLockManager {
 
                     LockEntry lockEntry = groupValue.get(mq);
                     if (null == lockEntry) {
+                        // 创建锁对象
                         lockEntry = new LockEntry();
                         lockEntry.setClientId(clientId);
                         groupValue.put(mq, lockEntry);
@@ -82,13 +84,15 @@ public class RebalanceLockManager {
                                 mq);
                     }
 
+                    // 占据锁对象的是传入的 clientId ，刷新过期时间并结束
                     if (lockEntry.isLocked(clientId)) {
                         lockEntry.setLastUpdateTimestamp(System.currentTimeMillis());
                         return true;
                     }
 
+                    // 占领锁对象的不是传入的 clientId ，那么需要判断这个锁对象是否过期
                     String oldClientId = lockEntry.getClientId();
-
+                    // 过期的话，就可以重置了；即传入的 clientId 就可以占据了
                     if (lockEntry.isExpired()) {
                         lockEntry.setClientId(clientId);
                         lockEntry.setLastUpdateTimestamp(System.currentTimeMillis());
@@ -109,6 +113,8 @@ public class RebalanceLockManager {
                             oldClientId,
                             clientId,
                             mq);
+
+                    // group 下的别的 clientId 占据了队列的锁对象，而且并没有过期，那么就无法获取锁
                     return false;
                 } finally {
                     this.lock.unlock();
@@ -124,7 +130,14 @@ public class RebalanceLockManager {
     }
 
     /**
-     * 判断消费组 group 下的消息队列 mq 是否被 clientID 锁定
+     * 判断消费组 group 下的消息队列 mq 是否被 clientID 锁定，可能情况如下：
+     * <p>
+     * 1）当前 group 下还没有客户端实例锁定这个 mq，那么传入的 clientId 直接锁定即可；
+     * 2）当前 group 下正好是传入的 clientId 锁定的，而且还没过期，那么刷新过期时间即可；
+     * 3）当前 group 下正好是传入的 clientId 锁定的，但是过期了，那么重置过期时间即可；
+     * 4）当前 group 下锁住 mq 的不是传入的 clientId 而是其它客户端实例：
+     * - 如果其它客户端实例持有该 mq 的 LockEntry 并没有过期，那么传入的 clientId 就获取锁失败；
+     * - 如果其它客户端实例持有该 mq 的 LockEntry 过期，那么传入的 clientId 可以占据 mq 的 LockEntry
      *
      * @param group    消费组
      * @param mq       消息队列
@@ -142,6 +155,8 @@ public class RebalanceLockManager {
             if (lockEntry != null) {
                 // 判断锁对象锁定的是否是目前消费端实例 & 锁还有效
                 boolean locked = lockEntry.isLocked(clientId);
+
+                // 锁有效，刷新过期时间
                 if (locked) {
                     lockEntry.setLastUpdateTimestamp(System.currentTimeMillis());
                 }
@@ -154,7 +169,7 @@ public class RebalanceLockManager {
     }
 
     /**
-     * 尝试批量锁定 MessageQueue
+     * clientID 尝试批量锁定 MessageQueue
      *
      * @param group    消费组
      * @param mqs      队列集合
@@ -171,17 +186,18 @@ public class RebalanceLockManager {
         // 没有锁住的 MessageQueue 结合结果集
         Set<MessageQueue> notLockedMqs = new HashSet<MessageQueue>(mqs.size());
 
-        // 遍历目标 MessageQueue
+        // 遍历要锁定的 MessageQueue
         for (MessageQueue mq : mqs) {
             // 判断当前客户端是否已经锁定了当前队列
             if (this.isLocked(group, mq, clientId)) {
                 lockedMqs.add(mq);
+
             } else {
                 notLockedMqs.add(mq);
             }
         }
 
-        // 存在没有被锁定的 MessageQueue
+        // 存在没有被锁定的 MessageQueue，尝试锁定这些队列
         if (!notLockedMqs.isEmpty()) {
             try {
                 // jvm 锁
@@ -251,21 +267,36 @@ public class RebalanceLockManager {
         return lockedMqs;
     }
 
+    /**
+     * clientID 尝试批量释放自己持有的 MessageQueue 的锁定，不是自己持有的不能释放
+     *
+     * @param group    消费组
+     * @param mqs      消费队列
+     * @param clientId 消费组下的消费者实例
+     */
     public void unlockBatch(final String group, final Set<MessageQueue> mqs, final String clientId) {
         try {
             this.lock.lockInterruptibly();
             try {
+                // 获取当前 Broker 上消费组下消费队列的锁定情况
                 ConcurrentHashMap<MessageQueue, LockEntry> groupValue = this.mqLockTable.get(group);
                 if (null != groupValue) {
+                    // 遍历要释放锁定的 MessageQueue
                     for (MessageQueue mq : mqs) {
                         LockEntry lockEntry = groupValue.get(mq);
+
+                        // 存在该 mq 的锁定对象
                         if (null != lockEntry) {
+
+                            // 判断是否是传入消费者所持有的，如果是则移除锁定信息即可
                             if (lockEntry.getClientId().equals(clientId)) {
                                 groupValue.remove(mq);
                                 log.info("unlockBatch, Group: {} {} {}",
                                         group,
                                         mq,
                                         clientId);
+
+                                // 不是传入消费者所持有的，不能移除该锁定
                             } else {
                                 log.warn("unlockBatch, but mq locked by other client: {}, Group: {} {} {}",
                                         lockEntry.getClientId(),
@@ -273,6 +304,8 @@ public class RebalanceLockManager {
                                         mq,
                                         clientId);
                             }
+
+                            // 不存在该 mq 的锁定对象
                         } else {
                             log.warn("unlockBatch, but mq not locked, Group: {} {} {}",
                                     group,
@@ -280,6 +313,8 @@ public class RebalanceLockManager {
                                     clientId);
                         }
                     }
+
+                    // 该消费组下没有锁定信息，忽略释放锁定
                 } else {
                     log.warn("unlockBatch, group not exist, Group: {} {}",
                             group,
@@ -339,7 +374,7 @@ public class RebalanceLockManager {
         }
 
         /**
-         * 是否过期。根据当前时间和上次更新时间差，和过期阈值比对
+         * 是否过期。根据当前时间和上次更新时间差，和过期阈值（60s) 比对
          *
          * @return
          */

@@ -107,7 +107,7 @@ public class RebalancePushImpl extends RebalanceImpl {
                 && MessageModel.CLUSTERING.equals(this.defaultMQPushConsumerImpl.messageModel())) {
             try {
 
-                // todo  获取消息队列消费锁（JVM 锁），避免和消息队列消费冲突。如果未获得锁而进行操作，可能会导致消息无法严格顺序消费
+                // todo  获取消息队列消费锁（JVM 锁），避免和消息队列消费冲突（消费的时候会加消费锁再消费）。如果未获得锁而进行操作，可能会导致消息无法严格顺序消费
                 // todo 第 3 把锁的作用
                 if (pq.getConsumeLock().tryLock(1000, TimeUnit.MILLISECONDS)) {
                     try {
