@@ -18,6 +18,7 @@ package org.apache.rocketmq.client.consumer;
 
 import java.util.HashSet;
 import java.util.Set;
+
 import org.apache.rocketmq.client.ClientConfig;
 import org.apache.rocketmq.client.QueryResult;
 import org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely;
@@ -35,6 +36,13 @@ import org.apache.rocketmq.remoting.RPCHook;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
+ * 1 RocketMQ 拉模式，消费者不自动向消息服务器拉取消息，而是将控制权交给了应用程序，RocketMQ 拉模式下的消费者只是提供拉取消息 API。
+ * 2 PUSH 模式相关点：
+ * - 消息拉取机制：PullMessageServer 线程根据PullRequest拉取任务循环拉取；
+ * - 消息队列负载机制，按照消费组，对主题下的消息队列，结合当前消费组内消费者数量动态负载。
+ *
+ *
+ * <p>
  * Default pulling consumer.
  * This class will be removed in 2022, and a better implementation {@link DefaultLitePullConsumer} is recommend to use
  * in the scenario of actively pulling messages.
@@ -46,23 +54,30 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
 
     /**
      * Do the same thing for the same Group, the application must be set,and guarantee Globally unique
+     * <p>
+     * 消费组名称
      */
     private String consumerGroup;
     /**
      * Long polling mode, the Consumer connection max suspend time, it is not recommended to modify
+     * 长轮询模式下挂起的最大超时时间，在Broker端根据偏移量从存储文件中查找消息时如果返回 PULL_NOT_FOUND时，不立即返回给拉取客户端，而是交给PullRequestHoldService线程，
+     * 每隔5秒再去拉取一次消息，如果找到则返回给消息拉取客户端，否则超时。
      */
     private long brokerSuspendMaxTimeMillis = 1000 * 20;
     /**
      * Long polling mode, the Consumer connection timeout(must greater than brokerSuspendMaxTimeMillis), it is not
      * recommended to modify
+     * 整个消息拉取过程中，拉取客户端等待服务器响应结果的超时时间，默认30s
      */
     private long consumerTimeoutMillisWhenSuspend = 1000 * 30;
     /**
      * The socket timeout in milliseconds
+     * 默认10s,拉消息时建立网络连接的超时时间
      */
     private long consumerPullTimeoutMillis = 1000 * 10;
     /**
      * Consumption pattern,default is clustering
+     * 消费模式，默认集群消费
      */
     private MessageModel messageModel = MessageModel.CLUSTERING;
     /**
@@ -71,21 +86,27 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     private MessageQueueListener messageQueueListener;
     /**
      * Offset Storage
+     * <p>
+     * 消息消费进度管理器
      */
     private OffsetStore offsetStore;
     /**
      * Topic set you want to register
+     * 订阅的主题列表
      */
     private Set<String> registerTopics = new HashSet<String>();
     /**
      * Queue allocation algorithm
+     * 队列分配器
      */
     private AllocateMessageQueueStrategy allocateMessageQueueStrategy = new AllocateMessageQueueAveragely();
     /**
      * Whether the unit of subscription group
      */
     private boolean unitMode = false;
-
+    /**
+     * 消息重试最大次数，默认 16 次
+     */
     private int maxReconsumeTimes = 16;
 
     public DefaultMQPullConsumer() {
@@ -107,16 +128,28 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     public DefaultMQPullConsumer(final String namespace, final String consumerGroup) {
         this(namespace, consumerGroup, null);
     }
+
     /**
      * Constructor specifying namespace, consumer group and RPC hook.
      *
      * @param consumerGroup Consumer group.
-     * @param rpcHook RPC hook to execute before each remoting command.
+     * @param rpcHook       RPC hook to execute before each remoting command.
      */
     public DefaultMQPullConsumer(final String namespace, final String consumerGroup, RPCHook rpcHook) {
         this.namespace = namespace;
         this.consumerGroup = consumerGroup;
         defaultMQPullConsumerImpl = new DefaultMQPullConsumerImpl(this, rpcHook);
+    }
+
+    /**
+     * 消费者启动
+     *
+     * @throws MQClientException
+     */
+    @Override
+    public void start() throws MQClientException {
+        this.setConsumerGroup(NamespaceUtil.wrapNamespace(this.getNamespace(), this.consumerGroup));
+        this.defaultMQPullConsumerImpl.start();
     }
 
     /**
@@ -179,7 +212,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     @Deprecated
     @Override
     public MessageExt viewMessage(String offsetMsgId) throws RemotingException, MQBrokerException,
-        InterruptedException, MQClientException {
+            InterruptedException, MQClientException {
         return this.defaultMQPullConsumerImpl.viewMessage(offsetMsgId);
     }
 
@@ -189,7 +222,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     @Deprecated
     @Override
     public QueryResult queryMessage(String topic, String key, int maxNum, long begin, long end)
-        throws MQClientException, InterruptedException {
+            throws MQClientException, InterruptedException {
         return this.defaultMQPullConsumerImpl.queryMessage(withNamespace(topic), key, maxNum, begin, end);
     }
 
@@ -268,7 +301,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     @Deprecated
     @Override
     public void sendMessageBack(MessageExt msg, int delayLevel)
-        throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+            throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         msg.setTopic(withNamespace(msg.getTopic()));
         this.defaultMQPullConsumerImpl.sendMessageBack(msg, delayLevel, null);
     }
@@ -280,7 +313,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
     @Deprecated
     @Override
     public void sendMessageBack(MessageExt msg, int delayLevel, String brokerName)
-        throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+            throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         msg.setTopic(withNamespace(msg.getTopic()));
         this.defaultMQPullConsumerImpl.sendMessageBack(msg, delayLevel, brokerName);
     }
@@ -290,11 +323,6 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
         return this.defaultMQPullConsumerImpl.fetchSubscribeMessageQueues(withNamespace(topic));
     }
 
-    @Override
-    public void start() throws MQClientException {
-        this.setConsumerGroup(NamespaceUtil.wrapNamespace(this.getNamespace(), this.consumerGroup));
-        this.defaultMQPullConsumerImpl.start();
-    }
 
     @Override
     public void shutdown() {
@@ -313,65 +341,65 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
 
     @Override
     public PullResult pull(MessageQueue mq, String subExpression, long offset, int maxNums)
-        throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+            throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         return this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), subExpression, offset, maxNums);
     }
 
     @Override
     public PullResult pull(MessageQueue mq, String subExpression, long offset, int maxNums, long timeout)
-        throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+            throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         return this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), subExpression, offset, maxNums, timeout);
     }
 
     @Override
     public PullResult pull(MessageQueue mq, MessageSelector messageSelector, long offset, int maxNums)
-        throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+            throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         return this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), messageSelector, offset, maxNums);
     }
 
     @Override
     public PullResult pull(MessageQueue mq, MessageSelector messageSelector, long offset, int maxNums, long timeout)
-        throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+            throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         return this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), messageSelector, offset, maxNums, timeout);
     }
 
     @Override
     public void pull(MessageQueue mq, String subExpression, long offset, int maxNums, PullCallback pullCallback)
-        throws MQClientException, RemotingException, InterruptedException {
+            throws MQClientException, RemotingException, InterruptedException {
         this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), subExpression, offset, maxNums, pullCallback);
     }
 
     @Override
     public void pull(MessageQueue mq, String subExpression, long offset, int maxNums, PullCallback pullCallback,
-        long timeout)
-        throws MQClientException, RemotingException, InterruptedException {
+                     long timeout)
+            throws MQClientException, RemotingException, InterruptedException {
         this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), subExpression, offset, maxNums, pullCallback, timeout);
     }
 
     @Override
     public void pull(MessageQueue mq, MessageSelector messageSelector, long offset, int maxNums,
-        PullCallback pullCallback)
-        throws MQClientException, RemotingException, InterruptedException {
+                     PullCallback pullCallback)
+            throws MQClientException, RemotingException, InterruptedException {
         this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), messageSelector, offset, maxNums, pullCallback);
     }
 
     @Override
     public void pull(MessageQueue mq, MessageSelector messageSelector, long offset, int maxNums,
-        PullCallback pullCallback, long timeout)
-        throws MQClientException, RemotingException, InterruptedException {
+                     PullCallback pullCallback, long timeout)
+            throws MQClientException, RemotingException, InterruptedException {
         this.defaultMQPullConsumerImpl.pull(queueWithNamespace(mq), messageSelector, offset, maxNums, pullCallback, timeout);
     }
 
     @Override
     public PullResult pullBlockIfNotFound(MessageQueue mq, String subExpression, long offset, int maxNums)
-        throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+            throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         return this.defaultMQPullConsumerImpl.pullBlockIfNotFound(queueWithNamespace(mq), subExpression, offset, maxNums);
     }
 
     @Override
     public void pullBlockIfNotFound(MessageQueue mq, String subExpression, long offset, int maxNums,
-        PullCallback pullCallback)
-        throws MQClientException, RemotingException, InterruptedException {
+                                    PullCallback pullCallback)
+            throws MQClientException, RemotingException, InterruptedException {
         this.defaultMQPullConsumerImpl.pullBlockIfNotFound(queueWithNamespace(mq), subExpression, offset, maxNums, pullCallback);
     }
 
@@ -392,7 +420,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
 
     @Override
     public MessageExt viewMessage(String topic,
-        String uniqKey) throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+                                  String uniqKey) throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         try {
             MessageDecoder.decodeMessageId(uniqKey);
             return this.viewMessage(uniqKey);
@@ -404,7 +432,7 @@ public class DefaultMQPullConsumer extends ClientConfig implements MQPullConsume
 
     @Override
     public void sendMessageBack(MessageExt msg, int delayLevel, String brokerName, String consumerGroup)
-        throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
+            throws RemotingException, MQBrokerException, InterruptedException, MQClientException {
         msg.setTopic(withNamespace(msg.getTopic()));
         this.defaultMQPullConsumerImpl.sendMessageBack(msg, delayLevel, brokerName, consumerGroup);
     }

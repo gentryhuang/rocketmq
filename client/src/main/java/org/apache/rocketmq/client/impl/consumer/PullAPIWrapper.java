@@ -51,7 +51,9 @@ import org.apache.rocketmq.common.sysflag.PullSysFlag;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
- * pull与Push在RocketMQ中，其实就只有Pull模式，所以Push其实就是用pull封装一下
+ * 1 pull与Push在RocketMQ中，其实就只有Pull模式，所以Push其实就是用pull封装一下，在消费端开启一个线程 PullMessageService 循环向 Broker 拉取消息，
+ * 一次拉取任务结束后，默认立即发起另一次拉取操作，实现准实时自动拉取。
+ * 2 push 模式是基于发布订阅模式的，pull 模式是基于消息队列模式的。
  */
 public class PullAPIWrapper {
     private final InternalLogger log = ClientLogger.getLog();

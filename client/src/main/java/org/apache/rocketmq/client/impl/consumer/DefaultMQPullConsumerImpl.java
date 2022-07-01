@@ -68,6 +68,15 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
+ * PULL 模式下的消费者实例
+ * 说明，PUSH 和 PULL 模式的区别：
+ * 1 PULL 模式不支持订阅表达式，仅支持注册（订阅）主题；
+ * 2 PULL 模式下根据消息队列拉取消息的方法和 PUSH 模式走的逻辑是一样的，唯一区别是 PULL 模式拉取需要应用程序控制；
+ * 3 PUSH 模式，消费者进行订阅，然后自动进行集群内消息队列的动态负载，自动拉取消息，准实时；
+ * 4 PULL 模式，消费者注册主题，然后自动进行集群内存消费队列的动态负载，消息消费队列分配好了，但是不会自动拉取消息，需要由业务方根据消费者分配到的队列主动拉取消息。
+ * 项目中一般采用 PUSH 模式，PUSH 模式是推拉的结合，其中 PULL 模式已经不推荐使用了。
+ *
+ * <p>
  * This class will be removed in 2022, and a better implementation {@link DefaultLitePullConsumerImpl} is recommend to use
  * in the scenario of actively pulling messages.
  */
@@ -644,26 +653,30 @@ public class DefaultMQPullConsumerImpl implements MQConsumerInner {
 
                 this.checkConfig();
 
+                // 根据订阅的主题，构建订阅信息，注意没有订阅表达式，这个和 Push 模式不同
                 this.copySubscription();
 
                 if (this.defaultMQPullConsumer.getMessageModel() == MessageModel.CLUSTERING) {
                     this.defaultMQPullConsumer.changeInstanceNameToPID();
                 }
 
-                // 创建 mqclient 对象
+                // 创建 客户端实例 对象
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQPullConsumer, this.rpcHook);
 
+                // 填充消息队列均衡器
                 this.rebalanceImpl.setConsumerGroup(this.defaultMQPullConsumer.getConsumerGroup());
                 this.rebalanceImpl.setMessageModel(this.defaultMQPullConsumer.getMessageModel());
                 this.rebalanceImpl.setAllocateMessageQueueStrategy(this.defaultMQPullConsumer.getAllocateMessageQueueStrategy());
                 this.rebalanceImpl.setmQClientFactory(this.mQClientFactory);
 
-                // 注册过滤消息钩子方法
+                // 创建拉取消息的 API 对象，该对象封装了具体拉取消息的逻辑。
+                // PULL、PUSH 模式最终都会调用 PullAPIWrapper 类的方法从 Broker 拉取消息。
                 this.pullAPIWrapper = new PullAPIWrapper(
                         mQClientFactory,
                         this.defaultMQPullConsumer.getConsumerGroup(), isUnitMode());
                 this.pullAPIWrapper.registerFilterMessageHook(filterMessageHookList);
 
+                // 创建消费进度管理器对象
                 if (this.defaultMQPullConsumer.getOffsetStore() != null) {
                     this.offsetStore = this.defaultMQPullConsumer.getOffsetStore();
                 } else {
@@ -684,6 +697,7 @@ public class DefaultMQPullConsumerImpl implements MQConsumerInner {
                 // offset 加载
                 this.offsetStore.load();
 
+                // 保存当前消费者实例到客户端实例中
                 boolean registerOK = mQClientFactory.registerConsumer(this.defaultMQPullConsumer.getConsumerGroup(), this);
                 if (!registerOK) {
                     this.serviceState = ServiceState.CREATE_JUST;
@@ -693,7 +707,16 @@ public class DefaultMQPullConsumerImpl implements MQConsumerInner {
                             null);
                 }
 
+                /**
+                 *  启动客户端实例
+                 *  特别说明：
+                 *   既然 Pull 模式无需自动拉取消息，但 PullMessageService 线程（消息拉取）+ RebalanceService 线程（消息队列负载）这个两个线程就没必要启动，这里启动了，会不会带来问题？
+                 *   答案是不会，因为虽然 PullMessageService 线程启动，但是一开始会在获取拉取任务(PullRequest)，PullRequest 是由 RebalanceService 产生，它根据主题消息队列个数和当前消费组内消费者个数进行负载，
+                 *   然后产生对应的 PullRequest 对象，再将这些对象放入到 PullMessageService 的 pullRequestQueue 队列。但是 RebalanceImpl#dispatchPullRequest(final List < PullRequest>pullRequestList) 是
+                 *   没有放的。也就是 PullMessageService 只为 PUSH 模式服务。
+                 */
                 mQClientFactory.start();
+
                 log.info("the consumer [{}] start OK", this.defaultMQPullConsumer.getConsumerGroup());
                 this.serviceState = ServiceState.RUNNING;
                 break;
