@@ -129,7 +129,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
         /*--- 消费者向 Broker 发起消息拉取请求时，如果broker上并没有存在该消费组的订阅消息时，
               如果不允许自动创建(autoCreateSubscriptionGroup 设置为 false)，默认为true，则不会返回消息给客户端 -----*/
 
-        // todo 校验 consumer 分组配置是否存在。当不存在时，如果允许自动创建则根据当前 consumerGroup 创建一个基本的消费组配置信息
+        // todo 校验 consumer 分组配置是否存在。当不存在时，如果允许自动创建则根据当前 consumerGroup 创建一个基本的消费组配置信息.
+        // 目前好像只有控制台可以修改，程序中都是自动创建。
         SubscriptionGroupConfig subscriptionGroupConfig =
                 this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getConsumerGroup());
 
@@ -538,7 +539,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     break;
 
                 /**
-                 * 消息拉取长轮询机制分析：
+                 * 消息拉取长轮询机制分析 - 所谓轮询就是不停地判断拉取消息的请求的逻辑偏移量和消息队列最大逻辑偏移量的大小关系，大于消息消费队列的最大偏移量时才挂起，一旦检测发现待拉取消息偏移量小于消费队列最大偏移量时，则尝试拉取消息，结束长轮询过程。
+                 *
                  * 1 RocketMQ未真正实现消息推模式，而是消费者主动向消息服务器拉取消息，RocketMQ推模式是循环向消息服务端发起消息拉取请求
                  * 2 消息未到达消费队列时，如果不启用长轮询机制，则会在服务端等待shortPollingTimeMills时间后再去判断消息是否已经到达指定消息队列，
                  *   如果消息仍未到达则提示拉取消息客户端PULL—NOT—FOUND（消息不存在）；
@@ -557,7 +559,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                         long pollingTimeMills = suspendTimeoutMillisLong;
 
                         // 没有开启长轮询，就使用短轮询时间
-                        // 默认时开启的
+                        // 默认是开启的
                         if (!this.brokerController.getBrokerConfig().isLongPollingEnable()) {
                             // 默认为1000ms作为下一次拉取消息的等待时间。
                             pollingTimeMills = this.brokerController.getBrokerConfig().getShortPollingTimeMills();
@@ -575,8 +577,9 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                                 pollingTimeMills,
                                 this.brokerController.getMessageStore().now(),
                                 offset, // 待拉取消息的逻辑偏移量
-                                subscriptionData,
-                                messageFilter);
+                                subscriptionData, // 订阅信息
+                                messageFilter // 消息过滤器，在获取消息前，快速过滤无效消息索引
+                        );
 
                         // todo 添加到挂起请求队列，等待后续重新拉取
                         this.brokerController.getPullRequestHoldService().suspendPullRequest(topic, queueId, pullRequest);

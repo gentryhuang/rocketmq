@@ -2612,7 +2612,7 @@ public class DefaultMessageStore implements MessageStore {
 
         /**
          * 重放消息的 CommitLog 物理偏移：
-         * 1）该值的初始化值是在 Broker 启动时赋予的
+         * 1）该值的初始化值是在 Broker 启动时赋予的，是个绝对正确的物理偏移量。
          * 2）随着重放消息的过程，该值会不断推进
          */
         private volatile long reputFromOffset = 0;
@@ -2776,7 +2776,7 @@ public class DefaultMessageStore implements MessageStore {
                         result.release();
                     }
 
-                    // 没有找到数据，结束 doReput 方法
+                    // 没有找到数据，结束 doReput 方法，等待下次继续执行
                 } else {
                     doNext = false;
                 }
@@ -2793,6 +2793,7 @@ public class DefaultMessageStore implements MessageStore {
             while (!this.isStopped()) {
                 try {
 
+                    // 每休息 1 毫秒，就继续抢占 CPU ，可以认为是实时的
                     Thread.sleep(1);
 
                     // 每处理一次 doReput() 方法，休眠 1 毫秒，基本上是一直在转发 commitlog 中的内容到 consumequeue、index
