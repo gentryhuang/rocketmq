@@ -56,10 +56,10 @@ public class TransactionProducer {
         String[] tags = new String[]{"TagA", "TagB", "TagC", "TagD", "TagE"};
 
         // 发送 10 条事务消息
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 1; i++) {
             try {
                 Message msg = new Message(
-                        "TopicTest1234",
+                        "hlb_topic",
                         tags[i % tags.length],
                         "KEY" + i,
                         ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET)

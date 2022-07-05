@@ -190,12 +190,16 @@ public class BrokerConfig {
     /**
      * The minimum time of the transactional message  to be checked firstly, one message only exceed this time interval
      * that can be checked.
+     *
+     * 事务性消息首先被检查的最小时间，一条消息只超过这个时间间隔才能被检查
      */
     @ImportantField
     private long transactionTimeOut = 6 * 1000;
 
     /**
      * The maximum number of times the message was checked, if exceed this value, this message will be discarded.
+     *
+     * 消息被检查的最大次数，如果超过这个值，这条消息将被丢弃。
      */
     @ImportantField
     private int transactionCheckMax = 15;

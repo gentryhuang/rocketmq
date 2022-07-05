@@ -80,7 +80,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
     }
 
     /**
-     * 是否丢弃
+     * 是否丢弃事务消息，即事务消息提交失败，不能被消费者消费
      *
      * @param msgExt
      * @param transactionCheckMax
@@ -101,6 +101,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
             }
         }
 
+        // 在消息属性TRANSACTION_CHECK_TIMES中增 1
         msgExt.putUserProperty(MessageConst.PROPERTY_TRANSACTION_CHECK_TIMES, String.valueOf(checkTime));
         return false;
     }
@@ -174,7 +175,6 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
      * 1 一条一条拉取(消费进度)，如果在op队列，就是已经commit或者rollback的，不用再管了，否则就检查是否需要回查，需要的话，这条需再写回half队列
      * 2 从 op 队列里确认事务状态，是根据 op 队列里拉取的消息的消息体（保存的是事务半消息的逻辑偏移量）来判断当前偏移的事务消息是否已经处理过了。
      *
-     *
      * @param transactionTimeout  检查事务消息的最小时间，只有一条消息超过了可以检查的时间间隔。
      * @param transactionCheckMax 最大回查次数
      * @param listener            When the message is considered to be checked or discarded, the relative method of this class will
@@ -195,7 +195,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
 
             log.debug("Check topic={}, queues={}", topic, msgQueues);
 
-            // 遍历 Half MessageQueue ，具体逻辑如下：
+            // 遍历 Half MessageQueue ，其实就一个，具体逻辑如下：
             // 1 将 Half 消息与 OP 消息对比，如果 OP 中包含该消息，则不回查
             // 如果不包含，并且 Half 中的该消息存储时间超过了限制时间或最后一条 Op 的存储时间超过了事务超时时间，则进行回查
             for (MessageQueue messageQueue : msgQueues) {
@@ -206,9 +206,11 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 MessageQueue opQueue = getOpQueue(messageQueue);
 
                 // 获取 Half 消息队列的当前消费进度（逻辑偏移量）
+                // todo Half 消息队列消费进度，只会在回查的时候更新
                 long halfOffset = transactionalMessageBridge.fetchConsumeOffset(messageQueue);
 
                 // 获取 OP 队列的当前消费进度（逻辑偏移量）
+                // todo OP 消息队列消费进度，只会在回查的时候更新
                 long opOffset = transactionalMessageBridge.fetchConsumeOffset(opQueue);
                 log.info("Before check, the queue={} msgOffset={} opOffset={}", messageQueue, halfOffset, opOffset);
                 if (halfOffset < 0 || opOffset < 0) {
@@ -219,8 +221,9 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
 
                 // op 队列的消息 offset
                 List<Long> doneOpOffset = new ArrayList<>();
+
                 // removeMap 表示哪些 half（通过逻辑偏移量 offset 标志） 不需要再回查了（half 消息已经有对应的 op 消息了）
-                // key: half 消息逻辑偏移量 offset
+                // key: 已经完成的 half 消息逻辑偏移量 offset
                 // value: op 消息逻辑偏移量 offset
                 HashMap<Long, Long> removeMap = new HashMap<>();
 
@@ -232,6 +235,9 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                  * 并把不需要回查的 half 消息的进度以及保存该进度的 op 消息的进度添加到 removeMap 中
                  * 2 基于 halfOffset 判断仍需要回查的当前 op 消息的进度添加到 doneOpOffset 集合中
                  * 3 返回 pullResult 是批量拉取的 op 消息
+                 * todo 为了避免重复调用事务回查接口，前置将已经处理好的 half 消息使用 op 消息过滤掉，过滤的条件是根据当前 half 队列的逻辑偏移量，
+                 * 只要 op 消息存储的逻辑偏移量 >= 该偏移量，就说明该 half 偏移量的 half 消息已经被处理了。从这里看就会过滤 halfOffset 这一个逻辑偏移，但是从后面可以知道，在向消息生产放回查之前，该 half 消息会
+                 * 被重新放入存储的，
                  */
                 PullResult pullResult = fillOpRemoveMap(removeMap, opQueue, opOffset, halfOffset, doneOpOffset);
                 if (null == pullResult) {
@@ -244,12 +250,14 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 // 空消息的次数
                 int getMessageNullCount = 1;
 
-                // todo RMQ_SYS_TRANS_HALF_TOPIC#queueId的最新偏移量，表示 half 消息队列最新消费进度
+                // todo RMQ_SYS_TRANS_HALF_TOPIC#queueId 的最新偏移量，表示 half 消息队列最新消费进度
                 long newOffset = halfOffset;
 
                 // RMQ_SYS_TRANS_HALF_TOPIC 的 Half 队列的当前消费进度
                 long i = halfOffset;
-                // 不断推进 half 消息进度，用于判断是否需要回查当前进度的 half 消息
+
+
+                // todo  不断推进 half 消息进度，用于判断是否需要回查当前进度的 half 消息
                 while (true) {
 
                     // 每个 half 消息队列的处理时间是 60s
@@ -277,7 +285,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 如果消息为空
                         if (msgExt == null) {
 
-                             // 如果超过空消息次数，直接跳出while循环，结束该消息队列的事务状态回查
+                            // 如果超过空消息次数，直接跳出while循环，结束该消息队列的事务状态回查。默认重试一次
                             if (getMessageNullCount++ > MAX_RETRY_COUNT_WHEN_HALF_NULL) {
                                 break;
                             }
@@ -286,6 +294,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                                 log.debug("No new msg, the miss offset={} in={}, continue check={}, pull result={}", i,
                                         messageQueue, getMessageNullCount, getResult.getPullResult());
                                 break;
+
+                                // 其他原因，则将偏移量i设置为： getResult.getPullResult().getNextBeginOffset()，继续。
                             } else {
                                 log.info("Illegal offset, the miss offset={} in={}, continue check={}, pull result={}",
                                         i, messageQueue, getMessageNullCount, getResult.getPullResult());
@@ -320,7 +330,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 消息已存储的时间
                         long valueOfCurrentMinusBorn = System.currentTimeMillis() - msgExt.getBornTimestamp();
 
-                        // 检测事务状态的时间即开始回查的时间，事务提交后需要一段时间才能开启回查，默认是6秒
+                        // 检测事务状态的时间即开始回查的时间，事务提交后需要一段时间才能开启回查，默认是6min
                         long checkImmunityTime = transactionTimeout;
 
                         //获取用户自定义的回查时间
@@ -356,19 +366,28 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 需要回查
                         if (isNeedCheck) {
 
-                            // todo 为了保证消息顺序写入，需要将半消息重新填入 half 队列中
+                            /**
+                             * todo 特别说明：
+                             * 1 为了保证回查成功，需要将半消息重新填入 half 队列中；
+                             * 2 发送具体的事务回查机制，这里用一个线程池来异步发送回查消息，为了回查进度保存的简化，这里只要发送了回查消息，当前回查进度会向前推动，如果回查失败，上一步骤新增的消息将可以再次发送回查消息。
+                             *   那如果回查消息发送成功，那会不会下一次又重复发送回查消息呢？
+                             *   答：这个可以根据OP队列中的消息来判断是否重复，如果回查消息发送成功并且消息服务器完成提交或回滚操作，这条消息会发送到OP队列中，
+                             *   然后首先会通过fillOpRemoveMap根据 op 中记录的处理进度获取一批已处理的 half 消息，这样就可以过滤掉了。
+                             */
                             if (!putBackHalfMsgQueue(msgExt, i)) {
                                 continue;
                             }
 
-                            // todo 事务回查，确认状态，其中 msgExt 中的 CommitLog 偏移量和 ConsumeQueue 逻辑偏移量都是最新的，上面 putBackHalfMsgQueue 方法执行的结果
-                            // todo 因为回查的方式是 oneway 方式，可能会失败，因此上面的重写入 msgExt 是必要的，在写入消息的时候 TRANSACTION_CHECK_TIMES 回查次数也会写入
+                            // todo 事务回查，确认状态，其中 msgExt 中的 CommitLog 偏移量和 ConsumeQueue 逻辑偏移量都是最新的，是上面 putBackHalfMsgQueue 方法执行的结果
+                            // todo 因为回查的方式是 oneway 方式，可能会失败，因此上面的重写入 msgExt 是必要的，在写入消息的时候 TRANSACTION_CHECK_TIMES 回查次数也会写入；此外，
+                            // 如果这个新消息的回查成功，那么之前的 half 消息也回认为是成功的，原因在于 op 消息中记录的是这个新消息的逻辑偏移量，只要 half 消息的逻辑偏移量 < op 消息中存储的逻辑偏移量，
+                            // 就可以认为 half 消息已经处理过了。
                             listener.resolveHalfMsg(msgExt);
 
-                            // 不需要回查
+                            // 不需要回查，那么就拉取更多 op 消息
                         } else {
 
-                            // 拉取更多的完成的事务消息，也就是 op 消息，继续筛选
+                            // 拉取更多的完成的事务消息，继续使用 op 消息前置过滤，然后继续筛选
                             pullResult = fillOpRemoveMap(removeMap, opQueue, pullResult.getNextBeginOffset(), halfOffset, doneOpOffset);
                             log.debug("The miss offset:{} in messageQueue:{} need to get more opMsg, result is:{}", i,
                                     messageQueue, pullResult);
@@ -380,6 +399,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                     newOffset = i + 1;
                     i++;
                 }
+
+                /*-------------------------- 完成一次回查后，根据情况进行 half 消费队列 和 op 消费队列的消费进度更新 ------------------*/
 
                 // 需要更新事务消息消费进度
                 if (newOffset != halfOffset) {
@@ -425,7 +446,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
     private PullResult fillOpRemoveMap(HashMap<Long, Long> removeMap,
                                        MessageQueue opQueue,
                                        long pullOffsetOfOp,
-                                       long miniOffset, List<Long> doneOpOffset) {
+                                       long miniOffset,
+                                       List<Long> doneOpOffset) {
 
         // 从 OP 队列中读取一定数量的消息，默认最大 32 条
         PullResult pullResult = pullOpMsg(opQueue, pullOffsetOfOp, 32);
@@ -663,11 +685,27 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
         }
     }
 
+    /**
+     * 根据消息物理偏移量查找消息，这个过程有两步：
+     * 1 先根据物理偏移量读取 4 个字节的内容，该内容就是一个消息的大小 size
+     * 2 根据物理偏移量读取 size 大小的内容，此时就是消息
+     *
+     * @param requestHeader Commit message request header.
+     * @return
+     */
     @Override
     public OperationResult commitMessage(EndTransactionRequestHeader requestHeader) {
         return getHalfMessageByOffset(requestHeader.getCommitLogOffset());
     }
 
+    /**
+     * 根据消息物理偏移量查找消息，这个过程有两步：
+     * 1 先根据物理偏移量读取 4 个字节的内容，该内容就是一个消息的大小 size
+     * 2 根据物理偏移量读取 size 大小的内容，此时就是消息
+     *
+     * @param requestHeader Prepare message request header.
+     * @return
+     */
     @Override
     public OperationResult rollbackMessage(EndTransactionRequestHeader requestHeader) {
         return getHalfMessageByOffset(requestHeader.getCommitLogOffset());

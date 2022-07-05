@@ -23,7 +23,7 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
 /**
- * 半消息事务回查任务
+ * 半消息事务回查线程任务
  * 说明：
  * 默认每隔 1min 分钟去检测 RMQ_SYS_TRANS_HALF_TOPIC 主题中的消息，回查消息的事务状态。
  */
@@ -54,12 +54,13 @@ public class TransactionalMessageCheckService extends ServiceThread {
         log.info("End transaction check service thread!");
     }
 
+
     @Override
     protected void onWaitEnd() {
-        // 获取事务过期时间
+        // 获取事务过期时间，只有超过该时间才会检查。默认 6min
         long timeout = brokerController.getBrokerConfig().getTransactionTimeOut();
 
-        // 最大 Ceck 次数，默认 15
+        // 最大 check 次数，默认 15。超过检测次数，消息会默认丢弃
         int checkMax = brokerController.getBrokerConfig().getTransactionCheckMax();
         long begin = System.currentTimeMillis();
         log.info("Begin to check prepare message, begin time:{}", begin);

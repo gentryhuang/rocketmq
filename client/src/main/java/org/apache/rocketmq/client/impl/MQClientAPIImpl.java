@@ -846,13 +846,17 @@ public class MQClientAPIImpl {
             }
             uniqMsgId = sb.toString();
         }
+
+        // 发送消息的响应对象
         SendResult sendResult = new SendResult(
                 sendStatus,
                 uniqMsgId,
-                responseHeader.getMsgId(),
+                responseHeader.getMsgId(), // Broker 端的MsgId
                 messageQueue,
                 responseHeader.getQueueOffset()
         );
+
+        // 事务ID
         sendResult.setTransactionId(responseHeader.getTransactionId());
         String regionId = response.getExtFields().get(MessageConst.PROPERTY_MSG_REGION);
         String traceOn = response.getExtFields().get(MessageConst.PROPERTY_TRACE_SWITCH);

@@ -72,7 +72,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         final EndTransactionRequestHeader requestHeader =
                 (EndTransactionRequestHeader) request.decodeCommandCustomHeader(EndTransactionRequestHeader.class);
         LOGGER.debug("Transaction request:{}", requestHeader);
-        // 从节点不处理
+        // 从节点不处理结束事务请求
         if (BrokerRole.SLAVE == brokerController.getMessageStoreConfig().getBrokerRole()) {
             response.setCode(ResponseCode.SLAVE_NOT_AVAILABLE);
             LOGGER.warn("Message store is slave mode, so end transaction is forbidden. ");
@@ -118,7 +118,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         } else {
             // 事务状态
             switch (requestHeader.getCommitOrRollback()) {
-                // 未知
+                // 未知不处理，打印日志即可，后续有反查
                 case MessageSysFlag.TRANSACTION_NOT_TYPE: {
                     LOGGER.warn("The producer[{}] end transaction in sending message,  and it's pending status."
                                     + "RequestHeader: {} Remark: {}",
@@ -158,20 +158,20 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         // 如果请求是提交事务，进入事务消息提交处理流程
         if (MessageSysFlag.TRANSACTION_COMMIT_TYPE == requestHeader.getCommitOrRollback()) {
 
-            // 根据之前提交的半消息的 offset 从 CommitLog 文件中查找消息
+            // 根据之前提交的半消息的物理偏移量 commitLogOffset 从 CommitLog 文件中查找该条消息
             // requestHeader 中包含 commitLogOffset
             result = this.brokerController.getTransactionalMessageService().commitMessage(requestHeader);
 
             if (result.getResponseCode() == ResponseCode.SUCCESS) {
 
-                // 字段检查：检查下这条信息是否正确，消息偏移量、生产者组什么的是否匹配，是不是查错消息了
+                // 字段检查：检查下这条信息是否正确，消息偏移量（消费队列逻辑偏移量，消息物理偏移量）、生产者组什么的是否匹配，是不是查错消息了
                 // result.getPrepareMessage() 就是之前存储到 Broker 的半消息。
                 RemotingCommand res = checkPrepareMessage(result.getPrepareMessage(), requestHeader);
 
                 // 根据备份信息重新构造消息并投递
                 if (res.getCode() == ResponseCode.SUCCESS) {
 
-                    // 恢复事务消息的真实的主题、队列、并设置事务ID
+                    // 恢复事务消息的真实的主题、队列、并设置事务ID，完成普通消息的构造
                     MessageExtBrokerInner msgInner = endMessageTransaction(result.getPrepareMessage());
 
                     //设置消息的相关属性，取消事务相关的系统标记
@@ -206,7 +206,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
             // 根据 offset 从 CommitLog 中查找消息
             result = this.brokerController.getTransactionalMessageService().rollbackMessage(requestHeader);
             if (result.getResponseCode() == ResponseCode.SUCCESS) {
-                //字段检查
+                //字段检查，确定查对消息
                 RemotingCommand res = checkPrepareMessage(result.getPrepareMessage(), requestHeader);
 
                 // 注意，回滚只是做标记
@@ -291,6 +291,8 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
         msgInner.setStoreHost(msgExt.getStoreHost());
         msgInner.setReconsumeTimes(msgExt.getReconsumeTimes());
         msgInner.setWaitStoreMsgOK(false);
+
+        // 事务ID
         msgInner.setTransactionId(msgExt.getUserProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX));
         msgInner.setSysFlag(msgExt.getSysFlag());
         TopicFilterType topicFilterType =

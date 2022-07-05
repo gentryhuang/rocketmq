@@ -184,6 +184,7 @@ public class BrokerController {
 
     // 事务消息服务
     private TransactionalMessageService transactionalMessageService;
+
     private AbstractTransactionalMessageCheckListener transactionalMessageCheckListener;
     private Future<?> slaveSyncFuture;
     private Map<Class, AccessValidator> accessValidatorMap = new HashMap<Class, AccessValidator>();
@@ -576,7 +577,7 @@ public class BrokerController {
             }
 
 
-            // 10 todo 事务消息相关类的创建
+            // 10 todo 事务消息相关类的创建 - 初始化事务消息环境
             initialTransaction();
 
             // 11 ACL 相关逻辑
@@ -587,18 +588,27 @@ public class BrokerController {
         return result;
     }
 
+    /**
+     * 初始化事务消息环境
+     */
     private void initialTransaction() {
+
+        // 创建事务消息服务
         this.transactionalMessageService = ServiceProvider.loadClass(ServiceProvider.TRANSACTION_SERVICE_ID, TransactionalMessageService.class);
         if (null == this.transactionalMessageService) {
             this.transactionalMessageService = new TransactionalMessageServiceImpl(new TransactionalMessageBridge(this, this.getMessageStore()));
             log.warn("Load default transaction message hook service: {}", TransactionalMessageServiceImpl.class.getSimpleName());
         }
+
+        // 创建事务消息回查回调
         this.transactionalMessageCheckListener = ServiceProvider.loadClass(ServiceProvider.TRANSACTION_LISTENER_ID, AbstractTransactionalMessageCheckListener.class);
         if (null == this.transactionalMessageCheckListener) {
             this.transactionalMessageCheckListener = new DefaultTransactionalMessageCheckListener();
             log.warn("Load default discard message hook service: {}", DefaultTransactionalMessageCheckListener.class.getSimpleName());
         }
         this.transactionalMessageCheckListener.setBrokerController(this);
+
+        // 创建半消息事务回查线程任务
         this.transactionalMessageCheckService = new TransactionalMessageCheckService(this);
     }
 

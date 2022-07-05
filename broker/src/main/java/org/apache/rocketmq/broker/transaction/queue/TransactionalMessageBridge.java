@@ -415,7 +415,7 @@ public class TransactionalMessageBridge {
         msgInner.setStoreHost(this.storeHost);
         msgInner.setWaitStoreMsgOK(false);
 
-        // 甚至唯一ID UNIQ_KEY
+        // 唯一ID UNIQ_KEY
         MessageClientIDSetter.setUniqID(msgInner);
         return msgInner;
     }

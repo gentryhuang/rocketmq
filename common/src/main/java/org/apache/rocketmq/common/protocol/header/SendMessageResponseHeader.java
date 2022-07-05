@@ -25,12 +25,24 @@ import org.apache.rocketmq.remoting.annotation.CFNotNull;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class SendMessageResponseHeader implements CommandCustomHeader {
+    /**
+     * Broker 端的消息特别信息
+     */
     @CFNotNull
     private String msgId;
+    /**
+     * 发送消息时使用的消费队列 ID
+     */
     @CFNotNull
     private Integer queueId;
+    /**
+     * 消息在消费队列中的逻辑偏移量
+     */
     @CFNotNull
     private Long queueOffset;
+    /**
+     * 如果是事务消息，那么该值有意义
+     */
     private String transactionId;
 
     @Override

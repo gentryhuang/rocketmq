@@ -35,6 +35,8 @@ public class SendResult {
      */
     private long queueOffset;
     private String transactionId;
+
+
     private String offsetMsgId;
     private String regionId;
     private boolean traceOn = true;

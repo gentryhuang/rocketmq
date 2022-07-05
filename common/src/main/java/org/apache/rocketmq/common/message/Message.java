@@ -36,7 +36,7 @@ public class Message implements Serializable {
      */
     private int flag;
     /**
-     * 保存 Tags、keys、delevelLevel 等属性都存在这个 map 中
+     * 保存 Tags、keys、delevelLevel，以及主题和队列ID替换 等属性都存在这个 map 中
      */
     private Map<String, String> properties;
     /**

@@ -1152,7 +1152,8 @@ public class DefaultMessageStore implements MessageStore {
             try {
                 // 1 TOTALSIZE ，消息的长度
                 int size = sbr.getByteBuffer().getInt();
-                // 根据消息大小获取消息
+
+                // 根据物理偏移量和消息大小获取消息
                 return lookMessageByOffset(commitLogOffset, size);
             } finally {
                 sbr.release();

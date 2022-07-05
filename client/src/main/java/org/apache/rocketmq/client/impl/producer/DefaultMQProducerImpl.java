@@ -118,6 +118,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     private final ExecutorService defaultAsyncSenderExecutor;
     private final Timer timer = new Timer("RequestHouseKeepingService", true);
     protected BlockingQueue<Runnable> checkRequestQueue;
+    /**
+     * 事务状态回查线程池
+     */
     protected ExecutorService checkExecutor;
     /**
      * 服务状态:
@@ -402,7 +405,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     public void checkTransactionState(final String addr, final MessageExt msg,
                                       final CheckTransactionStateRequestHeader header) {
 
-        // 回查本地事务状态任务
+        // 回查本地事务状态任务，交给回查线程池处理
         Runnable request = new Runnable() {
             private final String brokerAddr = addr;
             private final MessageExt message = msg;
@@ -945,6 +948,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     /**
      * 发送消息核心方法- 该方法会真正使用网络发起请求
      * 说明：该方法真正发起网络请求，发送消息给 Broker
+     * <p>
+     * todo 发送消息选择的都是主节点
      *
      * @param msg               待发送消息
      * @param mq                消息将发送到该消息队列上
@@ -966,7 +971,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                                       final long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         long beginStartTime = System.currentTimeMillis();
 
-        // 根据 mq 所属于的 BrokerName 获取 broker 地址
+        // 根据 mq 所属于的 BrokerName 获取 broker 地址，注意选择的是主 Broker
         String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(mq.getBrokerName());
         if (null == brokerAddr) {
             // 根据 topic 找到发布信息，即更新
@@ -1590,12 +1595,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      *
      * @param msg                      消息
      * @param localTransactionExecuter 本地事务执行器
-     * @param arg                      本地事务执行器参数
+     * @param arg                      本地事务执行器参数，即 listener 的参数
      * @return 事务消息发送结果
      * @throws MQClientException
      */
     public TransactionSendResult sendMessageInTransaction(final Message msg,
-                                                          final LocalTransactionExecuter localTransactionExecuter, final Object arg)
+                                                          final LocalTransactionExecuter localTransactionExecuter,
+                                                          final Object arg)
             throws MQClientException {
 
         // 判断检查本地事务的 listenner 是否存在
@@ -1607,10 +1613,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         // todo 事务消息不支持延迟消息
         // ignore DelayTimeLevel parameter
         if (msg.getDelayTimeLevel() != 0) {
+            // 移除 msg 中的 DELAY 参数，不支持延迟消息
             MessageAccessor.clearProperty(msg, MessageConst.PROPERTY_DELAY_TIME_LEVEL);
         }
         Validators.checkMessage(msg, this.defaultMQProducer);
-
 
         SendResult sendResult = null;
         // todo 重要： msg设置参数 TRAN_MSG，表示为事务消息，也就是半消息
@@ -1619,9 +1625,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         // todo 设置生产者组为了事务消息回查本地事务状态时，从该生产者组中随机选择一个生产者即可
         MessageAccessor.putProperty(msg, MessageConst.PROPERTY_PRODUCER_GROUP, this.defaultMQProducer.getProducerGroup());
         try {
-            // 1 第一个阶段，调用发送普通消息的方法，发送 Prepare 消息
+            // 1 第一个阶段，调用发送普通消息的方法，同步发送 Prepare 消息到 half 主题下的 0 号队列（只有一个队列）
+            // todo 必须同步发送
             sendResult = this.send(msg);
         } catch (Exception e) {
+            // 发送半消息异常，直接抛出异常
             throw new MQClientException("send message Exception", e);
         }
 
@@ -1629,7 +1637,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         LocalTransactionState localTransactionState = LocalTransactionState.UNKNOW;
         Throwable localException = null;
         switch (sendResult.getSendStatus()) {
-            // 发送 Half 消息成功，执行本地事务，也就是执行业务代码实现
+            // 发送 Half 消息成功，才会执行本地事务，也就是执行业务代码实现。否则不会执行本地事务。
             case SEND_OK: {
                 try {
                     // 事务编号
@@ -1655,7 +1663,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         localTransactionState = transactionListener.executeLocalTransaction(msg, arg);
                     }
 
-                    // 没有返回，则认为是未知
+                    // 返回 null ，则认为是未知
                     if (null == localTransactionState) {
                         localTransactionState = LocalTransactionState.UNKNOW;
                     }
@@ -1664,6 +1672,8 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         log.info("executeLocalTransactionBranch return {}", localTransactionState);
                         log.info(msg.toString());
                     }
+
+                    // 本地事务处理异常
                 } catch (Throwable e) {
                     log.info("executeLocalTransactionBranch exception", e);
                     log.info(msg.toString());
@@ -1672,7 +1682,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             }
             break;
 
-            // 发送 Half 消息失败，标记本地事务状态为回滚
+            // 发送 Half 消息失败，则标记本地事务状态为回滚
             case FLUSH_DISK_TIMEOUT:
             case FLUSH_SLAVE_TIMEOUT:
             case SLAVE_NOT_AVAILABLE:
@@ -1683,19 +1693,16 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         }
 
 
-        // 3 发送确认消息，即将请求发往broker(mq server)去更新事务消息的最终状态
-        // - 根据 sendResult 找到 Prepare 消息，sendResult 包含事务消息的ID
-        // - 根据 localTransaction 更新消息的最终状态
+        // 3 发送确认消息，即将请求发往 broker(mq server) 去更新事务消息的最终状态，使用 op 消息打标
         // 如果 endTransaction 方法执行失败，数据没有发送到 Broker，导致事务消息的状态更新失败，Broker 会有回查线程定时（默认1分钟）扫描每个存储事务消息的文件，
         // 如果已经提交或者回滚的消息直接跳过，如果是 prepared 状态则会向 Producer 发起 CheckTransaction 请求，Producer会调用DefaultMQProducerImpl.checkTransactionState()方法来处理broker的定时回调请求，
-        // 而checkTransactionState会调用我们的事务设置的决断方法来决定是回滚事务还是继续执行，最后调用endTransactionOneway让broker来更新消息的最终状态。
-
+        // 而checkTransactionState会调用我们的事务设置的决断方法来决定是回滚事务还是继续执行，最后调用 endTransactionOneway 让 broker 来更新消息的最终状态（op 消息打标）。
 
         // 结束事务，根据事务消息发送的结果和本地事务执行情况，决定是 COMMIT 还是 ROLLBACK
         try {
             // 执行endTransaction方法
-            // - 如果半消息发送失败或本地事务执行失败告诉服务端是删除半消息，
-            // - 半消息发送成功且本地事务执行成功则告诉服务端生效半消息
+            // - 如果半消息发送失败或本地事务执行失败告诉服务端是删除半消息（打标），
+            // - 半消息发送成功且本地事务执行成功则告诉服务端生效半消息（打标）。
             // - 如果是未知状态，等待回查即可
             this.endTransaction(msg, sendResult, localTransactionState, localException);
         } catch (Exception e) {
@@ -1707,9 +1714,13 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         TransactionSendResult transactionSendResult = new TransactionSendResult();
         transactionSendResult.setSendStatus(sendResult.getSendStatus());
         transactionSendResult.setMessageQueue(sendResult.getMessageQueue());
+
+        // 消息ID
         transactionSendResult.setMsgId(sendResult.getMsgId());
         transactionSendResult.setQueueOffset(sendResult.getQueueOffset());
+        // 事务ID
         transactionSendResult.setTransactionId(sendResult.getTransactionId());
+        // 本地事务执行状态
         transactionSendResult.setLocalTransactionState(localTransactionState);
         return transactionSendResult;
     }
@@ -1756,7 +1767,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 获取事务id
         String transactionId = sendResult.getTransactionId();
-        // todo 半消息发到了哪个broker上，最后提交也得到这个 broker上
+        // todo 半消息发到了哪个broker上，最后提交也得到这个 broker上（发送消息时使用的都是主 Broker)
         final String brokerAddr = this.mQClientFactory.findBrokerAddressInPublish(sendResult.getMessageQueue().getBrokerName());
 
         // 创建请求
@@ -1769,7 +1780,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         /**
          * 两段式协议发送与提交/回滚消息：
          * 1 执行完本地事务消息的状态为 UNKNOW 时，结束事务不做任何操作。
-         * 即 Broker 端由 EndTransactionProcessor 不对 UNKNOW 映射的 TRANSACTION_NOT_TYPE 进行处理。通过  TransactionalMessageCheckService 线程定时去检测RMQ_SYS_TRANS_HALF_TOPIC主题中的消息，
+         * 即 Broker 端由 EndTransactionProcessor 不对 UNKNOW 映射的 TRANSACTION_NOT_TYPE 进行处理。而是通过  TransactionalMessageCheckService 线程定时去检测 RMQ_SYS_TRANS_HALF_TOPIC主题中的消息，
          *   回查消息的事务状态。
          */
         switch (localTransactionState) {
@@ -1791,8 +1802,12 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // Hook
         doExecuteEndTransactionHook(msg, sendResult.getMsgId(), brokerAddr, localTransactionState, false);
+
+        // 生产者组
         requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
+        // 消息在 messageQueue 中的逻辑偏移量
         requestHeader.setTranStateTableOffset(sendResult.getQueueOffset());
+        // 消息 ID
         requestHeader.setMsgId(sendResult.getMsgId());
         String remark = localException != null ? ("executeLocalTransactionBranch exception: " + localException.toString()) : null;
 

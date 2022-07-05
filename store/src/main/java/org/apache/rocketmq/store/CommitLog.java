@@ -1559,7 +1559,7 @@ public class CommitLog {
      * 主要根据物理偏移量，找到所在的commitlog文件，commitlog文件封装成MappedFile(内存映射文件)，然后直接从偏移量开始，读取指定的字节（消息的长度），
      * 要是事先不知道消息的长度，只知道offset呢？其实也简单，先找到MapFile,然后从offset处先读取4个字节，就能获取该消息的总长度。
      *
-     * @param offset 物理便宜量
+     * @param offset 物理偏移量
      * @param size   消息大小
      * @return
      */
@@ -2299,7 +2299,7 @@ public class CommitLog {
                     AppendMessageStatus.PUT_OK,
                     wroteOffset,
                     msgLen,
-                    msgId,
+                    msgId, // 消息ID
                     msgInner.getStoreTimestamp(),
                     queueOffset,
                     CommitLog.this.defaultMessageStore.now() - beginTimeMills);

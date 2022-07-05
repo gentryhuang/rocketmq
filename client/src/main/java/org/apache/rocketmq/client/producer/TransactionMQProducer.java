@@ -123,6 +123,7 @@ public class TransactionMQProducer extends DefaultMQProducer {
 
         // 消息 Topic 处理
         msg.setTopic(NamespaceUtil.wrapNamespace(this.getNamespace(), msg.getTopic()));
+
         // 发送事务消息
         return this.defaultMQProducerImpl.sendMessageInTransaction(msg, null, arg);
     }

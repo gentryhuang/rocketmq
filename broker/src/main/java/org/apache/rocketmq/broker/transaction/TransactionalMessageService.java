@@ -47,8 +47,7 @@ public interface TransactionalMessageService {
     CompletableFuture<PutMessageResult> asyncPrepareMessage(MessageExtBrokerInner messageInner);
 
     /**
-     * 当已提交或回滚此消息时，删除半消息。
-     * 使用 Op 消息记录操作记录
+     * 当已提交或回滚此消息时，删除半消息。即 使用 Op 消息记录操作记录
      * Delete prepare message when this message has been committed or rolled back.
      *
      * @param messageExt
@@ -56,6 +55,8 @@ public interface TransactionalMessageService {
     boolean deletePrepareMessage(MessageExt messageExt);
 
     /**
+     * 根据消息物理偏移量，从 CommitLog 中查找该条消息
+     *
      * Invoked to process commit prepare message.
      *
      * @param requestHeader Commit message request header.

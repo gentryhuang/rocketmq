@@ -149,6 +149,7 @@ public class MQClientInstance {
     /**
      * Topic 路由信息中的 Broker 信息，存储在 NameServer ，缓存在本地客户端，供生产者、消费者共同使用
      * 即 Broker 名字和 Broker 地址相关 Map
+     * todo 客户端和 Broker 通信，需要通过 MessageQueue 中的 BrokerName 结合当前缓存信息，确定具体的 Broker 地址
      */
     private final ConcurrentMap<String/* Broker Name */, HashMap<Long/* brokerId */, String/* address */>> brokerAddrTable = new ConcurrentHashMap<String, HashMap<Long, String>>();
     private final ConcurrentMap<String/* Broker Name */, HashMap<String/* address */, Integer>> brokerVersionTable = new ConcurrentHashMap<String, HashMap<String, Integer>>();
@@ -1293,7 +1294,7 @@ public class MQClientInstance {
     }
 
     /**
-     * 根据 BrokerName 查找对应 Broker 地址
+     * 根据 BrokerName 查找对应 Broker 地址，优先主服务
      *
      * @param brokerName
      * @return

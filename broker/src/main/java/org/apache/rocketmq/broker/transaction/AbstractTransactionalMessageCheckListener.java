@@ -71,6 +71,8 @@ public abstract class AbstractTransactionalMessageCheckListener {
      * @throws Exception
      */
     public void sendCheckMessage(MessageExt msgExt) throws Exception {
+
+        // 构建事务消息回查请求，请求核心参数包括：消息offsetId、消息ID(索引)、消息事务ID、事务消息队列中的偏移量（RMQ_SYS_TRANS_HALF_TOPIC）
         CheckTransactionStateRequestHeader checkTransactionStateRequestHeader = new CheckTransactionStateRequestHeader();
         checkTransactionStateRequestHeader.setCommitLogOffset(msgExt.getCommitLogOffset());
         checkTransactionStateRequestHeader.setOffsetMsgId(msgExt.getMsgId());
@@ -87,6 +89,8 @@ public abstract class AbstractTransactionalMessageCheckListener {
         String groupId = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
 
         /**
+         * 根据生产者组获取任意一个生产者，通过与其连接发送事务回查消息，回查消息的请求者为【Broker服务器】，接收者为(client，具体为消息生产者)。
+         *
          *  向 Producer 发送消息
          * @see ClientRemotingProcessor#processRequest(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand)
          */
