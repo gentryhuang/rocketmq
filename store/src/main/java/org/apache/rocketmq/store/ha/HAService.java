@@ -49,18 +49,23 @@ import org.apache.rocketmq.store.PutMessageStatus;
  * RocketMQ HA 机制大体可以分为以下三个部分：
  * 1. Master 启动并监听 Slave 的连接
  * 2. Slave 启动，主动与 Master 建立连接，Master 接收 Slave 的连接，并建立相关 TCP 连接
- * 3. Slave 以每隔 5s 的间隔时间发送待拉取偏移量，等待 Master 返回数据
- * 4. Slave 保存消息并继续发送新的消息同步请求
+ * 3. Slave 以每隔 5s 的间隔时间上报待拉取偏移量，等待 Master 返回数据
+ * 4. Slave 保存消息并继续上报新的消息同步请求
  * todo 主从复制的关键两大步骤：
  * 1 复制工作是由 HAConnection 和 HAClient 完成的。具体是：
  * - 1.1  HAService 启动。根据当前服务器的角色，可能是 Master ，也可能是 Slave
  * - 1.2  Master 会打开通道，监听 Slave 的连接。一旦有 Slave 连接就会封装建立的通道，并启动两个线程任务，分别用于读取从服务器复制消息请求、向从服务器发送复制的消息
  * - 1.3  Slave 会启动线程任务，完成连接 Master、向 Master 上报自己的复制偏移量（向 Master 发送复制请求）、处理 Master 回传的消息并追加到 commitlog 文件中
- * 以上三个过程不停执行，完成 Slave 和 Master 的交互，是想主从复制
+ * 以上三个过程不停执行，完成 Slave 和 Master 的交互，实现主从复制
  * <p>
  * 2 消息发送者执行主从复制
  * - 2.1 这个和真正的主从复制没有关系，严格说这个是判断主从复制是否完成的逻辑。因为主从复制是另一个逻辑完成的。
  * - 2.2 GroupTransferService 用于实现消息生产方等待主从复制完成或超时
+ * - 2.3 主从复制是不依赖外部应用程序的，是 RocketMQ 内部逻辑实现：
+ * - 2.3.1 从服务器使用 HAClient 线程任务和主服务器通信，不断向主服务器上报同步进度以及读取主服务发送的消息并写入到本地；
+ * - 2.3.2 主服务器使用 AcceptSocketService 线程任务接收从服务的连接请求，并创建 HAConnection 封装 Socket；然后通过 HAConnection 对象中的读写线程任务分别完成：
+ * - 2.3.2.1 不断读取从服务器上报的消息复制进度，主要用于主服务器首次同步消息确定发送消息的位置，以及根据从服务上报的复制进度尝试唤醒等待的线程；
+ * - 2.3.2.2 主服务根据自己维护的偏移量，不断拉取消息并发送给从服务器；
  */
 public class HAService {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
@@ -83,6 +88,7 @@ public class HAService {
     private final DefaultMessageStore defaultMessageStore;
     /**
      * 等待-通知对象
+     * 利用 synchronized
      */
     private final WaitNotifyObject waitNotifyObject = new WaitNotifyObject();
     /**
@@ -92,7 +98,7 @@ public class HAService {
     private final AtomicLong push2SlaveMaxOffset = new AtomicLong(0);
 
     /**
-     * 主从复制线程任务
+     * 同步的主从复制线程任务 - 查询复制请求是否完成
      */
     private final GroupTransferService groupTransferService;
 
@@ -101,13 +107,52 @@ public class HAService {
      */
     private final HAClient haClient;
 
+    /**
+     * 创建 HAService
+     * <p>
+     * 主要包括 3 大线程任务，HA 启动时才会启动这 3 大线程任务
+     *
+     * @param defaultMessageStore
+     * @throws IOException
+     * @see DefaultMessageStore#DefaultMessageStore(org.apache.rocketmq.store.config.MessageStoreConfig, org.apache.rocketmq.store.stats.BrokerStatsManager, org.apache.rocketmq.store.MessageArrivingListener, org.apache.rocketmq.common.BrokerConfig)
+     */
     public HAService(final DefaultMessageStore defaultMessageStore) throws IOException {
         this.defaultMessageStore = defaultMessageStore;
+
+        // 主服务器监听从服务器连接的线程任务
+        // todo 主服务器使用
         this.acceptSocketService =
                 new AcceptSocketService(defaultMessageStore.getMessageStoreConfig().getHaListenPort());
+
+        // 主从复制的线程任务 - 查询复制请求是否完成
         this.groupTransferService = new GroupTransferService();
+
+        //  HA 客户端实现，Slave 端网络的实现类
+        // todo 从服务器使用
         this.haClient = new HAClient();
     }
+
+    /**
+     * HAServer 启动流程
+     * todo  注意：不管是 Master 还是 Slave 都将按照上述流程启动，在内部的实现会根据 Broker 配置来决定真正开启的流程
+     *
+     * @throws Exception
+     * @see DefaultMessageStore#start()
+     */
+    public void start() throws Exception {
+        // 1 开启服务端监听，用于处理 Slave 客户端的连接请求。并启动对应的监听线程，处理监听逻辑。
+        // todo 针对 Master 角色
+        this.acceptSocketService.beginAccept();
+        this.acceptSocketService.start();
+
+        // 2 同步的主从复制线程任务 - 查询复制请求是否完成
+        this.groupTransferService.start();
+
+        // 3 启动 HA 客户端线程
+        // todo 针对 Slave 角色
+        this.haClient.start();
+    }
+
 
     public void updateMasterAddress(final String newAddr) {
         if (this.haClient != null) {
@@ -155,26 +200,6 @@ public class HAService {
         return connectionCount;
     }
 
-
-    /**
-     * HAServer 启动流程
-     * todo  注意：不管是 Master 还是 Slave 都将按照上述流程启动，在内部的实现会根据 Broker 配置来决定真正开启的流程
-     *
-     * @throws Exception
-     */
-    public void start() throws Exception {
-        // 1 开启服务端监听，用于处理 Slave 客户端的连接请求。并启动对应的监听线程，处理监听逻辑。
-        // todo 针对 Master 角色
-        this.acceptSocketService.beginAccept();
-        this.acceptSocketService.start();
-
-        // 2 启动复制线程任务
-        this.groupTransferService.start();
-
-        // 3 启动 HA 客户端线程
-        // todo 针对 Slave 角色
-        this.haClient.start();
-    }
 
     public void addConnection(final HAConnection conn) {
         synchronized (this.connectionList) {
@@ -247,20 +272,20 @@ public class HAService {
          * @throws Exception If fails.
          */
         public void beginAccept() throws Exception {
-            // 打开 服务端 Socket 通道
+            // 1 打开 服务端 Socket 通道
             this.serverSocketChannel = ServerSocketChannel.open();
 
             // 创建 Selector
             this.selector = RemotingUtil.openSelector();
             this.serverSocketChannel.socket().setReuseAddress(true);
 
-            // 绑定监听端口
+            // 2 绑定监听端口
             this.serverSocketChannel.socket().bind(this.socketAddressListen);
 
             // 设置为非阻塞模式
             this.serverSocketChannel.configureBlocking(false);
 
-            // 注册连接事件
+            // 3 注册连接事件
             this.serverSocketChannel.register(this.selector, SelectionKey.OP_ACCEPT);
         }
 
@@ -278,8 +303,10 @@ public class HAService {
             }
         }
 
+
         /**
          * 该方法是标准的基于 NIO 的服务端程序实例。
+         * 0 应用程序不断轮询 Selector ，检查是否有准备好的事件
          * 1 选择器每 1s 处理一次连接事件
          * 2 连接事件就绪后，调用 ServerSocketChannel 的 accept() 方法创建 SocketChannel
          * 3 为每个连接创建一个 HAConnection 对象，该 HAConnection 将负责主从数据同步逻辑
@@ -294,10 +321,13 @@ public class HAService {
 
                     // 1 每 1s 处理一次连接就绪事件
                     this.selector.select(1000);
+                    // 检查是否有准备好的事件
                     Set<SelectionKey> selected = this.selector.selectedKeys();
 
+                    // 如果有的话就处理
                     if (selected != null) {
                         for (SelectionKey k : selected) {
+                            // 连接事件
                             if ((k.readyOps() & SelectionKey.OP_ACCEPT) != 0) {
 
                                 // 2 连接事件就绪后，创建 SocketChannel
@@ -348,13 +378,13 @@ public class HAService {
     }
 
     /**
-     * todo 同步复制任务，即GroupTransferService 的职责就是判断主从同步是否结束，而非主从同步逻辑
+     * todo 同步复制任务，即 GroupTransferService 的职责就是判断主从同步是否结束，而非主从同步逻辑。
      * 说明：
      * 1 主从同步阻塞实现，消息发送者将消息刷写到磁盘后，需要继续等待新数据被传输到从服务器
      * 2 todo 从服务器数据的复制是 HAConnection 中的逻辑，具体通过开启两个线程实现的。所以消息发送者在这里需要等待数据传输的结果，即这里去判断 HAConnection 中的结果
      * 3 todo 该类的整体结构与同步刷盘实现类类似
-     * <p>
-     * GroupTransferService Service
+     *
+     * @see CommitLog#handleHA(org.apache.rocketmq.store.AppendMessageResult, org.apache.rocketmq.store.PutMessageResult, org.apache.rocketmq.common.message.MessageExt)
      */
     class GroupTransferService extends ServiceThread {
 
@@ -384,6 +414,9 @@ public class HAService {
             this.wakeup();
         }
 
+        /**
+         * 通知某个阻塞在 notifyTransferObject 上的线程
+         */
         public void notifyTransferSome() {
             this.notifyTransferObject.wakeup();
         }
@@ -398,8 +431,9 @@ public class HAService {
         }
 
         /**
-         * 消息发送者线程提交任务后将被阻塞直到超时或 GroupTransferService 通知唤醒。todo 也就是 GroupTransferService 的职责就是判断主从同步是否结束。
+         * 消息发送者线程提交任务后将被阻塞直到超时或 GroupTransferService 通知唤醒「注意：在同步复制的情况下」。todo 也就是 GroupTransferService 的职责就是判断主从同步是否结束。
          * <p>
+         * 0 todo 对 requestsRead 加锁，顺序处理消息发送者线程提交的 同步主从复制是否完成的查询请求。异步主从复制不会提交该请求。
          * 1 GroupTransferService 负责在主从同步复制结束后，通知由于等待同步结果而阻塞的消息发送者线程。
          * 2 todo 判断主从同步是否完成的依据：从服务器中已成功复制的消息最大偏移量是否大于、等于消息生产者发送消息后消息服务端返回下一条消息的起始偏移量(也就是预期的复制点)。
          * 2.1 如果是，则表示主从同步复制已经完成，唤醒消息发送线程。
@@ -409,7 +443,7 @@ public class HAService {
          * 3.2 GroupTransferService 通知主从复制完成
          */
         private void doWaitTransfer() {
-            // 对 对同步复制队列 加锁，顺序处理消息发送者线程提交的主从复制是否成功的查询请求
+            // 对 读同步复制队列 加锁，顺序处理消息发送者线程提交的主从复制是否成功的查询请求
             synchronized (this.requestsRead) {
 
                 if (!this.requestsRead.isEmpty()) {
@@ -439,7 +473,7 @@ public class HAService {
                             log.warn("transfer messsage to slave timeout, " + req.getNextOffset());
                         }
 
-                        // todo 根据复制结果，尝试唤醒等待的线程
+                        // todo 根据复制结果，尝试唤醒等待的线程：成功或超时
                         req.wakeupCustomer(transferOK ? PutMessageStatus.PUT_OK : PutMessageStatus.FLUSH_SLAVE_TIMEOUT);
                     }
 
@@ -457,7 +491,7 @@ public class HAService {
 
             while (!this.isStopped()) {
                 try {
-                    // 等待 10ms
+                    // 等待 10ms 或被唤醒
                     this.waitForRunning(10);
 
                     // 查询复制是否完成
@@ -482,13 +516,13 @@ public class HAService {
     }
 
     /**
-     * HA 客户端实现
+     * HA 客户端实现 - 读取主服务器发回的消息 & 请求拉取消息或 ACK 消息
      * todo 从服务端的核心实现类，即专门用于从服务器
      */
     class HAClient extends ServiceThread {
 
         /**
-         * Socket 读缓存区大小
+         * Socket 读缓存区大小 4M
          */
         private static final int READ_MAX_BUFFER_SIZE = 1024 * 1024 * 4;
         /**
@@ -508,25 +542,26 @@ public class HAService {
          */
         private Selector selector;
         /**
-         * 上一次写入消息的时间戳，todo 向 主服务器写？
+         * 上一次写入消息的时间戳，todo 向 主服务器上报（拉取）消息后更新该属性
          */
         private long lastWriteTimestamp = System.currentTimeMillis();
         /**
-         * 反馈到主服务器的当前从服务器的复制进度，即 CommitLog 文件的最大偏移量
+         * 反馈到主服务器的当前从服务器的复制进度，即 CommitLog 的最大偏移量（写入即可，不要求刷盘）
+         * <p>
+         * 初始化为从服务器的 CommitLog 的最大物理偏移量
          */
         private long currentReportedOffset = 0;
         /**
          * 本次已处理读缓存区的指针，即 byteBufferRead 中已转发的指针。
          */
         private int dispatchPosition = 0;
-
         /**
          * 读缓存区，大小为 4M
          */
         private ByteBuffer byteBufferRead = ByteBuffer.allocate(READ_MAX_BUFFER_SIZE);
         /**
          * 读缓存区备份，与 byteBufferRead 进行替换。
-         * todo 主要用于 处理 byteBufferRead 中未包含一条完整的消息的处理逻辑
+         * todo 主要用于 处理 byteBufferRead 中未包含一条完整的消息的处理逻辑，然后等待消息完整
          */
         private ByteBuffer byteBufferBackup = ByteBuffer.allocate(READ_MAX_BUFFER_SIZE);
 
@@ -549,7 +584,6 @@ public class HAService {
          * @return
          */
         private boolean isTimeToReportOffset() {
-
             // 距离上次写入消息的时间戳
             long interval =
                     HAService.this.defaultMessageStore.getSystemClock().now() - this.lastWriteTimestamp;
@@ -572,9 +606,10 @@ public class HAService {
          */
         private boolean reportSlaveMaxOffset(final long maxOffset) {
 
-            // 将偏移量写入到 ByteBuffer 中
+            // 设置指针和大小
             this.reportOffset.position(0);
             this.reportOffset.limit(8);
+            // 将偏移量写入到 ByteBuffer 中
             this.reportOffset.putLong(maxOffset);
 
             // 将 ByteBuffer 从写模式切换到读模式，以便将数据传入通道
@@ -594,7 +629,7 @@ public class HAService {
                 }
             }
 
-            // 更新上次写消息的时间
+            // 更新上次写消息的时间，用于后续判断是否需要向主服务器上报
             lastWriteTimestamp = HAService.this.defaultMessageStore.getSystemClock().now();
             return !this.reportOffset.hasRemaining();
         }
@@ -636,7 +671,7 @@ public class HAService {
         private boolean processReadEvent() {
             int readSizeZeroTimes = 0;
 
-            // 循环判断 byteBufferRead 读缓存区是否还有剩余空间
+            // 循环判断 byteBufferRead 读缓存区是否还有剩余空间可供数据存储放
             while (this.byteBufferRead.hasRemaining()) {
                 try {
 
@@ -676,11 +711,12 @@ public class HAService {
                 }
             }
 
+            // 没有待处理的主服务器发回的消息，则直接返回
             return true;
         }
 
         /**
-         * todo 将主服务器回传的消息追加到 Commitlog 中并转发到消息消费队列与索引文件中。
+         * todo 将主服务器回传的消息追加到 CommitLog 中并转发到消息消费队列与索引文件中。
          * 1 将主服务器传回的消息追加到消息内存映射文件中，
          * todo 即该方法主要从 byteBufferRead 读缓存区中解析一条一条的消息，然后存储到 CommitLog 文件并转发到消息消费队列和索引文件中
          * 2 如何判断 byteBufferRead 是否包含一条完整的消息
@@ -691,33 +727,41 @@ public class HAService {
 
             // 1 定义头部长度，大小为 12 个字节，包括消息的物理偏移量与消息的长度
             // 注意：长度字节必须首先探测，否则无法判断byteBufferRead缓存区中是否包含一条完整的消息
+            // 8 字节物理偏移量的作用：告述从服务器，该消息属于哪个文件
+            // 4 字节物理偏移量的作用：表示消息的体大小
             final int msgHeaderSize = 8 + 4; // phyoffset + size
 
             // 2 记录当前 byteBufferRead 读缓存区的当前指针
             int readSocketPos = this.byteBufferRead.position();
 
+            // 从 byteBufferRead 读缓存区中解析一条一条的消息
             while (true) {
 
                 // 3 先探测 byteBufferRead 缓冲区中是否包含一条消息的头部，如果包含头部，则读取物理偏移量与消息长度，然后再探测是否包含一条完整的消息，如果不包含，
                 // 则需要将byteBufferRead中的数据备份，以便更多数据到达再处理。
 
-                // 3.1 剩余没有处理的缓存区
+                // 3.1 剩余没有处理的缓存区大小
                 int diff = this.byteBufferRead.position() - this.dispatchPosition;
 
-                // 3.2 读缓存区是否包含一条消息头部
+                // 3.2 读缓存区是否包含一条消息头部，不包含肯定不是一条完整的消息；包含了还要进一步判断；
                 // todo 主服务器发送信息分为两部分：头 + 体
                 if (diff >= msgHeaderSize) {
+
+                    /*------------------ 3.2.1 读取主服务器返回消息的头 ---------------------*/
 
                     // 读取 8 字节的消息物理偏移量
                     long masterPhyOffset = this.byteBufferRead.getLong(this.dispatchPosition);
                     // 读取 4 字节的消息的长度
+                    // todo 如果是主节点发送的心跳消息，为 0 ，从节点也就不会处理该消息了
                     int bodySize = this.byteBufferRead.getInt(this.dispatchPosition + 8);
 
-                    // 3.3 获取从服务器当前消息文件的最大物理偏移量
+                    //  获取从服务器当前消息文件的最大物理偏移量，其实就是写指针的位置，下次就从这里写。
+                    //  todo 注意，从服务器刚开始的消息最大偏移量为 0 ，上报到主服务器后，主服务器回传的可能并不是从 0 开始传的，因此这种情况下下面的 slavePhyOffset != 0 不会进行判断。
+                    //   但是后续正常情况下，主服务器回传到从服务器的消息物理偏移量和从服务器消息最大物理偏移量一定是一致的，因为从服务器的消息物理偏移量的变更是根据主服务器传送的消息进行更新的，是以主服务器为准
                     long slavePhyOffset = HAService.this.defaultMessageStore.getMaxPhyOffset();
 
-                    // 3.4 如果slave的最大物理偏移量与master给的偏移量不相等，则返回false
-                    // 注意：从后面的处理逻辑来看，返回false,将会关闭与master的连接，在Slave本次周期内将不会再参与主从同步了。
+                    // 如果slave的最大物理偏移量与master给的偏移量不相等，则返回false
+                    // 注意：从后面的处理逻辑来看，返回false,将会关闭与master的连接，在 Slave 本次周期内将不会再参与主从同步了。
                     if (slavePhyOffset != 0) {
 
                         // todo 要和发送过去的偏移量对应，以保持连续
@@ -732,6 +776,8 @@ public class HAService {
                     // 探测是否包含一条完整的消息，包含的话就可以将消息内容追加到消息内存映射文件中了。
                     if (diff >= (msgHeaderSize + bodySize)) {
 
+                        /*----------------------- 3.2.2 读取主服务器返回消息的体 -------------------------*/
+
                         // 创建消息体大小的字节数组
                         byte[] bodyData = new byte[bodySize];
 
@@ -742,25 +788,30 @@ public class HAService {
                         // 读取消息体的长度的字节内容到 bodyData 中
                         this.byteBufferRead.get(bodyData);
 
-                        // todo 将消息内容追加到消息内存映射文件中
+
+                        /*------------------------- 3.2.3 将读取到的完整消息进行存储 ----------------------*/
+                        // todo 将消息内容追加到消息内存映射文件中并进行消息重放
                         HAService.this.defaultMessageStore.appendToCommitLog(masterPhyOffset, bodyData);
 
 
                         this.byteBufferRead.position(readSocketPos);
 
-                        // 更新 dispatchPosition
+                        // 更新 dispatchPosition，即已处理读缓存区的指针
                         this.dispatchPosition += msgHeaderSize + bodySize;
 
+
+                        /*------------------------- 3.2.4 向主服务器 ACK 消息----------------------------------*/
                         // todo 向主服务端及时反馈当前已存储进度，也就是继续请求复制消息请求
                         if (!reportSlaveMaxOffsetPlus()) {
                             return false;
                         }
 
+                        // 继续尝试读取下一条
                         continue;
                     }
                 }
 
-                // todo 如果byteBufferRead中未包含一条完整的消息，则需要将byteBufferRead中的数据备份，以便更多数据到达再处理。
+                // todo 如果 byteBufferRead 中未包含一条完整的消息，则需要将 byteBufferRead 中的数据备份到 byteBufferBackup 中，以便更多数据到达再处理。
                 if (!this.byteBufferRead.hasRemaining()) {
                     this.reallocateByteBuffer();
                 }
@@ -801,7 +852,7 @@ public class HAService {
          * 在 Broker 启动时，如果 Broker 的角色为从服务器，则读取 Broker 配置文件中的 haMasterAddress 属性并更新 HAClient 的 masterAddress ，
          * 如果角色为从服务器，但 haMasterAddress 为空，启动 Broker 不会报错，但不会执行主从同步复制。
          *
-         * @return
+         * @return 是否成功连接上 Master
          * @throws ClosedChannelException
          */
         private boolean connectMaster() throws ClosedChannelException {
@@ -813,6 +864,8 @@ public class HAService {
                 if (addr != null) {
                     SocketAddress socketAddress = RemotingUtil.string2SocketAddress(addr);
                     if (socketAddress != null) {
+
+                        // 通道
                         this.socketChannel = RemotingUtil.connect(socketAddress);
 
                         // todo 注册 OP_READ (网络读事件)，用于接收主服务器回传的消息
@@ -822,13 +875,14 @@ public class HAService {
                     }
                 }
 
-                // 初始化从服务器当前的复制进度，即 CommitLog 文件的最大偏移量
+                // todo 初始化从服务器当前的复制进度，即 CommitLog 的最大偏移量
                 this.currentReportedOffset = HAService.this.defaultMessageStore.getMaxPhyOffset();
 
                 // 上一次写入消息的时间初始化为当前时间
                 this.lastWriteTimestamp = System.currentTimeMillis();
             }
 
+            // todo 不为空，说明当前是从服务器且连接到了主服务器
             return this.socketChannel != null;
         }
 
@@ -870,13 +924,13 @@ public class HAService {
                 try {
 
                     // 1 从服务器连接主服务器，处于连接状态就不需要重新连接。
-                    // todo 连接主服务器
+                    // todo 连接主服务器，如果是从服务器则忽略
                     if (this.connectMaster()) {
 
-                        // 2 判断是否需要向主服务器反馈当前已经拉取消息偏移量，
+                        // 2 判断是否需要向主服务器反馈当前已经拉取消息偏移量。依据：每次上报间隔必须大于 haSendHeartbeatInterval，默认5s
                         if (this.isTimeToReportOffset()) {
 
-                            // 3 如果需要向主服务器反馈拉取消息偏移量，则向主服务器发送一个 8 字节的请求，请求包中包含的数据为当前 Broker（从服务器） 消息文件的最大偏移量。首次是 0
+                            // 3 如果需要向主服务器反馈拉取消息偏移量，则向主服务器发送一个 8 字节的请求，请求包中包含的数据为当前 Broker（从服务器） 消息的最大偏移量。首次是 0
                             // todo 反馈也是向主服务器发送复制请求，请求偏移量每次都是从服务器的消息文件的最大偏移量
                             // todo 发送复制请求
                             boolean result = this.reportSlaveMaxOffset(this.currentReportedOffset);
@@ -892,6 +946,8 @@ public class HAService {
 
                         // 5 todo 处理网络读请求，即处理从主服务器传回的消息数据
                         boolean ok = this.processReadEvent();
+
+                        // 处理失败，即追加消息失败，则关闭和主服务器的连接，并清理相关缓存
                         if (!ok) {
                             this.closeMaster();
                         }
@@ -901,6 +957,7 @@ public class HAService {
                             continue;
                         }
 
+                        // 连接过期则断开连接
                         long interval =
                                 HAService.this.getDefaultMessageStore().getSystemClock().now()
                                         - this.lastWriteTimestamp;
@@ -916,6 +973,7 @@ public class HAService {
                     } else {
                         this.waitForRunning(1000 * 5);
                     }
+
                 } catch (Exception e) {
                     log.warn(this.getServiceName() + " service has exception. ", e);
                     this.waitForRunning(1000 * 5);

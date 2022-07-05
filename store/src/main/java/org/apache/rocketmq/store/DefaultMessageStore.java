@@ -88,10 +88,11 @@ import org.apache.rocketmq.store.stats.BrokerStatsManager;
  * 8 提供同步和异步刷盘，根据场景选择合适的机制。
  * <p>
  * 9 文件清除机制 - {@link org.apache.rocketmq.store.DefaultMessageStore#addScheduleTask()} 使用的是定时任务的方式，在 Broker 启动时会触发 {@link org.apache.rocketmq.store.DefaultMessageStore#start()}
- * - RocketMQ 操作 CommitLog 和 ConsumeQueue 文件，都是基于内存映射文件。Broker 在启动时会加载 CommitLog、ConsumeQueue 对应的文件夹，读取物理文件到内存以创建对应的内存映射文件，
+ * - 9.1 RocketMQ 操作 CommitLog 和 ConsumeQueue 文件，都是基于内存映射文件。Broker 在启动时会加载 CommitLog、ConsumeQueue 对应的文件夹，读取物理文件到内存以创建对应的内存映射文件，
  * 为了避免内存与磁盘的浪费，不可能将消息永久存储在消息服务器上，所以需要一种机制来删除已过期的文件。
- * - RocketMQ 顺序写 CommitLog 、ConsumeQueue 文件，所有写操作全部落在最后一个 CommitLog 或 ConsumeQueue 文件上，之前的文件在下一个文件创建后，将不会再被更新。
- * - RocketMQ 清除过期文件的方法是：如果非当前写文件在一定时间间隔内没有再次被更新，则认为是过期文件，可以被删除，RocketMQ不会管这个这个文件上的消息是否被全部消费。默认每个文件的过期时间为72小时。
+ * - 9.2 RocketMQ 顺序写 CommitLog 、ConsumeQueue 文件，所有写操作全部落在最后一个 CommitLog 或 ConsumeQueue 文件上，之前的文件在下一个文件创建后，将不会再被更新。
+ * - 9.3 RocketMQ 清除过期文件的方法是：如果非当前写文件在一定时间间隔内没有再次被更新，则认为是过期文件，可以被删除，RocketMQ不会管这个这个文件上的消息是否被全部消费。默认每个文件的过期时间为72小时。
+ * - 9.4 消息是被顺序存储在 commitlog 文件的，且消息大小不定长，所以消息的清理是不可能以消息为单位进 行清理的，而是以commitlog 文件为单位进行清理的。否则会急剧下降清理效率，并实现逻辑复杂。
  */
 public class DefaultMessageStore implements MessageStore {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
@@ -255,6 +256,8 @@ public class DefaultMessageStore implements MessageStore {
         this.cleanConsumeQueueService = new CleanConsumeQueueService();
         this.storeStatsService = new StoreStatsService();
         this.indexService = new IndexService(this);
+
+        // 创建主从复制的 HAService 对象
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             this.haService = new HAService(this);
         } else {
@@ -462,7 +465,7 @@ public class DefaultMessageStore implements MessageStore {
             this.recoverTopicQueueTable();
         }
 
-        // todo 启动延时消息处理任务
+        // todo 根据情况启动：1）高可用服务 2）启动延时消息处理任务
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
 
             // 启动 HA
@@ -1319,7 +1322,7 @@ public class DefaultMessageStore implements MessageStore {
 
         boolean result = this.commitLog.appendData(startOffset, data);
 
-        // 追加成功，则唤醒ReputMessageService实时将消息转发给消息消费队列与索引文件
+        // 追加成功，则唤醒 ReputMessageService 实时将消息转发给消息消费队列与索引文件
         if (result) {
             this.reputMessageService.wakeup();
         } else {
@@ -2246,7 +2249,7 @@ public class DefaultMessageStore implements MessageStore {
             // 文件保存的时长（从最后一次更新时间到现在），默认 72 小时。如果超过了该时间，则认为是过期文件。
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
 
-            // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间
+            // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定了删除一个文件后，休息多久再删除第二个
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
 
             // 在清除过期文件时，如果该文件被其他线程占用（引用次数大于 0，比如读取消息），此时会阻止此次删除任务，同时在第一次试图删除该文件时记录当前时间戳，
@@ -2420,6 +2423,8 @@ public class DefaultMessageStore implements MessageStore {
                 }
             }
 
+
+            // 默认没有满
             return false;
         }
 

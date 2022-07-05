@@ -1172,7 +1172,7 @@ public class CommitLog {
         // 7 根据刷盘策略刷盘，即持久化到文件。前面的流程实际未存储到硬盘。
         handleDiskFlush(result, putMessageResult, msg);
 
-        // 8 todo 执行 HA 主从同步复制
+        // 8 todo 执行 HA 主从复制，根据是否等待，决定是同步复制还是异步复制
         handleHA(result, putMessageResult, msg);
 
         return putMessageResult;
@@ -1271,7 +1271,7 @@ public class CommitLog {
 
 
     /**
-     * 同步阻塞等待复制结果
+     * 处理复制
      *
      * @param result
      * @param putMessageResult
@@ -1285,6 +1285,7 @@ public class CommitLog {
             HAService service = this.defaultMessageStore.getHaService();
 
             // 是否等待复制完成
+            // 如果是就是同步复制
             if (messageExt.isWaitStoreMsgOK()) {
                 // Determine whether to wait
                 if (service.isSlaveOK(result.getWroteOffset() + result.getWroteBytes())) {
@@ -1329,7 +1330,7 @@ public class CommitLog {
 
     /**
      * 消息刷盘
-     * 分为：同步和异步刷写
+     * 分为：同步和异步刷写，默认异步刷盘
      *
      * @param result
      * @param putMessageResult

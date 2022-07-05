@@ -86,6 +86,7 @@ public class WaitNotifyObject {
             boolean needNotify = false;
 
             for (Map.Entry<Long, Boolean> entry : this.waitingThreadTable.entrySet()) {
+                // 如果存在等待唤醒的线程，那么就设置唤醒标记
                 needNotify = needNotify || !entry.getValue();
 
                 // 设置标记为 true
@@ -106,6 +107,7 @@ public class WaitNotifyObject {
     public void allWaitForRunning(long interval) {
         long currentThreadId = Thread.currentThread().getId();
         synchronized (this) {
+            // 获取当前线程等待状态，让其等待
             Boolean notified = this.waitingThreadTable.get(currentThreadId);
             if (notified != null && notified) {
 

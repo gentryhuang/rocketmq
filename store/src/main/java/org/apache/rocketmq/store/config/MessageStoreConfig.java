@@ -215,13 +215,24 @@ public class MessageStoreConfig {
     private int maxMsgsNumBatch = 64;
     @ImportantField
     private boolean messageIndexSafe = false;
+    /**
+     * HA 监听端口
+     */
     private int haListenPort = 10912;
 
     /**
      * 主服务器与从服务器的高可用心跳发送时间间隔默认为 5s
      */
     private int haSendHeartbeatInterval = 1000 * 5;
+
+    /**
+     * 连接保活 20s
+     */
     private int haHousekeepingInterval = 1000 * 20;
+
+    /**
+     * 默认 32K
+     */
     private int haTransferBatchSize = 1024 * 32;
     @ImportantField
     private String haMasterAddress = null;

@@ -583,7 +583,7 @@ public class MappedFileQueue {
         List<MappedFile> files = new ArrayList<MappedFile>();
         if (null != mfs) {
 
-            // 2 从前往后遍历到倒数第 2 个文件
+            // 2 从前往后遍历到倒数第 2 个文件，也就先删除最久的
             for (int i = 0; i < mfsLength; i++) {
                 MappedFile mappedFile = (MappedFile) mfs[i];
 

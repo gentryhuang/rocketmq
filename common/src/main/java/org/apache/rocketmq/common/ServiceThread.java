@@ -162,7 +162,7 @@ public abstract class ServiceThread implements Runnable {
         }
 
         //entry to wait
-        // 重置状态
+        // 重置同步状态
         waitPoint.reset();
 
         try {
@@ -172,6 +172,13 @@ public abstract class ServiceThread implements Runnable {
             log.error("Interrupted", e);
         } finally {
             hasNotified.set(false);
+
+            /*
+                protected void onWaitEnd() {
+                    // 读写复制队列交换
+                    this.swapRequests();
+                  }
+             */
             this.onWaitEnd();
         }
     }
