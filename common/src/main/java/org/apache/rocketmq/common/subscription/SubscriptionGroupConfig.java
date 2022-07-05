@@ -56,7 +56,7 @@ public class SubscriptionGroupConfig {
      */
     private long brokerId = MixAll.MASTER_ID;
     /**
-     * 当消费缓慢，将转向 brokerId 的服务器上拉取消息，默认为 1
+     * 当消费缓慢，将转向 broker 的服务器上拉取消息，默认为 1
      */
     private long whichBrokerWhenConsumeSlowly = 1;
     /**

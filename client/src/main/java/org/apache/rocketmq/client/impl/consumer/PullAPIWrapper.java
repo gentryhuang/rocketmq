@@ -62,7 +62,7 @@ public class PullAPIWrapper {
     private final boolean unitMode;
 
     /**
-     * 消息队列 与 拉取 Broker 的映射
+     * 消息队列 与 拉取 Broker ID 的映射
      * todo 存放的是建议 消息队列从从哪个 Broker 服务器拉取消息的缓存表
      * 1 当拉取消息时，会通过该映射获取拉取请求对应的 Broker
      * 2 当处理拉取结果时，会更新该表，根据 Broker 建议下次从那个 broker 拉取消息
@@ -233,11 +233,12 @@ public class PullAPIWrapper {
             final PullCallback pullCallback
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
 
-        // todo 获取 Broker 信息
+        // todo 获取 Broker 信息，从 消息队列 与 拉取 Broker ID 的映射表中选择具体哪个 BrokerId (MessageQueue 中只包含 BrokerName)
         FindBrokerResult findBrokerResult =
 
                 // 根据 brokerName 和 brokerId 获取 Broker 信息
-                // todo 在整个 RocketMQ Broker 的部署结构中，相同名称的 Broker 构成主从结构，其 BrokerId 会不一样。在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
+                // todo 在整个 RocketMQ Broker 的部署结构中，相同名称的 Broker 构成主从结构，其 BrokerId 会不一样,主服务器的brokerId为0，从服务器的brokerId大于0。
+                //  在每次拉取消息后，会给出一个建议，下次是从主节点还是从节点拉取
                 this.mQClientFactory.findBrokerAddressInSubscribe(
                         mq.getBrokerName(),
                         // 获取 mq 拉取消息对应的 Broker 编号

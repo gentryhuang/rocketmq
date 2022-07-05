@@ -93,6 +93,9 @@ import org.apache.rocketmq.store.stats.BrokerStatsManager;
  * - 9.2 RocketMQ 顺序写 CommitLog 、ConsumeQueue 文件，所有写操作全部落在最后一个 CommitLog 或 ConsumeQueue 文件上，之前的文件在下一个文件创建后，将不会再被更新。
  * - 9.3 RocketMQ 清除过期文件的方法是：如果非当前写文件在一定时间间隔内没有再次被更新，则认为是过期文件，可以被删除，RocketMQ不会管这个这个文件上的消息是否被全部消费。默认每个文件的过期时间为72小时。
  * - 9.4 消息是被顺序存储在 commitlog 文件的，且消息大小不定长，所以消息的清理是不可能以消息为单位进 行清理的，而是以commitlog 文件为单位进行清理的。否则会急剧下降清理效率，并实现逻辑复杂。
+ * 额外说明：
+ * 1 用户应该在磁盘使用率达到0.85之前监控磁盘使用率。RocketMQ设置了两个级别的服务退化:当磁盘使用率达到0.85时，立即删除最旧的文件，以缓解可用服务(RW)的磁盘压力;当磁盘使用率达到0.9时，禁止对可用服务(R)进行写操作。
+ * 2 很难找到最合适的阈值，如果需要，用户可以根据业务特征在broker.conf中设置这两个阈值，以保证磁盘利用率过高导致消息丢失的情况。
  */
 public class DefaultMessageStore implements MessageStore {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
@@ -258,6 +261,7 @@ public class DefaultMessageStore implements MessageStore {
         this.indexService = new IndexService(this);
 
         // 创建主从复制的 HAService 对象
+        // todo 注意：主从同步不具备主从切换功能，也就是当主节点宕机后，从不会接管消息发送，但可以提供消息读取
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             this.haService = new HAService(this);
         } else {

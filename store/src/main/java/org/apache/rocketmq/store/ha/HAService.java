@@ -88,7 +88,7 @@ public class HAService {
     private final DefaultMessageStore defaultMessageStore;
     /**
      * 等待-通知对象
-     * 利用 synchronized
+     * 利用 synchronized-wait-notify/notifyAll 实现
      */
     private final WaitNotifyObject waitNotifyObject = new WaitNotifyObject();
     /**
