@@ -207,7 +207,7 @@ public abstract class AbstractSendMessageProcessor extends AsyncNettyRequestProc
         }
 
 
-        // 3 在 Broker 端存储主题的配置信息，并定时上报到 NmaeSrv
+        // 3 在 Broker 端存储主题的配置信息，并定时上报到 NameSrv
         // 3.1 检查下发送消息的 Topic 在 Broker 本地有没有
         TopicConfig topicConfig =
                 this.brokerController.getTopicConfigManager().selectTopicConfig(requestHeader.getTopic());

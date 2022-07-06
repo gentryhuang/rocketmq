@@ -28,6 +28,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.rocketmq.broker.BrokerController;
 import org.apache.rocketmq.broker.BrokerPathConfigHelper;
+import org.apache.rocketmq.broker.processor.AbstractSendMessageProcessor;
 import org.apache.rocketmq.common.ConfigManager;
 import org.apache.rocketmq.common.DataVersion;
 import org.apache.rocketmq.common.MixAll;
@@ -43,6 +44,17 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 
 /**
  * Topic 配置管理，会定时持久化并上报到 NameServer
+ * 说明：
+ * 1 为了消息发送的高可用，希望新创建的 Topic 在集群中的每台 Broker 上创建对应的队列，避免 Broker 的单节点故障；
+ * 2 在 autoCreateTopicEnable 设置为true，表示开启Topic自动创建，但很可能新创建的 Topic 的路由信息只包含在其中一台 Broker 上。
+ * - 2.1 默认主题 TBW102 不能发送消息，仅供路由查找。即如果开启自动创建主题，集群中每台 Broker 会将默认主题 TBW102 的路由信息上报到 NameSrv ，客户端可以通过 TBW102 查到对应的路由信息。
+ * - 2.2 客户端查到默认主题路由信息后，结合目标 Topic 解析、更新默认主题路由到本地，此时本地的路由信息中的主题是目标 Topic ，路由的其它信息（如读写队列数，权限、所在的 Broker）使用的是默认主题的。此时，Broker 和 NameSrv 还没有目标 Topic 的信息，
+ * 在Broker端创建主题的时机为，消息生产者往Broker端发送消息时才会创建，然后Broker端会在一个心跳包周期内，将新创建的路由信息发送到NameServer，于此同时，Broker端还会有一个定时任务，定时将内存中的路由信息，持久化到Broker端的磁盘上。
+ * - 2.3 可消息发送方发送消息时，会选择 2.2 中本地的队列中的一个，此时该队列中的 Broker 就是当前发送方要请求的服务，而目标 Topic 也会在该 Broker 上创建，然后 Broker 会上报该目标 Topic 的配置信息到 NameSrv。
+ * - 2.4 后续再有客户端访问目标 Topic 的路由信息就能从 NameSrv 中访问到了，而此时目标 Topic 只分布到了一个 Broker 上；当然如果此时访问目标 Topic 时，2.3 中的目标 Topic 还没有上报到 NameSrv ，那么此时会继续执行 2.3 中的逻辑，可能目标 Topic 可以
+ * 分布到其它的 Broker 上（取决于选择的队列）。
+ *
+ * @see AbstractSendMessageProcessor#msgCheck(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader, org.apache.rocketmq.remoting.protocol.RemotingCommand)
  */
 public class TopicConfigManager extends ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
