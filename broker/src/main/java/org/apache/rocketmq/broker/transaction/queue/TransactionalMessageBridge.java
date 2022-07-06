@@ -171,7 +171,7 @@ public class TransactionalMessageBridge {
      * @param topic   topic
      * @param queueId 消息队列id
      * @param offset  offset
-     * @param nums    消息数码
+     * @param nums    消息数量
      * @param sub     订阅数据
      * @return
      */

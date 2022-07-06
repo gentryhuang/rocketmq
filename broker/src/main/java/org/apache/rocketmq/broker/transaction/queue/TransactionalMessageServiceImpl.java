@@ -205,7 +205,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 // 根据消息队列获取对应的 OP 队列，没有则新创建一个
                 MessageQueue opQueue = getOpQueue(messageQueue);
 
-                // 获取 Half 消息队列的当前消费进度（逻辑偏移量）
+                // todo 获取 Half 消息队列的当前消费进度（逻辑偏移量），也就是已经确定的消费进度。OP 消息会依据该确定进度判断哪些 Half 消息已经确定了。
                 // todo Half 消息队列消费进度，只会在回查的时候更新
                 long halfOffset = transactionalMessageBridge.fetchConsumeOffset(messageQueue);
 
@@ -222,8 +222,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 // op 队列的消息 offset
                 List<Long> doneOpOffset = new ArrayList<>();
 
-                // removeMap 表示哪些 half（通过逻辑偏移量 offset 标志） 不需要再回查了（half 消息已经有对应的 op 消息了）
-                // key: 已经完成的 half 消息逻辑偏移量 offset
+                // todo  removeMap 表示哪些 half（通过 half 逻辑偏移量 offset 标志） 不需要再回查了（half 消息已经有对应的 op 消息了）
+                // key: 已经完成的 half 消息逻辑偏移量 offset (在拉取一批 OP 消息后判断其存储的已经确定的 half 消息逻辑偏移量 >= 已经确定的消费进度 halfOffset)；在推进 half 消息的过程就可以前置过滤了，避免重复回查；
                 // value: op 消息逻辑偏移量 offset
                 HashMap<Long, Long> removeMap = new HashMap<>();
 
@@ -257,7 +257,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 long i = halfOffset;
 
 
-                // todo  不断推进 half 消息进度，用于判断是否需要回查当前进度的 half 消息
+                // todo  不断推进 half 消息进度，然后通过前面拉取的一批 op 消息进行匹配，判断是否需要回查当前进度的 half 消息
                 while (true) {
 
                     // 每个 half 消息队列的处理时间是 60s
@@ -267,6 +267,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                     }
 
                     // 如果当前进度（i） 的 half 消息已经commit或者rollback，无需再处理
+                    // todo 使用 op 消息判断当前 half 消息是否需要回查
                     if (removeMap.containsKey(i)) {
                         log.debug("Half offset {} has been committed/rolled back", i);
 
@@ -278,7 +279,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         // 需要回查，即当前进度的 half 消息没有对应的 op 消息
                     } else {
 
-                        // todo 根据消费进度 i 拉取半消息
+                        // todo 根据消费进度 i 拉取该条 半消息
                         GetResult getResult = getHalfMsg(messageQueue, i);
                         MessageExt msgExt = getResult.getMsg();
 
