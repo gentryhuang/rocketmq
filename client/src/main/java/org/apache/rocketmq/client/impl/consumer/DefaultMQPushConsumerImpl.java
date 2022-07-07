@@ -410,6 +410,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                             subscriptionData);
 
                     // 根据拉取状态结果，分别处理
+                    // todo 就算有消息过滤，那么消费位置也会不断向前推进，不会造成积压；
+                    //  即：RocketMQ NG 的 diffTotal 的计算逻辑是 brokerOffset - consumerOffset ，不会造成大量积压，也会推进；
                     switch (pullResult.getPullStatus()) {
 
                         // 1 找到消息直接将这一批（默认最多一次拉取32条）先丢到 ProceeQueue 中，然后直接将该批消息 submit 到 ConsumeMessageService 的线程池，

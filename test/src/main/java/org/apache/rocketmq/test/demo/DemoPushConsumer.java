@@ -20,17 +20,17 @@ public class DemoPushConsumer {
 
         // Instantiate with specified consumer group name.
         // 使用指定的用户组名实例化消费者
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("demo_consumer");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("demo_consumer1");
 
         // Specify name server addresses.
-        // namesrv 地址
+        // NameSrv 地址
         consumer.setNamesrvAddr("localhost:9876");
 
         // Subscribe one more more topics to consume.
         // 订阅主题
         consumer.subscribe("hlb_topic", "*");
 
-        consumer.subscribe("","","");
+        consumer.subscribe("", "", "");
 
         consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
 
