@@ -1077,7 +1077,7 @@ public class CommitLog {
         // 3 获取当前可以写入的 CommitLog 文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
 
-        // 4 追加消息需要加锁、串行化处理
+        // 4 todo 追加消息需要加锁、串行化处理
         // 使用自旋（while-CAS）锁 或 ReentrantLock
         putMessageLock.lock(); //spin or ReentrantLock ,depending on store config
         try {

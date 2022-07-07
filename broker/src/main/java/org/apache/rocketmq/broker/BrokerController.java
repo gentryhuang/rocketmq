@@ -261,7 +261,7 @@ public class BrokerController {
         this.brokerStatsManager = new BrokerStatsManager(this.brokerConfig.getBrokerClusterName());
         this.setStoreHost(new InetSocketAddress(this.getBrokerConfig().getBrokerIP1(), this.getNettyServerConfig().getListenPort()));
 
-        // 9 快速失败的实现类，用于定期检测 PageCache 是否繁忙，繁忙则将排队中的发送消息线程任务快速失败掉，结束等待。
+        // todo 9 快速失败的实现类，用于定期检测 PageCache 是否繁忙，繁忙则将排队中的发送消息线程任务快速失败掉，结束等待，消息发送者默认情况会重试2次，将消息发往其他Broker，保证其高可用。
         this.brokerFastFailure = new BrokerFastFailure(this);
 
 
@@ -1031,7 +1031,7 @@ public class BrokerController {
             this.brokerStatsManager.start();
         }
 
-        // todo 开启快速失败 发送消息任务
+        // todo 开启快速失败 发送消息任务，以便与
         if (this.brokerFastFailure != null) {
             this.brokerFastFailure.start();
         }

@@ -504,6 +504,8 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                     this.brokerController.getBrokerStatsManager().incBrokerGetNums(getMessageResult.getMessageCount());
 
                     // 读取消息
+
+                    // 默认把拉取的消息拷贝到堆内存
                     if (this.brokerController.getBrokerConfig().isTransferMsgByHeap()) { // 内存中
                         final long beginTimeMills = this.brokerController.getMessageStore().now();
                         // 获取消息内容到堆内存，设置到响应 Body
@@ -513,13 +515,16 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                                 (int) (this.brokerController.getMessageStore().now() - beginTimeMills));
                         response.setBody(r);
 
-                        // 零拷贝
+                        // 零拷贝，不经过堆
                     } else { // zero-copy
                         try {
 
                             // 基于 zero-copy 实现，直接响应，无需堆内内存，性能更优
                             FileRegion fileRegion =
                                     new ManyMessageTransfer(response.encodeHeader(getMessageResult.getBufferTotalSize()), getMessageResult);
+
+                            // 通过 mappedBuffer 发送到 SocketBuffer
+                            // todo 即拷贝到 Socket Buffer
                             channel.writeAndFlush(fileRegion).addListener(new ChannelFutureListener() {
                                 @Override
                                 public void operationComplete(ChannelFuture future) throws Exception {

@@ -275,6 +275,7 @@ public class DefaultMessageStore implements MessageStore {
 
         this.transientStorePool = new TransientStorePool(messageStoreConfig);
 
+        // todo 是否使用堆外内存，其中一项是必须异步刷盘，因为同步刷盘是要求直接将内存中的数据直接写入到文件中。
         if (messageStoreConfig.isTransientStorePoolEnable()) {
             this.transientStorePool.init();
         }
@@ -788,6 +789,7 @@ public class DefaultMessageStore implements MessageStore {
     @Override
     public boolean isOSPageCacheBusy() {
         // 消息开始写入 Commitlog 文件时加锁的时间
+        // @see org.apache.rocketmq.store.CommitLog.putMessage
         long begin = this.getCommitLog().getBeginTimeInLock();
 
         // 一次消息追加过程中截止到当前持有锁的总时长，完成后重置为 0

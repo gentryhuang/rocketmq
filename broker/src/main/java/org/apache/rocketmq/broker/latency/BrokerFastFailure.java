@@ -63,7 +63,7 @@ public class BrokerFastFailure {
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                // 开启快速失败 发送消息任务，会执行
+                // 开启快速失败（发送消息任务）才会执行
                 if (brokerController.getBrokerConfig().isBrokerFastFailureEnable()) {
                     cleanExpiredRequest();
                 }
@@ -72,10 +72,10 @@ public class BrokerFastFailure {
     }
 
     /**
-     * 快速失败消息发送任务
+     * 快速失败消息发送任务，消息发送者默认情况会重试2次，将消息发往其他Broker，保证其高可用。
      */
     private void cleanExpiredRequest() {
-        // 如果操作系统 PageCache 繁忙，并且发送队列中还有排队的任务
+        // 如果操作系统 PageCache 繁忙，并且发送队列中还有排队待处理的任务
         while (this.brokerController.getMessageStore().isOSPageCacheBusy()) {
             try {
                 if (!this.brokerController.getSendThreadPoolQueue().isEmpty()) {

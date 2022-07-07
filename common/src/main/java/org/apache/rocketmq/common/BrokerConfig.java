@@ -133,6 +133,9 @@ public class BrokerConfig {
     private int commercialBigCount = 1;
     private int commercialBaseCount = 1;
 
+    /**
+     * 将消息拷贝到堆内存中，默认是 true
+     */
     private boolean transferMsgByHeap = true;
     private int maxDelayTime = 40;
 
@@ -190,7 +193,7 @@ public class BrokerConfig {
     /**
      * The minimum time of the transactional message  to be checked firstly, one message only exceed this time interval
      * that can be checked.
-     *
+     * <p>
      * 事务性消息首先被检查的最小时间，一条消息只超过这个时间间隔才能被检查
      */
     @ImportantField
@@ -198,7 +201,7 @@ public class BrokerConfig {
 
     /**
      * The maximum number of times the message was checked, if exceed this value, this message will be discarded.
-     *
+     * <p>
      * 消息被检查的最大次数，如果超过这个值，这条消息将被丢弃。
      */
     @ImportantField

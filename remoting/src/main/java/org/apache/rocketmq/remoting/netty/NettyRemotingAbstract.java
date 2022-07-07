@@ -283,8 +283,8 @@ public abstract class NettyRemotingAbstract {
                 }
             };
 
-            // 4 处理请求前先判断是否需要拒绝本次请求的处理
-            // 比如 操作系统PageCache是否繁忙，如果开启使用堆外内存那是否还有可用的堆外内存缓存区
+            // todo 4 处理请求前先判断是否需要拒绝本次请求的处理
+            // 比如 操作系统PageCache是否繁忙，或如果开启使用堆外内存那是否还有可用的堆外内存缓存区
             if (pair.getObject1().rejectRequest()) {
                 /// 如果拒绝请求，则响应系统繁忙
                 final RemotingCommand response = RemotingCommand.createResponseCommand(RemotingSysResponseCode.SYSTEM_BUSY,

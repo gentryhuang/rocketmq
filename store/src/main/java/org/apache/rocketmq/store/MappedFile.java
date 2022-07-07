@@ -49,9 +49,46 @@ import sun.nio.ch.DirectBuffer;
  * 1 存储文件名格式：00000000000000000000、00000000001073741824、00000000002147483648等文件
  * 2 每个 MappedFile 大小统一
  * 3 文件命名方式：fileName[n] = fileName[n - 1] + mappedFileSize
+ * todo 特别说明，通常有以下两种方式进行读写：
+ * 1. Mmap+PageCache的方式，读写消息都走的是 pageCache，这样子读写都在pagecache里面不可避免会有锁的问题，在并发的读写操作情况下，会出现缺页中断降低，内存加锁，污染页的回写。
+ * 2. DirectByteBuffer(堆外内存)+PageCache的两层架构方式，这样子可以实现 读写消息分离，写入消息时候写到的是DirectByteBuffer——堆外内存中,读消息走的是PageCache(对于,DirectByteBuffer是两步刷盘，一步是刷到PageCache，还有一步是刷到磁盘文件中)。
+ * 带来的好处：避免了内存操作的很多容易堵的地方，降低了时延，比如说缺页中断降低，内存加锁，污染页的回写。
+ * 带来的潜在问题：会增加数据丢失的可能性，如果Broker JVM进程异常退出，提交到PageCache中的消息是不会丢失的，但存在堆外内存(DirectByteBuffer)中但还未提交到PageCache中的这部分消息，将会丢失。但通常情况下，RocketMQ进程退出的可能性不大。
+ * 3. @see org.apache.rocketmq.store.TransientStorePool 内存锁定机制
+ * todo RocketMQ 高性能读写：
+ * 1. 采用顺序写 + "读写分离"
+ * 2. 采用零拷贝 mmap + write 的方式来回应 Consumer 的请求；（kafka中存在大量的网络数据持久化到磁盘和磁盘文件通过网络发送的过程，kafka使用了sendfile零拷贝方式）
+ * 3. 预分配与文件预热
  */
 public class MappedFile extends ReferenceResource {
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
+
+    /*
+      再谈 HeapByteBuffer 和 DirectByteBuffer：
+
+      1. HeapByteBuffer优点：内容维护在jvm里，把内容写进buffer里速度快；更容易回收;
+      2. DirectByteBuffer优点：跟外设（IO设备）打交道时会快很多，因为外设读取 JVM 堆中的数据时不是直接读取的，而是把 jvm 里的数据读到一个内存块里，再从这个块中读取。
+         如果使用DirectByteBuffer，则可以省去这一步，实现zero copy（零拷贝）；外设之所以要把jvm堆里的数据copy出来再操作，不是因为操作系统不能直接操作jvm内存，而是因为jvm在进行gc（垃圾回收）时，
+         会对数据进行移动，一旦出现这种问题，外设就会出现数据错乱的情况，优化了用户空间内部拷贝。
+      3. 堆外内存实现零拷贝
+         - 前者分配在JVM堆上（ByteBuffer.allocate()），后者分配在操作系统物理内存上（ByteBuffer.allocateDirect()，JVM使用C库中的malloc()方法分配堆外内存）；
+         - 底层I/O操作需要连续的内存（JVM堆内存容易发生GC和对象移动），所以在执行write操作时需要将HeapByteBuffer数据拷贝到一个临时的(操作系统用户态)内存空间中，会多一次额外拷贝。
+           而 DirectByteBuffer 则可以省去这个拷贝动作，这是Java层面的 “零拷贝” 技术，在netty中广泛使用；
+
+      零拷贝：
+      1. RocketMQ 默认使用 MappedByteBuffer ，其底层使用了操作系统的mmap机制。为了避免 pageCache 的锁竞争，通过两层架构实现读写分离；
+      2. MappedByteBuffer底层使用了操作系统的mmap机制(默认），FileChannel#map()方法就会返回MappedByteBuffer。DirectByteBuffer 虽然实现了 MappedByteBuffer，不过
+           DirectByteBuffer默认并没有直接使用mmap机制，此外 DirectByteBuffer 是 MappedByteBuffer 的子类；
+      3. 零拷贝的实现一般有两种：
+          - mmap: 适合小数据量读写；需要 4 次上下文切换，3 次数据拷贝(将数据从内核缓冲区拷贝到应用缓冲区，以及从应用缓冲区拷贝到socket内核缓冲区是完全没必要的，使用零拷贝来消除这两次额外的内存拷贝--只拷贝一次）；
+          - sendFile: 适合大文件传输；需要 2 次上下文切换，最少 2 次数据拷贝；
+          sendFile 可以利用 DMA 方式，减少 CPU 拷贝，mmap 则不能（必须从内核拷贝到 Socket 缓冲区）；sendFile 零拷贝因为没有涉及到用户态，所以除了打通流管道，我们无法通过代码来修改流管道里的数据。
+       4. 两种零拷贝实现方式对比：
+          - sendFile其实只需要2次上下文切换，sendFile+网卡支持 SG-DMA实现零拷贝技术，没有在内存层面去拷贝数据，也就是说全程没有通过 CPU 来搬运数据，所有的数据都是通过 DMA 来进行传输的。
+如果你要对数据修改，sendFile就不合适了，而mmap 将磁盘文件映射到内存，支持读和写。
+          - sendFile相当于是原汁原味地读写，直接将硬盘上的文件送给网卡，但这种方式并不一定对所有场景都适用，比如如果你需要从硬盘上读取文件，然后经过一定修改之后再送给网卡的情况下，就不适合用sendFile。
+          对于RocketMQ来说，因为RocketMQ将所有队列的数据都写入了CommitLog，消费者批量消费时需要读出来进行应用层过滤，所以就不能利用到sendfile+DMA的零拷贝方式，而只能用mmap。
+     */
 
     /**
      * 操作系统每页大小，默认 4KB
@@ -111,8 +148,8 @@ public class MappedFile extends ReferenceResource {
     protected FileChannel fileChannel;
 
     /**
-     * 物理文件对应的内存映射 Buffer，对应操作系统的 PageCache
-     *
+     * 物理文件对应的内存映射 Buffer，对应操作系统的 PageCache，即内存映射机制
+     * <p>
      * java nio 中引入基于 MappedByteBuffer 操作大文件的方式，其读写性能极高
      */
     private MappedByteBuffer mappedByteBuffer;
@@ -269,7 +306,7 @@ public class MappedFile extends ReferenceResource {
             // 创建具有读写功能的通道，对文件 file 进行封装
             this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
 
-            // todo 根据文件通道映射一个 MappedByteBuffer，将文件映射到内存中
+            // todo 根据文件通道映射一个 MappedByteBuffer，将文件映射到内存中，即采用了 mmap
             this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
             TOTAL_MAPPED_FILES.incrementAndGet();
@@ -770,6 +807,12 @@ public class MappedFile extends ReferenceResource {
         this.committedPosition.set(pos);
     }
 
+    /**
+     * 文件预热，把当前映射的文件，每一页遍历，写入一个0字节；
+     *
+     * @param type
+     * @param pages
+     */
     public void warmMappedFile(FlushDiskType type, int pages) {
         long beginTime = System.currentTimeMillis();
         ByteBuffer byteBuffer = this.mappedByteBuffer.slice();
@@ -806,6 +849,9 @@ public class MappedFile extends ReferenceResource {
         log.info("mapped file warm-up done. mappedFile={}, costTime={}", this.getFileName(),
                 System.currentTimeMillis() - beginTime);
 
+        // 调用了mlock 和 madvise(MADV_WILLNEED)
+        // mlock: 可以将进程使用的部分或者全部的地址空间锁定在物理内存中，防止其被交换到swap空间。
+        // madvise：给操作系统建议，说这文件在不久的将来要访问的，因此，提前读几页可能是个好主意。
         this.mlock();
     }
 

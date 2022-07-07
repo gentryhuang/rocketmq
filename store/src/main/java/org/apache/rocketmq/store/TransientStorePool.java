@@ -32,6 +32,14 @@ import sun.nio.ch.DirectBuffer;
 
 /**
  * 堆外内存池
+ * <p>
+ * 1. Java NIO的内存映射机制，提供了将文件系统中的文件映射到内存机制，实现对文件的操作转换对内存地址的操作，极大的提高了IO特性，但这部分内存并不是常驻内存，可能被置换到交换区；
+ * 2. RocketMQ 为了提高消息发送的性能，引入了内存锁定机制，即将最近需要操作的commitlog文件映射到内存，并提供 内存锁定功能，确保这些文件始终存在内存中，该机制的控制参数就是transientStorePoolEnable。
+ * 3. 如果开启了transientStorePoolEnable，内存锁定机制，那是不是随着commitlog文件的不断增加，最终导致内存溢出？答案如下：
+ * 3.1 TransientStorePool默认会初始化5个DirectByteBuffer(堆外内存)，并提供内存锁定功能，即这部分内存不会被置换，可以通过transientStorePoolSize参数控制。
+ * 3.2 在消息写入消息时，首先从池子中获取一个 DirectByteBuffer 进行消息的追加，当 DirectByteBuffer 写满后会重用。此外，同一时间，只会对一个commitlog文件进行顺序写，写完一个后，继续创建一个新的commitlog文件。
+ * 故TransientStorePool的设计思想是循环利用这5个DirectByteBuffer，只需要写入到DirectByteBuffer的内容被提交到PageCache后，即可重复利用。
+ * 3.3 因此，可以看出不会随着消息的不断写入而导致内存溢出。
  */
 public class TransientStorePool {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
