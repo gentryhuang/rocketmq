@@ -62,10 +62,18 @@ public class MessageExt extends Message {
      * 消息存储时间
      */
     private long storeTimestamp;
+
+    /**
+     * 连接到的 Broker Socket
+     */
     private SocketAddress storeHost;
 
     /**
-     * 本质上是 offsetMsgId，是消息存储在 Broker 后生成的一个id。并非我们说的那个 msgId
+     * todo 本质上是 offsetMsgId，是消在 Broker 后生成的一个id，并非我们说的那个 msgId。
+     * 注意：
+     * 1. 该属性值是客户端在解析消息时生成的，Broker 端没有存储。 @see org.apache.rocketmq.client.impl.consumer.PullAPIWrapper#processPullResult(org.apache.rocketmq.common.message.MessageQueue, org.apache.rocketmq.client.consumer.PullResult, org.apache.rocketmq.common.protocol.heartbeat.SubscriptionData)
+     * 2. 当前类的 toString 方法打印的是 msgId，也就是 offsetMsgId
+     * 3. getMsgId 方法返回的却是 msgId
      */
     private String msgId;
 

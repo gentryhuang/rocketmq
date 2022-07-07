@@ -88,6 +88,11 @@ public class MappedFile extends ReferenceResource {
 如果你要对数据修改，sendFile就不合适了，而mmap 将磁盘文件映射到内存，支持读和写。
           - sendFile相当于是原汁原味地读写，直接将硬盘上的文件送给网卡，但这种方式并不一定对所有场景都适用，比如如果你需要从硬盘上读取文件，然后经过一定修改之后再送给网卡的情况下，就不适合用sendFile。
           对于RocketMQ来说，因为RocketMQ将所有队列的数据都写入了CommitLog，消费者批量消费时需要读出来进行应用层过滤，所以就不能利用到sendfile+DMA的零拷贝方式，而只能用mmap。
+
+
+      transientStorePoolEnable能缓解pagecache的压力背后关键如下：
+        1. 消息先写入到堆外内存中，该内存由于启用了内存锁定机制，故消息的写入是接近直接操作内存，性能能得到保证。消息进入到堆外内存后，后台会启动一个线程，一批一批将消息提交到pagecache，
+        即写消息时对pagecache的写操作由单条写入变成了批量写入，降低了对pagecache的压力。
      */
 
     /**

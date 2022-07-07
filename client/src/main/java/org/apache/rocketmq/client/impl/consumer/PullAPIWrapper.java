@@ -116,6 +116,7 @@ public class PullAPIWrapper {
         if (PullStatus.FOUND == pullResult.getPullStatus()) {
             // 解析消息
             ByteBuffer byteBuffer = ByteBuffer.wrap(pullResultExt.getMessageBinary());
+            // todo 包含 offsetMsgId 的生成
             List<MessageExt> msgList = MessageDecoder.decodes(byteBuffer);
 
             // todo 根据订阅信息消息tag 匹配合适消息

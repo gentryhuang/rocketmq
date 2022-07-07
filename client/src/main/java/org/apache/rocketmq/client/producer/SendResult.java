@@ -28,6 +28,9 @@ public class SendResult {
      * 发送状态
      */
     private SendStatus sendStatus;
+    /**
+     * 生产方生成的 msgId
+     */
     private String msgId;
     private MessageQueue messageQueue;
     /**
@@ -36,7 +39,9 @@ public class SendResult {
     private long queueOffset;
     private String transactionId;
 
-
+    /**
+     * Broker 端的 offsetMsgId
+     */
     private String offsetMsgId;
     private String regionId;
     private boolean traceOn = true;

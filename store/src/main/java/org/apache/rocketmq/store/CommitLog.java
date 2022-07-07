@@ -2143,10 +2143,13 @@ public class CommitLog {
 
             // 计算 commitlog 中的 msgId
             this.resetByteBuffer(storeHostHolder, storeHostLength);
+
+            // todo 这里应该叫 offsetMsgId ，该ID中包含很多信息
             String msgId;
 
             // 2 创建全局唯一的 msgId，底层存储由16个字节表示
-            // 格式：4字节 IP + 4字节端口号 + 8字节消息偏移量
+            // 格式：4字节当前 Broker IP + 4字节当前 Broker 端口号 + 8字节消息物理偏移量
+            // todo 在 RocketMQ中，只需要提供 offsetMsgId，可用不必知道该消息所属的topic信息即可查询该条消息的内容。
             if ((sysflag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0) {
                 msgId = MessageDecoder.createMessageId(this.msgIdMemory, msgInner.getStoreHostBytes(storeHostHolder), wroteOffset);
             } else {
@@ -2299,7 +2302,7 @@ public class CommitLog {
                     AppendMessageStatus.PUT_OK,
                     wroteOffset,
                     msgLen,
-                    msgId, // 消息ID
+                    msgId, // offsetMsgId
                     msgInner.getStoreTimestamp(),
                     queueOffset,
                     CommitLog.this.defaultMessageStore.now() - beginTimeMills);

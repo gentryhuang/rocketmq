@@ -31,6 +31,8 @@ import org.apache.rocketmq.remoting.protocol.RemotingSysResponseCode;
 
 /**
  * 快速失败的实现类，用于定期检测 PageCache 是否繁忙，繁忙则将排队中的发送消息线程任务快速失败掉，结束等待。
+ * <p>
+ * todo 从 Broker 端快速失败机制引入的初衷来看，快速失败后会发起重试（消息生产方默认进行 2 次重试）
  */
 public class BrokerFastFailure {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);

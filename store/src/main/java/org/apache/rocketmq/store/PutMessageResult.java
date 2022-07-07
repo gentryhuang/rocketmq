@@ -20,7 +20,13 @@ package org.apache.rocketmq.store;
  * 存储消息结果
  */
 public class PutMessageResult {
+    /**
+     * 写入状态
+     */
     private PutMessageStatus putMessageStatus;
+    /**
+     * 消息写入 CommitLog 的结果
+     */
     private AppendMessageResult appendMessageResult;
 
     public PutMessageResult(PutMessageStatus putMessageStatus, AppendMessageResult appendMessageResult) {

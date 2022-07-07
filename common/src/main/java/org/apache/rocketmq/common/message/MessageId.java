@@ -18,8 +18,17 @@ package org.apache.rocketmq.common.message;
 
 import java.net.SocketAddress;
 
+/**
+ * 消息的绝对信息
+ */
 public class MessageId {
+    /**
+     * Broker 地址
+     */
     private SocketAddress address;
+    /**
+     * 消息在 CommitLog 中的物理偏移量
+     */
     private long offset;
 
     public MessageId(SocketAddress address, long offset) {

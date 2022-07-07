@@ -37,7 +37,7 @@ public class AppendMessageResult {
     // Write Bytes
     private int wroteBytes;
 
-    // 消息id
+    // todo 消息 offsetMsgId ,在 RocketMQ中，只需要提供 offsetMsgId，可用不必知道该消息所属的topic信息即可查询该条消息的内容。
     // Message ID
     private String msgId;
 

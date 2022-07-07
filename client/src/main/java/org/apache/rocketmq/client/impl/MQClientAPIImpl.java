@@ -615,6 +615,7 @@ public class MQClientAPIImpl {
         // 发送
         RemotingCommand response = this.remotingClient.invokeSync(addr, request, timeoutMillis);
         assert response != null;
+
         // 处理响应并返回结果
         return this.processSendResponse(brokerName, msg, response, addr);
     }
@@ -846,6 +847,7 @@ public class MQClientAPIImpl {
 
         MessageQueue messageQueue = new MessageQueue(topic, brokerName, responseHeader.getQueueId());
 
+        // 获取消息发送端生成的 msgId
         String uniqMsgId = MessageClientIDSetter.getUniqID(msg);
         if (msg instanceof MessageBatch) {
             StringBuilder sb = new StringBuilder();
@@ -858,8 +860,8 @@ public class MQClientAPIImpl {
         // 发送消息的响应对象
         SendResult sendResult = new SendResult(
                 sendStatus,
-                uniqMsgId,
-                responseHeader.getMsgId(), // Broker 端的MsgId
+                uniqMsgId, // 消息发送端生成的 msgId
+                responseHeader.getMsgId(), // Broker 端的 offsetMsgId
                 messageQueue,
                 responseHeader.getQueueOffset()
         );

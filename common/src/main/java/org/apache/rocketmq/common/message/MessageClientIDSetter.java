@@ -20,6 +20,7 @@ import java.nio.ByteBuffer;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.rocketmq.common.UtilAll;
 
 public class MessageClientIDSetter {
@@ -111,6 +112,11 @@ public class MessageClientIDSetter {
         return value & 0x0000FFFF;
     }
 
+    /**
+     * 创建唯一 ID
+     *
+     * @return
+     */
     public static String createUniqID() {
         StringBuilder sb = new StringBuilder(LEN * 2);
         sb.append(FIX_STRING);
@@ -129,13 +135,26 @@ public class MessageClientIDSetter {
         return buffer.array();
     }
 
+    /**
+     * 创建消息的 UNIQ_KEY 属性值
+     *
+     * @param msg
+     */
     public static void setUniqID(final Message msg) {
         if (msg.getProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX) == null) {
+            // 生成 msgId
             msg.putProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX, createUniqID());
         }
     }
 
+    /**
+     * 获取消息的 msgId
+     *
+     * @param msg
+     * @return
+     */
     public static String getUniqID(final Message msg) {
+        // 从 UNIQ_KEY 属性中
         return msg.getProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
     }
 

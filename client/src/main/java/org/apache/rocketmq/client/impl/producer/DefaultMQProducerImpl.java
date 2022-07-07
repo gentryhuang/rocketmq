@@ -1001,10 +1001,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             byte[] prevBody = msg.getBody();
             try {
 
-                // 对于批量消息，为消息分配全局唯一ID
+                // 对于非批量消息，为消息分配全局唯一ID
                 //for MessageBatch,ID has been set in the generating process
                 if (!(msg instanceof MessageBatch)) {
-                    // 设置唯一编号
+                    // todo msg 的 UNIQ_KEY 属性值，该ID 是消息发送者在消息发送时会首先在客户端生成，全局唯一，即 msgId
                     MessageClientIDSetter.setUniqID(msg);
                 }
 
@@ -1768,7 +1768,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             final LocalTransactionState localTransactionState,
             final Throwable localException) throws RemotingException, MQBrokerException, InterruptedException, UnknownHostException {
 
-        // 解码消息编号，这个是服务端的 msgId，包含不少消息的元信息
+        // 解码消息编号，这个是服务端的 offfsetMsgId，包含当前消息的绝对信息：所属 Broker + 消息在 CommitLog 中的偏移量
         final MessageId id;
         if (sendResult.getOffsetMsgId() != null) {
             id = MessageDecoder.decodeMessageId(sendResult.getOffsetMsgId());

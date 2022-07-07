@@ -26,7 +26,7 @@ import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class SendMessageResponseHeader implements CommandCustomHeader {
     /**
-     * Broker 端的消息特别信息
+     * Broker 端的消息特别信息，其实是 offsetMsgId，里面包含： Broker 的地址和写入消息的物理偏移量
      */
     @CFNotNull
     private String msgId;
