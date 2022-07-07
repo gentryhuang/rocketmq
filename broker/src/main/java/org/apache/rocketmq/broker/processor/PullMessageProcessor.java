@@ -615,6 +615,7 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
                                 "PULL_OFFSET_MOVED:correction offset. topic={}, groupId={}, requestOffset={}, newOffset={}, suggestBrokerId={}",
                                 requestHeader.getTopic(), requestHeader.getConsumerGroup(), event.getOffsetRequest(), event.getOffsetNew(),
                                 responseHeader.getSuggestWhichBrokerId());
+
                     } else {
                         responseHeader.setSuggestWhichBrokerId(subscriptionGroupConfig.getBrokerId());
                         response.setCode(ResponseCode.PULL_RETRY_IMMEDIATELY);

@@ -246,7 +246,7 @@ public class BrokerController {
         this.brokerOuterAPI = new BrokerOuterAPI(nettyClientConfig);
         this.filterServerManager = new FilterServerManager(this);
 
-        // 8 从节点同步
+        // todo 8 从节点同步
         this.slaveSynchronize = new SlaveSynchronize(this);
 
         this.sendThreadPoolQueue = new LinkedBlockingQueue<Runnable>(this.brokerConfig.getSendThreadPoolQueueCapacity());
@@ -1006,8 +1006,10 @@ public class BrokerController {
             this.filterServerManager.start();
         }
 
+        // todo 开启从主服务器同步定时任务
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             startProcessorByHa(messageStoreConfig.getBrokerRole());
+
             handleSlaveSynchronize(messageStoreConfig.getBrokerRole());
             this.registerBrokerAll(true, false, true);
         }
@@ -1281,6 +1283,9 @@ public class BrokerController {
         return accessValidatorMap;
     }
 
+    /**
+     * 从主服务器同步
+     */
     private void handleSlaveSynchronize(BrokerRole role) {
         // 如果是从服务器
         if (role == BrokerRole.SLAVE) {
@@ -1301,6 +1306,8 @@ public class BrokerController {
                     }
                 }
             }, 1000 * 3, 1000 * 10, TimeUnit.MILLISECONDS);
+
+            // 如果是主服务器，那么停止从主服务器同步的定时任务
         } else {
             //handle the slave synchronise
             if (null != slaveSyncFuture) {
@@ -1332,6 +1339,7 @@ public class BrokerController {
         }
 
         //handle the slave synchronise
+        // 转换成从节点，那么就需要开启从主服务器同步的定时任务
         handleSlaveSynchronize(BrokerRole.SLAVE);
 
         try {

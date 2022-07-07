@@ -1042,7 +1042,7 @@ public class DefaultMessageStore implements MessageStore {
                         // 当前未被拉取到消费端的 CommitLog 中的消息长度
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
 
-                        // RocketMQ 消息常驻内存的大小：40% * (机器物理内存)；超过该大小，RocketMQ 会将旧的消息置换回磁盘。
+                        // RocketMQ 消息常驻内存的大小：40% * (机器物理内存)；超过该大小，RocketMQ 会将旧的消息置换回磁盘，如果要访问不在 pageCache 中的消息，则需要从磁盘读取；
                         long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE // RocketMQ 所在服务器的总内存大小
                                 * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0)// RocketMQ 所能使用内存的最大比例，默认 40 。
                         );

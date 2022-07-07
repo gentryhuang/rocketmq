@@ -266,7 +266,8 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
     public void updateConsumeOffsetToBroker(MessageQueue mq, long offset, boolean isOneway) throws RemotingException,
             MQBrokerException, InterruptedException, MQClientException {
 
-        // 根据消息队列所在的 Broker 的名称，获取 Broker 地址
+        // 根据消息队列所在的 Broker 的名称，获取 Broker 地址，优先选择主服务器
+        // todo 也就是说，不管消息是从主服务器拉取的还是从从服务器拉取的，提交消息消费进度请求，优先选择主服务器。服务端就是接收其偏移量，更新到服务端的内存中，然后定时持久化到文件中。
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInAdmin(mq.getBrokerName());
 
         // 如果没有找到，则从 NameServer 上重新拉取 Topic 的路由信息
@@ -309,12 +310,12 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
      * 消费进度是保存在 broker 哪个地方：
      * Broker端的offset管理参照 ConsumerOffsetManager，保存逻辑其实与广播模式差不多，offset保存的路径：/rocketmq_home/store/config/consumerOffset.json。
      * 如下：
-     *
+     * <p>
      * {
-     * 	"offsetTable":{
-     * 		"%RETRY%demo_consumer@demo_consumer":{0:0},
-     * 		"hlb_topic@demo_consumer":{0:4,1:3,2:5,3:2}
-     *   }
+     * "offsetTable":{
+     * "%RETRY%demo_consumer@demo_consumer":{0:0},
+     * "hlb_topic@demo_consumer":{0:4,1:3,2:5,3:2}
+     * }
      * }
      *
      * @param mq

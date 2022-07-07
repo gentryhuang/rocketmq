@@ -26,7 +26,7 @@ public class SubscriptionGroupConfig {
 
     /**
      * 消费组
-     *
+     * <p>
      * todo RocketMQ 消息消费重试不是以主题，而是以消费组。
      */
     private String groupName;
@@ -56,7 +56,7 @@ public class SubscriptionGroupConfig {
      */
     private long brokerId = MixAll.MASTER_ID;
     /**
-     * 当消费缓慢，将转向 broker 的服务器上拉取消息，默认为 1
+     * 当消费缓慢，将转向 broker 的服务器上拉取消息，默认为 1，表示是从服务器
      */
     private long whichBrokerWhenConsumeSlowly = 1;
     /**
