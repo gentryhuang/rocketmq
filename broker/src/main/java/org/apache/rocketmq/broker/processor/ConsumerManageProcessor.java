@@ -187,7 +187,7 @@ public class ConsumerManageProcessor extends AsyncNettyRequestProcessor implemen
                 response.setRemark(null);
 
 
-                // 返回未找到，最终 RebalancePushImpl#computePullFromWhere 中得到的偏移量为-1。
+                // 如果偏移量小于等于0，但其消息已经存储在磁盘中，此时返回未找到，最终 RebalancePushImpl#computePullFromWhere 中得到的偏移量为-1。
             } else {
                 response.setCode(ResponseCode.QUERY_NOT_FOUND);
                 response.setRemark("Not found, V3_0_6_SNAPSHOT maybe this group consumer boot first");

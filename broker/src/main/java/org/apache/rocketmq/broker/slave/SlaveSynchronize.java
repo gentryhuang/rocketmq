@@ -85,7 +85,7 @@ public class SlaveSynchronize {
     }
 
     /**
-     * 从主服务器同步
+     * 从主服务器同步，每隔 10s 执行一次
      *
      * @see BrokerController#start()
      */

@@ -686,6 +686,17 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     /**
      * 消息发送
+     * <p>
+     * todo 消息发送过程可能出现的问题：
+     * <p>
+     * 1. NameSrv 宕机
+     * - 在发送消息阶段，如果生产者本地缓存中没有缓存 topic 的路由信息，则需要从 NameServer 获取，只有当所有 NameServer 都不可用时，才会抛 MQClientException，否则会重试其它的 NameSrv（消息客户端(消息发送者、消息消费者)在任意时刻只会和其中一台NameServer建立连接）；
+     * 如果所有的 NameServer 全部挂掉，并且生产者有缓存 Topic 的路由信息，此时依然可以发送消息。所以，NameServer 的宕机，通常不会对整个消息发送带来什么严重的问题。
+     * 2. Broker 宕机
+     * - 消息生产者每隔 30s 从 NameServer 处获取最新的 Broker 存活信息（topic路由信息），Broker 每30s 向所有的 NameServer 报告自己的情况，故 Broker 的 down 机，Procuder 的最大可感知时间为 60s；
+     * - 在这 60s，消息发送会有什么影响呢？
+     * -- 1）启用sendLatencyFaultEnable，会对获取的 MQ 进行可用性验证，比如获取一个MessageQueue 发送失败，这时会对该 Broker 进行标记，标记该 Broker 在未来的某段时间内不会被选择到，默认为（5分钟，不可改变），所有此时只有当该 topic 全部的 broker 挂掉，才无法发送消息，符合高可用设计。
+     * ---2）不启用sendLatencyFaultEnable = false，此时会出现消息发送失败的情况，因为默认情况下，producer 每次发送消息，会采取轮询机制取下一个 MessageQueue,由于可能该 MessageQueue 所在的就是刚才挂掉的 Broker，会继续选择下一个 MessageQueue。
      *
      * @param msg               消息
      * @param communicationMode 发送方式：SYNC 、ASYNC、ONEWAY

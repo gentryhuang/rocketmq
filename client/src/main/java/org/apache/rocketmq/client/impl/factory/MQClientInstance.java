@@ -220,6 +220,7 @@ public class MQClientInstance {
         // todo 在客户端实例创建时，创建 网络通信客户端封装类
         this.mQClientAPIImpl = new MQClientAPIImpl(this.nettyClientConfig, this.clientRemotingProcessor, rpcHook, clientConfig);
 
+        // todo 更新 namserSrv 地址
         if (this.clientConfig.getNamesrvAddr() != null) {
             this.mQClientAPIImpl.updateNameServerAddressList(this.clientConfig.getNamesrvAddr());
             log.info("user specified name server address: {}", this.clientConfig.getNamesrvAddr());
@@ -833,6 +834,7 @@ public class MQClientInstance {
      * org.apache.rocketmq.broker.BrokerController#start()
      * 3 因此该方法获取 TBW102 的路由信息一定可以获取到，因为Broker启动时默认创建的，Broker启动时会向NameSrv注册。
      * 4 生产者发送消息时指定的 Topic 在首次发送消息的时候，从 NameSrv 是拉取不到的，因为它根据就没有上报过 NameSrv
+     * 5 todo NameSrv 请求异常不会更新缓存，即即使 NameSrv 全部宕机了只要有缓存就可以请求 Broker 。额外需要注意，请求某个 NameSrv 异常后，下次会请求其它的 NameSrv 。
      *
      * @param topic
      * @param isDefault

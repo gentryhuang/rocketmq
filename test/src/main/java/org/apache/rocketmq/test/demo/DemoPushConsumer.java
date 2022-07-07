@@ -5,6 +5,7 @@ import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
+import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
 
 import java.util.List;
@@ -30,6 +31,8 @@ public class DemoPushConsumer {
         consumer.subscribe("hlb_topic", "*");
 
         consumer.subscribe("","","");
+
+        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
 
         // Register callback to execute on arrival of messages fetched from brokers.
         // 注册要在从代理获取的消息到达时执行的回调，即注册消息监听器

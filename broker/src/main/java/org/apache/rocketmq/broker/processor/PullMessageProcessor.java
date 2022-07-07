@@ -131,11 +131,13 @@ public class PullMessageProcessor extends AsyncNettyRequestProcessor implements 
 
         // todo 校验 consumer 分组配置是否存在。当不存在时，如果允许自动创建则根据当前 consumerGroup 创建一个基本的消费组配置信息.
         // 目前好像只有控制台可以修改，程序中都是自动创建。
+        // todo 消费组是否运行自动创建，一般公司会禁止自动创建主题、消费组
         SubscriptionGroupConfig subscriptionGroupConfig =
                 this.brokerController.getSubscriptionGroupManager().findSubscriptionGroupConfig(requestHeader.getConsumerGroup());
 
         // todo 如果还是为空，则不能拉取消息，直接报错 订阅组不存在
         // todo 如果不允许自动创建订阅组信息，必须手动向 Broker 创建订阅组信息，否则不能拉取消息
+        // todo 即某个消费组下的消费者从 Broker 拉取消息，那么该 Broker 必须有消费组的信息，不然无法拉取消息。FIXME 集群扩容时，需要同步在集群上的topic.json、subscriptionGroup.json文件。
         if (null == subscriptionGroupConfig) {
             response.setCode(ResponseCode.SUBSCRIPTION_GROUP_NOT_EXIST);
             response.setRemark(String.format("subscription group [%s] does not exist, %s", requestHeader.getConsumerGroup(), FAQUrl.suggestTodo(FAQUrl.SUBSCRIPTION_GROUP_NOT_EXIST)));

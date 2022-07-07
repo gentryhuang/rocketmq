@@ -30,7 +30,7 @@ public class DemoProducer {
 
         //Create a message instance, specifying topic, tag and message body.
 
-        for (int i = 1; i < 1000; i++) {
+        for (int i = 1; i < 10000000; i++) {
             Message msg = new Message("hlb_topic" /* Topic */,
                     "TagA" /* Tag */,
                     ("Hello RocketMQ " +

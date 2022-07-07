@@ -70,7 +70,7 @@ public class NamesrvController {
 
     /**
      * 实现 ChannelEventListener 接口，在发送异常时的回调方法。
-     *
+     * <p>
      * 主要用于在 Nameserver与 Broker的连接通道在关闭、通道发送异常、通道空闲时），在上述数据结构中移除已宕机的 Broker。
      */
     private BrokerHousekeepingService brokerHousekeepingService;
@@ -118,7 +118,7 @@ public class NamesrvController {
         this.registerProcessor();
 
         // todo 定时任务
-        //  扫描并提出长时间没有和 NameSrv 的 Broker
+        //  没 10s 扫描并剔除长时间没有和 NameSrv 的 Broker
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {

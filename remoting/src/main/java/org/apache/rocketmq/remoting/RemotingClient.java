@@ -28,18 +28,65 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 public interface RemotingClient extends RemotingService {
 
+    /**
+     * 更新 NameSrv 地址
+     *
+     * @param addrs
+     */
     void updateNameServerAddressList(final List<String> addrs);
 
+    /**
+     * 获取 NameSrv 地址列表
+     *
+     * @return
+     */
     List<String> getNameServerAddressList();
 
+    /**
+     * 同步请求
+     *
+     * @param addr          目标服务地址，如果请求的是 NameSrv ，则该地址为 null
+     * @param request       请求对象
+     * @param timeoutMillis 请求超时时间
+     * @return
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingSendRequestException
+     * @throws RemotingTimeoutException
+     */
     RemotingCommand invokeSync(final String addr, final RemotingCommand request,
                                final long timeoutMillis) throws InterruptedException, RemotingConnectException,
             RemotingSendRequestException, RemotingTimeoutException;
 
+    /**
+     * 异步请求
+     *
+     * @param addr           目标服务地址，如果请求的是 NameSrv ，则该地址为 null
+     * @param request        请求对象
+     * @param timeoutMillis  请求超时时间
+     * @param invokeCallback 请求回调对象
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingTooMuchRequestException
+     * @throws RemotingTimeoutException
+     * @throws RemotingSendRequestException
+     */
     void invokeAsync(final String addr, final RemotingCommand request, final long timeoutMillis,
                      final InvokeCallback invokeCallback) throws InterruptedException, RemotingConnectException,
             RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException;
 
+    /**
+     * oneway 请求
+     *
+     * @param addr          目标服务地址，如果请求的是 NameSrv ，则该地址为 null
+     * @param request       请求对象
+     * @param timeoutMillis 请求超时时间
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingTooMuchRequestException
+     * @throws RemotingTimeoutException
+     * @throws RemotingSendRequestException
+     */
     void invokeOneway(final String addr, final RemotingCommand request, final long timeoutMillis)
             throws InterruptedException, RemotingConnectException, RemotingTooMuchRequestException,
             RemotingTimeoutException, RemotingSendRequestException;

@@ -60,6 +60,9 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
  * - queueId
  * 4 在 NameServer 的 RouteInfoManager 中，主要的路由信息就是由 topicQueueTable 和 brokerAddrTable 这两个 Map 来保存的。
  * 5 在 RouteInfoManager 中，这 5 个 Map 作为一个整体资源，使用了一个读写锁来做并发控制，避免并发更新和更新过程中读到不一致的数据问题。
+ * todo 客户端感觉路由信息发生变化需要的时间？
+ * - NameServer与Broker服务器TCP连接断开，此时NameServer能立即感知路由信息变化，将其从路由表中移除，从而消息发送端应该在30s左右就能感知路由发送变化，在此30s内在发送端会出现消息发送失败,但结合发送规避机制，并不会对发送方带来重大故障，可接受。
+ * - 如果NameServer与Broker服务器的TCP连接未断开，但Broker已无法提供服务(例如假死)，此时NameServer需要120s（定时任务中判定 Broker 异常的时间）才能感知Broker宕机，此时消息发送端最多需要150s才能感知其路由信息的变化。
  */
 public class RouteInfoManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
@@ -630,14 +633,21 @@ public class RouteInfoManager {
         }
     }
 
+    /**
+     * 在 NameSrv 和 Broker 连接有问题时会调用该方法
+     *
+     * @param remoteAddr 连接当前 NameSrv 的 Broker 地址
+     * @param channel    远端 Broker 连接当前 NameSrv 的通道
+     */
     public void onChannelDestroy(String remoteAddr, Channel channel) {
         String brokerAddrFound = null;
         if (channel != null) {
             try {
                 try {
                     this.lock.readLock().lockInterruptibly();
-                    Iterator<Entry<String, BrokerLiveInfo>> itBrokerLiveTable =
-                            this.brokerLiveTable.entrySet().iterator();
+
+                    // 根据连接通道筛选有问题的 Broker
+                    Iterator<Entry<String, BrokerLiveInfo>> itBrokerLiveTable = this.brokerLiveTable.entrySet().iterator();
                     while (itBrokerLiveTable.hasNext()) {
                         Entry<String, BrokerLiveInfo> entry = itBrokerLiveTable.next();
                         if (entry.getValue().getChannel() == channel) {
@@ -653,14 +663,17 @@ public class RouteInfoManager {
             }
         }
 
+
+        // 根据 Broker 地址剔除掉 Broker
         if (null == brokerAddrFound) {
             brokerAddrFound = remoteAddr;
         } else {
             log.info("the broker's channel destroyed, {}, clean it's data structure at once", brokerAddrFound);
         }
 
+        // 从 NameSrv 中剔除所有和当前异常 Broker 的缓存
+        // todo 特别是 Topic 的队列分布情况
         if (brokerAddrFound != null && brokerAddrFound.length() > 0) {
-
             try {
                 try {
                     this.lock.writeLock().lockInterruptibly();
@@ -728,6 +741,8 @@ public class RouteInfoManager {
                             Iterator<QueueData> itQueueData = queueDataList.iterator();
                             while (itQueueData.hasNext()) {
                                 QueueData queueData = itQueueData.next();
+
+                                // 将队列信息属于异常 Broker 的剔除掉
                                 if (queueData.getBrokerName().equals(brokerNameFound)) {
                                     itQueueData.remove();
                                     log.info("remove topic[{} {}], from topicQueueTable, because channel destroyed",
@@ -955,7 +970,7 @@ class BrokerLiveInfo {
      */
     private DataVersion dataVersion;
     /**
-     * 连接通道
+     * 远端连接当前 NameSrv 的连接通道
      */
     private Channel channel;
     private String haServerAddr;

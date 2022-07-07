@@ -1568,6 +1568,7 @@ public class DefaultMessageStore implements MessageStore {
                 try {
                     for (int i = 0; i < bufferConsumeQueue.getSize(); ) {
                         i += ConsumeQueue.CQ_STORE_UNIT_SIZE;
+                        // 当前消息的物理偏移量
                         long offsetPy = bufferConsumeQueue.getByteBuffer().getLong();
                         return checkInDiskByCommitOffset(offsetPy, maxOffsetPy);
                     }

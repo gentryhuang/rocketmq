@@ -37,7 +37,7 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
 public class ClientConfig {
     public static final String SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY = "com.rocketmq.sendMessageWithVIPChannel";
     /**
-     * NameSrv 地址
+     * todo NameSrv 地址，客户端具体实例设置的
      */
     private String namesrvAddr = NameServerAddressUtils.getNameServerAddresses();
     /**

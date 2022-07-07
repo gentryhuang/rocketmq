@@ -83,6 +83,9 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     private final EventLoopGroup eventLoopGroupWorker;
     private final Lock lockChannelTables = new ReentrantLock();
 
+    /**
+     * 服务地址 到 连接该服务通道 的映射
+     */
     private final ConcurrentMap<String /* addr */, ChannelWrapper> channelTables = new ConcurrentHashMap<String, ChannelWrapper>();
 
     private final Timer timer = new Timer("ClientHouseKeepingService", true);
@@ -95,6 +98,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
      * 选择的某个 NameSrv 地址
      */
     private final AtomicReference<String> namesrvAddrChoosed = new AtomicReference<String>();
+
     private final AtomicInteger namesrvIndex = new AtomicInteger(initValueIndex());
     private final Lock namesrvChannelLock = new ReentrantLock();
 
@@ -381,6 +385,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 log.info("name server address updated. NEW : {} , OLD: {}", addrs, old);
                 this.namesrvAddrList.set(addrs);
 
+                // 新地址中不包括已经选中的 Name Srv 地址，则清除该缓存
                 if (!addrs.contains(this.namesrvAddrChoosed.get())) {
                     this.namesrvAddrChoosed.set(null);
                 }
@@ -391,23 +396,41 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     @Override
     public RemotingCommand invokeSync(String addr, final RemotingCommand request, long timeoutMillis)
             throws InterruptedException, RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException {
+
+        // 1 记录请求的开始时间
         long beginStartTime = System.currentTimeMillis();
+
+        // 2 根据请求服务的地址获取对应的通道
         final Channel channel = this.getAndCreateChannel(addr);
+
+        // 只有通道是激活的才能请求
         if (channel != null && channel.isActive()) {
             try {
+
+                // 前置方法
                 doBeforeRpcHooks(addr, request);
                 long costTime = System.currentTimeMillis() - beginStartTime;
                 if (timeoutMillis < costTime) {
                     throw new RemotingTimeoutException("invokeSync call timeout");
                 }
+
+                // 请求
                 RemotingCommand response = this.invokeSyncImpl(channel, request, timeoutMillis - costTime);
+
+                // 后置方法
                 doAfterRpcHooks(RemotingHelper.parseChannelRemoteAddr(channel), request, response);
+
+                // 返回响应
                 return response;
             } catch (RemotingSendRequestException e) {
                 log.warn("invokeSync: send request exception, so close the channel[{}]", addr);
                 this.closeChannel(addr, channel);
                 throw e;
+
+                // 调用超时异常
             } catch (RemotingTimeoutException e) {
+                // 调用超时是否关闭连接，默认不关闭。
+                // todo 如果是目标服务假死就有点麻烦了，如 NameSrv 假死
                 if (nettyClientConfig.isClientCloseSocketIfTimeout()) {
                     this.closeChannel(addr, channel);
                     log.warn("invokeSync: close socket because of timeout, {}ms, {}", timeoutMillis, addr);
@@ -415,17 +438,31 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 log.warn("invokeSync: wait response timeout exception, the channel[{}]", addr);
                 throw e;
             }
+
+            // 通道没有激活，则遗传缓存的通道并关闭
         } else {
             this.closeChannel(addr, channel);
+
+            // 抛出连接异常
             throw new RemotingConnectException(addr);
         }
     }
 
+    /**
+     * 获取或创基通道
+     *
+     * @param addr 请求目标服务的地址，如果为 null 就是请求 NameSrv
+     * @return
+     * @throws RemotingConnectException
+     * @throws InterruptedException
+     */
     private Channel getAndCreateChannel(final String addr) throws RemotingConnectException, InterruptedException {
+        // 获取或创建连接到 NameSrv 的通道
         if (null == addr) {
             return getAndCreateNameserverChannel();
         }
 
+        // 其它通道
         ChannelWrapper cw = this.channelTables.get(addr);
         if (cw != null && cw.isOK()) {
             return cw.getChannel();
@@ -434,18 +471,30 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         return this.createChannel(addr);
     }
 
+    /**
+     * 获取或创建连接 NameSrv 通道
+     *
+     * @return
+     * @throws RemotingConnectException
+     * @throws InterruptedException
+     */
     private Channel getAndCreateNameserverChannel() throws RemotingConnectException, InterruptedException {
+        // 获取被选中的 NameSrv 的地址
         String addr = this.namesrvAddrChoosed.get();
         if (addr != null) {
+            // 获取对应地址的通道
             ChannelWrapper cw = this.channelTables.get(addr);
+            // 通道必须是 OK 的
             if (cw != null && cw.isOK()) {
                 return cw.getChannel();
             }
         }
 
+        // 选中的地址为 null
         final List<String> addrList = this.namesrvAddrList.get();
         if (this.namesrvChannelLock.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
             try {
+                // 再次判断是否缓存的 NameSrv 地址
                 addr = this.namesrvAddrChoosed.get();
                 if (addr != null) {
                     ChannelWrapper cw = this.channelTables.get(addr);
@@ -454,15 +503,17 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                     }
                 }
 
+                // 没有被选中的 NameSrv 地址，那么就从 NameSrv 地址列表中随机地址选一个并缓存起来
                 if (addrList != null && !addrList.isEmpty()) {
                     for (int i = 0; i < addrList.size(); i++) {
                         int index = this.namesrvIndex.incrementAndGet();
                         index = Math.abs(index);
                         index = index % addrList.size();
                         String newAddr = addrList.get(index);
-
                         this.namesrvAddrChoosed.set(newAddr);
                         log.info("new name server is chosen. OLD: {} , NEW: {}. namesrvIndex = {}", addr, newAddr, namesrvIndex);
+
+                        // 获取或创建连接到选中的 NameSrv 地址的通道并返回
                         Channel channelNew = this.createChannel(newAddr);
                         if (channelNew != null) {
                             return channelNew;

@@ -41,6 +41,8 @@ public class SubscriptionGroupManager extends ConfigManager {
     /**
      * 消费组订阅配置信息
      * key: 消费组名 value: 消费组订阅数据
+     * <p>
+     * 用途：重试主题、消费组订阅配置指定在消费缓慢时建议的拉取 BrokerID
      */
     private final ConcurrentMap<String, SubscriptionGroupConfig> subscriptionGroupTable = new ConcurrentHashMap<String, SubscriptionGroupConfig>(1024);
 

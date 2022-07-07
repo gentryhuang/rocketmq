@@ -254,9 +254,17 @@ public class MQClientAPIImpl {
         return nameSrvAddr;
     }
 
+    /**
+     * 更新 NameSrv 地址
+     *
+     * @param addrs
+     */
     public void updateNameServerAddressList(final String addrs) {
+        // NameSrv 多个地址使用 ; 风格
         String[] addrArray = addrs.split(";");
         List<String> list = Arrays.asList(addrArray);
+
+        // 更新 NettyRemotingClient 中缓存的 NameSrv 地址
         this.remotingClient.updateNameServerAddressList(list);
     }
 
@@ -1716,6 +1724,8 @@ public class MQClientAPIImpl {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.GET_ROUTEINFO_BY_TOPIC, requestHeader);
 
         // 同步获取 topic 的路由信息
+        // todo 注意，此时请求的地址为 null ，表示的是请求 NameSrv
+        // @see org.apache.rocketmq.remoting.netty.NettyRemotingClient.invokeAsync
         RemotingCommand response = this.remotingClient.invokeSync(null, request, timeoutMillis);
         assert response != null;
         switch (response.getCode()) {
