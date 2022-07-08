@@ -28,9 +28,7 @@ public class DemoPushConsumer {
 
         // Subscribe one more more topics to consume.
         // 订阅主题
-        consumer.subscribe("hlb_topic", "*");
-
-        consumer.subscribe("", "", "");
+        consumer.subscribe("hlb_topic", "TagB");
 
         consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
 

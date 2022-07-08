@@ -45,6 +45,7 @@ import org.apache.rocketmq.common.protocol.ResponseCode;
 import org.apache.rocketmq.common.protocol.header.ConsumerSendMsgBackRequestHeader;
 import org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader;
 import org.apache.rocketmq.common.protocol.header.SendMessageResponseHeader;
+import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
 import org.apache.rocketmq.common.subscription.SubscriptionGroupConfig;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 import org.apache.rocketmq.common.sysflag.TopicSysFlag;
@@ -449,7 +450,14 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
 
             // 存储普通消息
         } else {
-            putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
+
+            // 如果是延时消息
+            String delayTime = origProps.get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
+            if(delayTime != null && delayTime !=""){
+                putMessageResult = this.brokerController.getScheduleMessageStore().asyncPutMessage(msgInner);
+            }else {
+                putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
+            }
         }
 
         // 处理存储消息结果
