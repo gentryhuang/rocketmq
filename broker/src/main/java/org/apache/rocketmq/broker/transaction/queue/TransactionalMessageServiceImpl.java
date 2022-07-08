@@ -92,7 +92,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
         int checkTime = 1;
         if (null != checkTimes) {
             checkTime = getInt(checkTimes);
-            // 如果达到最大检查次数，则跳过
+            // 如果达到最大检查次数，默认 15 次，则跳过
             if (checkTime >= transactionCheckMax) {
                 return true;
                 // 没有达到，则更新当前消息的 check 次数
@@ -202,11 +202,11 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 // 记录开始时间
                 long startTime = System.currentTimeMillis();
 
-                // 根据消息队列获取对应的 OP 队列，没有则新创建一个
+                // todo  根据消息队列获取对应的 OP 队列，没有则新创建一个
                 MessageQueue opQueue = getOpQueue(messageQueue);
 
-                // todo 获取 Half 消息队列的当前消费进度（逻辑偏移量），也就是已经确定的消费进度。OP 消息会依据该确定进度判断哪些 Half 消息已经确定了。
-                // todo Half 消息队列消费进度，只会在回查的时候更新
+                // todo 获取 Half 消息队列的当前消费进度（逻辑偏移量），也就是已经确定的消费进度。OP 消息会依据该确定进度判断哪些 Half 消息已经确定了，然后收集起来；
+                // todo Half 消息队列消费进度，只会在回查的时候更新，因此正常情况下 Half 消息的消费进度是要小于 OP 消息存储的消费进度的。
                 long halfOffset = transactionalMessageBridge.fetchConsumeOffset(messageQueue);
 
                 // 获取 OP 队列的当前消费进度（逻辑偏移量）
@@ -222,7 +222,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 // op 队列的消息 offset
                 List<Long> doneOpOffset = new ArrayList<>();
 
-                // todo  removeMap 表示哪些 half（通过 half 逻辑偏移量 offset 标志） 不需要再回查了（half 消息已经有对应的 op 消息了）
+                // todo  removeMap 表示哪些 half（通过当前 half 消息逻辑偏移量 offset 作为参考） 已经完成不需要再回查了（half 消息已经有对应的 op 消息了）
                 // key: 已经完成的 half 消息逻辑偏移量 offset (在拉取一批 OP 消息后判断其存储的已经确定的 half 消息逻辑偏移量 >= 已经确定的消费进度 halfOffset)；在推进 half 消息的过程就可以前置过滤了，避免重复回查；
                 // value: op 消息逻辑偏移量 offset
                 HashMap<Long, Long> removeMap = new HashMap<>();
@@ -257,7 +257,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 long i = halfOffset;
 
 
-                // todo  不断推进 half 消息进度，然后通过前面拉取的一批 op 消息进行匹配，判断是否需要回查当前进度的 half 消息
+                // todo  不断推进 half 消息进度，然后通过前面拉取的一批 op 消息（已完成的 half 消息的进度会存储在 removeMap 中）进行对比，判断是否需要回查当前进度的 half 消息
                 while (true) {
 
                     // 每个 half 消息队列的处理时间是 60s
@@ -385,7 +385,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                             // 就可以认为 half 消息已经处理过了。
                             listener.resolveHalfMsg(msgExt);
 
-                            // 不需要回查，那么就拉取更多 op 消息
+                            // 不需要回查，那么就拉取更多的已经完成的 half （op 消息）消息进行对比
                         } else {
 
                             // 拉取更多的完成的事务消息，继续使用 op 消息前置过滤，然后继续筛选
@@ -401,7 +401,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                     i++;
                 }
 
-                /*-------------------------- 完成一次回查后，根据情况进行 half 消费队列 和 op 消费队列的消费进度更新 ------------------*/
+                /*-------------------------- 完成一次回查后，根据情况进行 half 消费队列 和 op 消费队列的消费进度更新，下次判断回查逻辑时，从最新的消费进度开始 ------------------*/
 
                 // 需要更新事务消息消费进度
                 if (newOffset != halfOffset) {
@@ -491,7 +491,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                     doneOpOffset.add(opMessageExt.getQueueOffset());
 
                     // 不需要校验
-                    // 存储 half 消息的逻辑偏移量 到 op 消息的逻辑偏移量
+                    // todo 存储已经完成的 half 消息的逻辑偏移量 到 op 消息的逻辑偏移量
                 } else {
                     removeMap.put(queueOffset, opMessageExt.getQueueOffset());
                 }

@@ -64,10 +64,10 @@ public class Broker2Client {
     /**
      * 检查生产者事务状态
      *
-     * @param group
-     * @param channel
-     * @param requestHeader
-     * @param messageExt
+     * @param group         生产者组
+     * @param channel       和消息发送发的通道
+     * @param requestHeader 回查请求头
+     * @param messageExt    待回查的 half 消息
      * @throws Exception
      */
     public void checkProducerTransactionState(
@@ -77,7 +77,7 @@ public class Broker2Client {
             final MessageExt messageExt) throws Exception {
         RemotingCommand request =
                 RemotingCommand.createRequestCommand(RequestCode.CHECK_TRANSACTION_STATE, requestHeader);
-        // 设置消息
+        // todo 设置消息到请求体
         request.setBody(MessageDecoder.encode(messageExt, false));
         try {
             /**

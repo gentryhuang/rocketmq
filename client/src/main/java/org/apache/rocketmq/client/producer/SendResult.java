@@ -40,7 +40,7 @@ public class SendResult {
     private String transactionId;
 
     /**
-     * Broker 端的 offsetMsgId
+     * Broker 端的 offsetMsgId (包含当前发送的消息所在的 Broker 地址以及在 CommitLog 中的物理偏移量）
      */
     private String offsetMsgId;
     private String regionId;

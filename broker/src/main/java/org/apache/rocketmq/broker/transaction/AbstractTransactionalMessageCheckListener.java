@@ -67,7 +67,7 @@ public abstract class AbstractTransactionalMessageCheckListener {
     /**
      * 发送检查本地事务状态消息
      *
-     * @param msgExt
+     * @param msgExt 待回查的 half 消息
      * @throws Exception
      */
     public void sendCheckMessage(MessageExt msgExt) throws Exception {
@@ -85,11 +85,12 @@ public abstract class AbstractTransactionalMessageCheckListener {
         msgExt.setQueueId(Integer.parseInt(msgExt.getUserProperty(MessageConst.PROPERTY_REAL_QUEUE_ID)));
         msgExt.setStoreSize(0);
 
-        // todo 取出发送消息时设置的生产者组
+        // todo 取出发送消息时设置的生产者组，到达客户端实例后，会取出该组下的一个生产方获取事务状态
         String groupId = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
 
         /**
          * 根据生产者组获取任意一个生产者，通过与其连接发送事务回查消息，回查消息的请求者为【Broker服务器】，接收者为(client，具体为消息生产者)。
+         * todo 生产方信息是心跳上报到 Broker 的
          *
          *  向 Producer 发送消息
          * @see ClientRemotingProcessor#processRequest(io.netty.channel.ChannelHandlerContext, org.apache.rocketmq.remoting.protocol.RemotingCommand)

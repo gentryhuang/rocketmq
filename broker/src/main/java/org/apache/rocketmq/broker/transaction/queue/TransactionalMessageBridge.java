@@ -54,7 +54,7 @@ public class TransactionalMessageBridge {
     private static final InternalLogger LOGGER = InnerLoggerFactory.getLogger(LoggerName.TRANSACTION_LOGGER_NAME);
 
     /**
-     * 消息队列 到 op 队列的映射
+     * half 消息简易队列 到 op 队列的映射
      */
     private final ConcurrentHashMap<MessageQueue, MessageQueue> opQueueMap = new ConcurrentHashMap<>();
     private final BrokerController brokerController;
@@ -320,7 +320,7 @@ public class TransactionalMessageBridge {
      * @return
      */
     public boolean putOpMessage(MessageExt messageExt, String opType) {
-        // 构建消息队列
+        // 构建 half 消息队列简易版
         MessageQueue messageQueue = new MessageQueue(
                 messageExt.getTopic(),
                 this.brokerController.getBrokerConfig().getBrokerName(),
@@ -444,7 +444,7 @@ public class TransactionalMessageBridge {
                 TransactionalMessageUtil.buildOpTopic(),
                 TransactionalMessageUtil.REMOVETAG,
 
-                // todo Op 消息存储的是 half 消息的逻辑偏移量，待验证
+                // todo Op 消息存储的是 half 消息的逻辑偏移量
                 String.valueOf(messageExt.getQueueOffset()).getBytes(TransactionalMessageUtil.charset)
         );
 
