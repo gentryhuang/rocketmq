@@ -473,10 +473,10 @@ public class DefaultMessageStore implements MessageStore {
         // todo 根据情况启动：1）高可用服务 2）启动延时消息处理任务
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
 
-            // 启动 HA
+            // 1  启动 HA
             this.haService.start();
 
-            // 启动处理延迟消息
+            // 2 启动处理延迟消息，只有主服务器才能执行
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
 
@@ -2080,8 +2080,7 @@ public class DefaultMessageStore implements MessageStore {
      * @param dispatchRequest
      */
     public void putMessagePositionInfo(DispatchRequest dispatchRequest) {
-        // 1 根据消息 topic 和 queueId ，获取对应的 ConsumeQueue 文件
-        // 找不到对应 ConsumeQueue 会自动创建一个
+        // 1 根据消息 topic 和 queueId ，获取对应的 ConsumeQueue 文件，找不到对应 ConsumeQueue 会自动创建一个
         // todo 因为每一个消息主题下每一个消息队列对应一个文件夹
         ConsumeQueue cq = this.findConsumeQueue(dispatchRequest.getTopic(), dispatchRequest.getQueueId());
 
@@ -2094,11 +2093,19 @@ public class DefaultMessageStore implements MessageStore {
         return brokerStatsManager;
     }
 
+    /**
+     * 处理延时消息服务
+     *
+     * @param brokerRole
+     */
     @Override
     public void handleScheduleMessageService(final BrokerRole brokerRole) {
         if (this.scheduleMessageService != null) {
+            // 如果当前 Broker 是从服务，则关闭
             if (brokerRole == BrokerRole.SLAVE) {
                 this.scheduleMessageService.shutdown();
+
+                // 如果当前 Broker 是主服务，则启动延时消息服务
             } else {
                 this.scheduleMessageService.start();
             }

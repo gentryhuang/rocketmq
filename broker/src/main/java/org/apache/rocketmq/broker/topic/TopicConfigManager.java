@@ -179,7 +179,7 @@ public class TopicConfigManager extends ConfigManager {
             String topic = TopicValidator.RMQ_SYS_SCHEDULE_TOPIC;
             TopicConfig topicConfig = new TopicConfig(topic);
             TopicValidator.addSystemTopic(topic);
-            // 读写队列 18 个
+            // todo 读写队列 18 个，每个队列对应一个延迟级别
             topicConfig.setReadQueueNums(SCHEDULE_TOPIC_QUEUE_NUM);
             topicConfig.setWriteQueueNums(SCHEDULE_TOPIC_QUEUE_NUM);
             this.topicConfigTable.put(topicConfig.getTopicName(), topicConfig);

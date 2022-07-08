@@ -48,12 +48,13 @@ import org.apache.rocketmq.store.config.StorePathConfigHelper;
 
 /**
  * 延时队列：
+ * 0 todo 延时消息服务不仅充当周期性（不断创建 Timer 的定时任务）扫描延时队列，还充当延时消息配置类（会对延时队列的相关配置进行持久化，如延时队列的消费进度，delayLevelTable 不会）
  * 1 RocketMQ 实现的延时队列只支持特定的延时时段，1s、5s、10s...2h，不能支持任意时间段的延时
  * 2 具体实现：
  * RocketMQ 发送延时消息时先把消息按延迟时间段发送到指定的队列中，RocketMQ 是把每种延迟时间段的消息都存放到同一个队列中，
  * 然后通过一个定时器进行轮询这些队列，查看消息是否到期，如果到期就把这个消息发送到指定 topic 的队列中。
  * 3 优点：
- * 设计简单，把所有相同延迟时间的消息都先放到一个队列中，定时扫描，可以保证消息消费的有序性
+ * 设计简单，把所有相同延迟时间的消息都先放到一个队列中保证了到期时间的有序性，定时扫描，可以保证消息消费的有序性
  * 4 缺点
  * 定时器采用 Timer，Timer 是单线程运行，如果延迟消息数量很大的情况下，可能单线程处理不过来，造成消息到期后也没发送出去的情况
  * 5 改进
@@ -156,11 +157,15 @@ public class ScheduleMessageService extends ConfigManager {
      * @return 投递时间
      */
     public long computeDeliverTimestamp(final int delayLevel, final long storeTimestamp) {
+        // 根据延迟级别取出对应的延时时间
         Long time = this.delayLevelTable.get(delayLevel);
+
+        // 计算消息投递时间
         if (time != null) {
             return time + storeTimestamp;
         }
 
+        // 没有对应的延时时间，默认使用 1s
         return storeTimestamp + 1000;
     }
 
@@ -171,7 +176,8 @@ public class ScheduleMessageService extends ConfigManager {
 
         // 通过AtomicBoolean 来确保有且仅有一次执行start方法
         if (started.compareAndSet(false, true)) {
-            // 加载延迟消息偏移量文件，默认：$user.home/store/config/delayOffset.json 到内存
+
+            // todo  加载延迟消息偏移量文件，默认：$user.home/store/config/delayOffset.json 到内存
             super.load();
 
             // 创建定时器
@@ -186,7 +192,7 @@ public class ScheduleMessageService extends ConfigManager {
                 // 延时时间
                 Long timeDelay = entry.getValue();
 
-                // todo 根据延时级别获取对应的偏移量，即 level 级别对应队列的偏移量
+                // todo 根据延时级别获取对应的偏移量，即 level 级别对应队列的逻辑偏移量
                 Long offset = this.offsetTable.get(level);
                 if (null == offset) {
                     offset = 0L;
@@ -200,7 +206,7 @@ public class ScheduleMessageService extends ConfigManager {
             }
 
             // 2 定时持久化延时队列的消费进度，每 10s 执行一次
-            // 刷新延时队列 topic 对应每个 queueid 的 offset 到本地磁盘。
+            // 刷新延时队列 topic 对应每个 queueid 的 offset 到本地磁盘（当前主 Broker)。
             this.timer.scheduleAtFixedRate(new TimerTask() {
 
                 @Override
@@ -322,11 +328,11 @@ public class ScheduleMessageService extends ConfigManager {
      */
     class DeliverDelayedMessageTimerTask extends TimerTask {
         /**
-         * 延时级别
+         * 延时级别，-1 就是对应的 ID
          */
         private final int delayLevel;
         /**
-         * 逻辑偏移量
+         * 延时级别对应消息队列的逻辑偏移量
          */
         private final long offset;
 
@@ -335,6 +341,9 @@ public class ScheduleMessageService extends ConfigManager {
             this.offset = offset;
         }
 
+        /**
+         * 延时执行 - 被延时调度了
+         */
         @Override
         public void run() {
             try {
@@ -363,7 +372,9 @@ public class ScheduleMessageService extends ConfigManager {
 
             // 重新计算消息投递时间
             long maxTimestamp = now + ScheduleMessageService.this.delayLevelTable.get(this.delayLevel);
+
             // 如果预期的投递时间比重新计算消息投递时间要大，那么以当前时间为准，因为可能延时等级对应的延时时间改变了
+            // todo 正常情况下，deliverTimestamp <= maxTimestamp ，如果 deliverTimestamp > maxTimestamp 说明延时等级对应的延时时间改小了，应该立即触发，避免后面的消息无法及时发送；
             if (deliverTimestamp > maxTimestamp) {
                 result = now;
             }
@@ -382,7 +393,7 @@ public class ScheduleMessageService extends ConfigManager {
             long failScheduleOffset = offset;
 
             if (cq != null) {
-                // 2 根据 cq 的逻辑偏移量获取消息的索引信息
+                // 2 根据 cq 的消费逻辑偏移量获取消息的索引信息
                 SelectMappedBufferResult bufferCQ = cq.getIndexBuffer(this.offset);
                 if (bufferCQ != null) {
                     try {
@@ -412,11 +423,13 @@ public class ScheduleMessageService extends ConfigManager {
                                 }
                             }
 
-                            // 2.2 todo 修正可投递时间，因为可能延时等级对应的延时时间改变了，这个时候不能以 tagsCode 中的预期消费时间为准
+
+                            // 2.2 todo 修正可投递时间，因为可能延时等级对应的延时时间会人为改变（改小），这个时候不能以 tagsCode 中的预期消费时间为准
                             long now = System.currentTimeMillis();
                             long deliverTimestamp = this.correctDeliverTimestamp(now, tagsCode);
 
                             // 2.3 下一个逻辑偏移量（第一次的时候 i = 0）
+                            // todo 推进了消息队列的偏移量
                             nextOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
                             // 2.4 判断延时时间是否到达
@@ -441,7 +454,7 @@ public class ScheduleMessageService extends ConfigManager {
                                             continue;
                                         }
 
-                                        // todo 2.7 投递真正的消息，这时候 setDelayTimeLevel = 0
+                                        // todo 2.7 投递真正的消息，这时候没有了延时消息的标志了
                                         PutMessageResult putMessageResult = ScheduleMessageService.this.writeMessageStore
                                                 .putMessage(msgInner);
 
@@ -481,9 +494,14 @@ public class ScheduleMessageService extends ConfigManager {
                                                         + msgExt + ", nextOffset=" + nextOffset + ",offsetPy="
                                                         + offsetPy + ",sizePy=" + sizePy, e);
                                     }
+
+
+                                    /*
+                                      todo 到期的延时消息重新投递失败，只是打印日志，然后就跳过了改消息(延迟队列消费的偏移量推进了），那岂不是会丢弃？
+                                     */
                                 }
 
-                                // todo 没有到达预期消费时间，那么就不需要继续往下遍历了。留着下次再次从这个偏移量开启遍历与判断是否到达
+                                // todo 没有到达预期消费时间，那么就不需要继续往下遍历了，因为同一个队列的到期时间是有序的，前一个没有到期后边的就更没有。留着下次再次从这个偏移量开启遍历与判断是否到达
                             } else {
 
                                 // 安排下一次任务
@@ -498,7 +516,7 @@ public class ScheduleMessageService extends ConfigManager {
                             }
                         } // end of for
 
-                        // 遍历完了拉取的消息索引条目，安排下次任务，就绪判断
+                        // 遍历完了拉取的消息索引条目，安排下次任务，继续判断
                         nextOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
                         ScheduleMessageService.this.timer.schedule(new DeliverDelayedMessageTimerTask(
                                 this.delayLevel, nextOffset), DELAY_FOR_A_WHILE); // 任务触发时间为 100ms
@@ -509,6 +527,8 @@ public class ScheduleMessageService extends ConfigManager {
                     } finally {
                         bufferCQ.release();
                     }
+
+
                 } // end of if (bufferCQ != null)
                 else {
 
@@ -555,6 +575,7 @@ public class ScheduleMessageService extends ConfigManager {
             msgInner.setReconsumeTimes(msgExt.getReconsumeTimes());
 
             msgInner.setWaitStoreMsgOK(false);
+            // 清理掉延时标志，不需要再次延时了
             MessageAccessor.clearProperty(msgInner, MessageConst.PROPERTY_DELAY_TIME_LEVEL);
 
             // 还原真实的 Topic 和 queueId

@@ -543,7 +543,7 @@ public class ConsumeQueue {
      * 2 写入失败，设置队列不可写，后续再来重放就不可写
      * 3 打印异常日志
      *
-     * @param request
+     * @param request 由 CommitLog 构建的 request
      */
     public void putMessagePositionInfoWrapper(DispatchRequest request) {
         // 最大重试次数
@@ -577,7 +577,7 @@ public class ConsumeQueue {
                     request.getCommitLogOffset(), // 消息在 CommitLog 中的物理偏移量
                     request.getMsgSize(), // 消息大小
                     tagsCode, // 消息的 tag
-                    request.getConsumeQueueOffset() // 消息在消息队列的逻辑偏移量
+                    request.getConsumeQueueOffset() // todo 消息在消息队列的逻辑偏移量，为了找到在哪个 ConsumeQueue 的哪个位置开始写
             );
 
             // 添加成功，使用消息存储时间 作为 存储 check point。
@@ -604,7 +604,7 @@ public class ConsumeQueue {
         }
 
         // XXX: warn and notify me
-        // 写入失败时，标记 ConsumeQueue 写入异常，不允许继续写入
+        // todo 写入失败时，标记 ConsumeQueue 写入异常，不允许继续写入
         log.error("[BUG]consume queue can not write, {} {}", this.topic, this.queueId);
         this.defaultMessageStore.getRunningFlags().makeLogicsQueueError();
     }

@@ -381,7 +381,9 @@ public class CommitLog {
                                                      final boolean readBody) {
         try {
 
-            // 1 TOTAL SIZE 消息条目总长度
+            /*---------- 根据消息在 CommitLog 中的存储格式，进行读取 --------------*/
+
+            // 1 TOTAL SIZE 当前消息条目大小
             int totalSize = byteBuffer.getInt();
             // 2 MAGIC CODE 魔数
             int magicCode = byteBuffer.getInt();
@@ -399,7 +401,7 @@ public class CommitLog {
 
             // 消息体的 crc 校验码
             int bodyCRC = byteBuffer.getInt();
-            // 消息消费队列ID
+            // todo 消息消费队列ID
             int queueId = byteBuffer.getInt();
             // FLAG FLAG 消息标记，RocketMQ 对其不做处理，供应用程序使用
             int flag = byteBuffer.getInt();
@@ -418,7 +420,7 @@ public class CommitLog {
             } else {
                 byteBuffer1 = byteBuffer.get(bytesContent, 0, 16 + 4);
             }
-            // 消息存储时间戳
+            // todo 消息存储时间戳
             long storeTimestamp = byteBuffer.getLong();
 
             // Broker 服务器 IP + 端口号
@@ -429,7 +431,7 @@ public class CommitLog {
                 byteBuffer2 = byteBuffer.get(bytesContent, 0, 16 + 4);
             }
 
-            // 消息重试次数
+            // todo 消息重试次数
             int reconsumeTimes = byteBuffer.getInt();
             // Prepared Transaction Offset
             long preparedTransactionOffset = byteBuffer.getLong();
@@ -458,7 +460,7 @@ public class CommitLog {
             String uniqKey = null;
 
 
-            // todo 处理附加属性
+            // todo 处理附加属性，很重要
             short propertiesLength = byteBuffer.getShort();
             Map<String, String> propertiesMap = null;
             if (propertiesLength > 0) {
@@ -470,10 +472,8 @@ public class CommitLog {
 
                 // 取出 KEYS
                 keys = propertiesMap.get(MessageConst.PROPERTY_KEYS);
-
-                // 取出 UNIQ_KEY
+                // 取出 UNIQ_KEY，消息的 msgId
                 uniqKey = propertiesMap.get(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX);
-
                 // 取出 TAGS
                 String tags = propertiesMap.get(MessageConst.PROPERTY_TAGS);
                 // todo 计算 tag 的 hashCode
@@ -483,7 +483,7 @@ public class CommitLog {
 
                 // Timing message processing 消息处理时间
                 {
-                    // 延迟级别
+                    // 是否是延时消息，根据附加属性中的 DELAY 值判断
                     String t = propertiesMap.get(MessageConst.PROPERTY_DELAY_TIME_LEVEL);
 
                     // 如果是延迟消息
@@ -497,7 +497,7 @@ public class CommitLog {
 
                         // todo 如果是延迟消息，tagsCode 存储计划消费时间
                         if (delayLevel > 0) {
-                            // 计算消息的计划消费时间，延迟级别对应的延迟时间 + 消息存储时间
+                            // todo 计算消息的计划消费时间：延迟级别对应的延迟时间 + 消息存储时间
                             tagsCode = this.defaultMessageStore.getScheduleMessageService().computeDeliverTimestamp(delayLevel, storeTimestamp);
                         }
                     }
@@ -531,10 +531,10 @@ public class CommitLog {
                     storeTimestamp, // 消息存储时间
                     queueOffset, // 消息逻辑队列偏移量
                     keys,
-                    uniqKey,
-                    sysFlag,
+                    uniqKey, // msgId
+                    sysFlag, // 消息系统标记
                     preparedTransactionOffset,
-                    propertiesMap
+                    propertiesMap // 消息的附加属性
             );
 
         } catch (Exception e) {
@@ -2140,8 +2140,6 @@ public class CommitLog {
             int storeHostLength = (sysflag & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 4 + 4 : 16 + 4;
             ByteBuffer bornHostHolder = ByteBuffer.allocate(bornHostLength);
             ByteBuffer storeHostHolder = ByteBuffer.allocate(storeHostLength);
-
-            // 计算 commitlog 中的 msgId
             this.resetByteBuffer(storeHostHolder, storeHostLength);
 
             // todo 这里应该叫 offsetMsgId ，该ID中包含很多信息

@@ -84,6 +84,20 @@ public class DispatchRequest {
 
     private int bufferSize = -1;//the buffer size maybe larger than the msg size if the message is wrapped by something
 
+    /**
+     * @param topic,                     // 消息主题
+     * @param queueId,                   // 队列id
+     * @param commitLogOffset,           // 消息在 CommitLog 文件中的物理偏移量
+     * @param msgSize,                   // 消息大小
+     * @param tagsCode,                  // 如果是延时消息，就是延时时间
+     * @param storeTimestamp,            // 消息存储时间
+     * @param consumeQueueOffset,        // 消息逻辑队列偏移量
+     * @param keys,
+     * @param uniqKey,                   // msgId
+     * @param sysFlag,                   // 消息系统标记
+     * @param preparedTransactionOffset,
+     * @param propertiesMap              // 消息的附加属性
+     */
     public DispatchRequest(
             final String topic,
             final int queueId,
@@ -98,8 +112,10 @@ public class DispatchRequest {
             final long preparedTransactionOffset,
             final Map<String, String> propertiesMap
     ) {
+        // 用于确定是哪个 ConsumeQueue
         this.topic = topic;
         this.queueId = queueId;
+
         this.commitLogOffset = commitLogOffset;
         this.msgSize = msgSize;
         this.tagsCode = tagsCode;
