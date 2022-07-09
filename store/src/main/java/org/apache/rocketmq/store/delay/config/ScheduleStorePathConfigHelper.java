@@ -34,4 +34,13 @@ public class ScheduleStorePathConfigHelper {
     public static String getScheduleLogTimeStorePath(final String rootDir) {
         return rootDir + File.separator + "config" + File.separator + "schedulelogtime.json";
     }
+
+    /**
+     * 获取消息队列文件夹路径，默认：$user.home/store/schedulelog
+     * @param rootDir
+     * @return
+     */
+    public static String getStorePathScheduleLog(final String rootDir) {
+        return rootDir + File.separator + "schedulelog";
+    }
 }

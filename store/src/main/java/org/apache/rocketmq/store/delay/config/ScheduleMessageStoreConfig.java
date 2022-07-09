@@ -29,7 +29,6 @@ public class ScheduleMessageStoreConfig {
     private String storePathScheduleLog = System.getProperty("user.home") + File.separator + "store" + File.separator + "schedulelog";
 
 
-
     /**
      * 如：每个 Commitlog 文件的大小，默认为 1G
      */
@@ -140,8 +139,14 @@ public class ScheduleMessageStoreConfig {
 
     // Flow control for ConsumeQueue
     private int putMsgIndexHightWater = 600000;
-    // The maximum size of message,default is 4M
+
+
+    /**
+     * 一个文件的大小，默认 4M
+     */
     private int maxMessageSize = 1024 * 1024 * 4;
+
+
     // Whether check the CRC32 of the records consumed.
     // This ensures no on-the-wire or on-disk corruption to the messages occurred.
     // This check adds some overhead,so it may be disabled in cases seeking extreme performance.
@@ -151,7 +156,7 @@ public class ScheduleMessageStoreConfig {
      * 每次 flush commitlog 时最小发生变化的页数
      */
     // How many pages are to be flushed when flush CommitLog
-    private int flushCommitLogLeastPages = 4;
+    private int flushCommitLogLeastPages = 0;
 
     /**
      * 每次 commitlog 提交任务至少需要的页数

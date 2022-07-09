@@ -56,6 +56,7 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.store.MessageExtBrokerInner;
 import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
+import org.apache.rocketmq.store.delay.tool.DirConfigHelper;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
 /**
@@ -451,11 +452,14 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             // 存储普通消息
         } else {
 
-            // 如果是延时消息
+            // todo 如果是任意延时消息
             String delayTime = origProps.get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
-            if(delayTime != null && delayTime !=""){
+            if (delayTime != null && delayTime != "") {
+                System.out.println(DirConfigHelper.getCurrentDateTime() + " 投递任意时间粒度延时消息 - org.apache.rocketmq.store.delay.ScheduleMessageStore.asyncPutMessage!" );
                 putMessageResult = this.brokerController.getScheduleMessageStore().asyncPutMessage(msgInner);
-            }else {
+
+                // 非延迟消息
+            } else {
                 putMessageResult = this.brokerController.getMessageStore().asyncPutMessage(msgInner);
             }
         }

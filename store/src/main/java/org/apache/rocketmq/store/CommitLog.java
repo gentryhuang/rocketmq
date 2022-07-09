@@ -105,7 +105,9 @@ public class CommitLog {
     private final ThreadLocal<MessageExtBatchEncoder> batchEncoderThreadLocal;
     /**
      * todo Topic 下 queue 的 逻辑偏移量，类似数组下标记(注意，不是物理偏移量)。在 Broker 启动时会根据 ConsumeQueue 计算获得，之后根据消息进行更新。
-     * todo 特别说明：在进行 CommitLog 转发时，对应消息队列的逻辑偏移量就是从这里取的，以及处理消息写入时的队列逻辑偏移量也需要这个缓存
+     * todo 特别说明：
+     * 1) CommitLog 消息写入时的队列逻辑偏移量也需要这个缓存，累计写入的 queue 的逻辑偏移量；
+     * 2) 在进行 CommitLog 转发时，转发对象中包含的对应消息队列的逻辑偏移量就是这里的值，在重放消息时会根据该逻辑偏移量确定写在哪个 ConsumeQueue 中；
      *
      * @see DefaultMessageStore#load()
      * @see DefaultMessageStore#recoverTopicQueueTable()

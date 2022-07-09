@@ -35,6 +35,7 @@ import org.apache.rocketmq.broker.out.BrokerOuterAPI;
 import org.apache.rocketmq.broker.plugin.MessageStoreFactory;
 import org.apache.rocketmq.broker.plugin.MessageStorePluginContext;
 import org.apache.rocketmq.broker.processor.*;
+import org.apache.rocketmq.broker.schedule.ScheduleLogCommitMillsManager;
 import org.apache.rocketmq.broker.slave.SlaveSynchronize;
 import org.apache.rocketmq.broker.subscription.SubscriptionGroupManager;
 import org.apache.rocketmq.broker.topic.TopicConfigManager;
@@ -123,6 +124,8 @@ public class BrokerController {
 
     // 延时消息存储
     ScheduleMessageStore scheduleMessageStore;
+    // 延时消息投递成功管理对象
+    ScheduleLogCommitMillsManager scheduleLogCommitMillsManager;
 
     public ScheduleMessageStore getScheduleMessageStore() {
         return scheduleMessageStore;
@@ -285,6 +288,7 @@ public class BrokerController {
         result = result && this.subscriptionGroupManager.load();
         result = result && this.consumerFilterManager.load();
 
+
         // 以上正常加载后开始创建核心对象
         if (result) {
             try {
@@ -294,7 +298,9 @@ public class BrokerController {
                                 this.brokerConfig);
 
                 // 延时消息存储
-                this.scheduleMessageStore = new ScheduleMessageStore(this.brokerStatsManager, this.brokerConfig,this.messageStore);
+                this.scheduleMessageStore = new ScheduleMessageStore(this.brokerStatsManager, this.brokerConfig, this.messageStore);
+                // 延时消息提交到 CommitLog 的管理
+                this.scheduleLogCommitMillsManager = new ScheduleLogCommitMillsManager(this.scheduleMessageStore.getScheduleLogManager());
 
                 // 5 开启 DLeger
                 if (messageStoreConfig.isEnableDLegerCommitLog()) {
@@ -314,6 +320,12 @@ public class BrokerController {
 
         // 6 加载与恢复文件。主要是在 RocketMQ 启动过程中根据 commitlog 重构 consumequeue ，index
         result = result && this.messageStore.load();
+
+        // todo 加载任意延时消息
+        result = result && this.scheduleMessageStore.load();
+        // todo 加载任意延时消息提交到 CommitLog 的时间记录
+        result = result && this.scheduleLogCommitMillsManager.load();
+
 
         if (result) {
 
@@ -431,6 +443,18 @@ public class BrokerController {
                     }
                 }
             }, 1000 * 10, this.brokerConfig.getFlushConsumerOffsetInterval(), TimeUnit.MILLISECONDS);
+
+
+            /**
+             * todo 每 3s 执行一次任意延时消息 Commit 到 CommitLog 的持久化记录
+             */
+            this.scheduledExecutorService.scheduleAtFixedRate(() -> {
+                try {
+                    BrokerController.this.scheduleLogCommitMillsManager.persist();
+                } catch (Throwable e) {
+                    log.error("schedule log commit persist error.", e);
+                }
+            }, 1000 * 10, 1000 * 3, TimeUnit.MILLISECONDS);
 
 
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
@@ -957,6 +981,9 @@ public class BrokerController {
         if (this.messageStore != null) {
             // DefaultMessageStore.start()
             this.messageStore.start();
+
+            // 启动任意延时消息
+            this.scheduleMessageStore.start();
         }
 
         // 通信
@@ -1015,7 +1042,7 @@ public class BrokerController {
             this.brokerStatsManager.start();
         }
 
-        // todo 开启快速失败 发送消息任务，以便与
+        // todo 开启快速失败 发送消息任务，便于 Broker 压力过大，让消息发送方尝试其它 Broker
         if (this.brokerFastFailure != null) {
             this.brokerFastFailure.start();
         }
