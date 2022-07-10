@@ -1386,11 +1386,9 @@ public class ScheduleMessageStore {
                                 log.warn("delete file dir failed，dir = {}", scheduleLog.getScheduleDir());
                             }
 
-                            // 清理 ScheduleLog 缓存
-                            scheduleLogTable.remove(fileTime);
+                            // todo 清理缓存和进度
+                            cleaScheduleCache(scheduleLogManager, fileTime);
                         }
-
-                        System.out.println(scheduleLog.getScheduleDir() + " 文件下删除了 " + deleteCount + " 个文件！");
                     } else if (spacefull) {
                         log.warn("disk space will be full soon, but delete file failed.");
                     }
@@ -1503,6 +1501,21 @@ public class ScheduleMessageStore {
                 return false;
             }
         }
+    }
+
+    /**
+     * 清理 ScheduleLog 相关唤醒
+     *
+     * @param scheduleLogManager      ScheduleLog 管理器
+     * @param delayPartitionDirectory 时间分区目录
+     */
+    private void cleaScheduleCache(ScheduleLogManager scheduleLogManager, Long delayPartitionDirectory) {
+        // 清理 ScheduleLog 缓存
+        scheduleLogManager.getScheduleLogTable().remove(delayPartitionDirectory);
+        // 清理时间分区对应的最大投递消息到 CommitLog 的时间
+        scheduleLogManager.getScheduleDelayTimeTable().remove(delayPartitionDirectory);
+        // 清理时间分区对应的加载到时间轮的 ScheduleLog 的物理偏移量
+        scheduleLogManager.getScheduleLogMemoryIndexTable().remove(delayPartitionDirectory);
     }
 
 
