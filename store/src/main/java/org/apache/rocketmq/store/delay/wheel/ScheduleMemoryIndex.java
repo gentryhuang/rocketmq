@@ -14,8 +14,6 @@ import org.apache.rocketmq.store.PutMessageStatus;
 import org.apache.rocketmq.store.delay.ScheduleLog;
 import org.apache.rocketmq.store.delay.ScheduleMessageStore;
 
-import java.util.concurrent.ConcurrentMap;
-
 /**
  * MemoryIndex
  */
@@ -29,14 +27,19 @@ public class ScheduleMemoryIndex implements TimerTask {
      * 消息在 ScheduleLog 中的物理偏移量
      */
     private Long offset;
-
     /**
      * 消息大小
      */
     private Integer size;
-
+    /**
+     * 加入时间轮的次数，初始值为 -1
+     * FIXME 暂未使用
+     */
+    private Integer rePutCount = -1;
+    /**
+     * ScheduleLog 存储对象
+     */
     private ScheduleMessageStore scheduleMessageStore;
-
 
     public ScheduleMemoryIndex(ScheduleMessageStore scheduleMessageStore, Long triggerTime, Long offset, Integer size) {
         this.scheduleMessageStore = scheduleMessageStore;
@@ -51,6 +54,7 @@ public class ScheduleMemoryIndex implements TimerTask {
         Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(triggerTime);
         ScheduleLog scheduleLog = scheduleMessageStore.getScheduleLogManager().getScheduleLogTable().get(delayPartitionDirectory);
         if (scheduleLog == null) {
+            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮触发，但 scheduleLog 不存在，triggerTime= " + triggerTime);
             return;
         }
 
@@ -84,8 +88,9 @@ public class ScheduleMemoryIndex implements TimerTask {
 
                     // 消息投递失败
                 } else {
-                    System.out.println("时间轮触发，但 msgExt投递失败 " + msgExt);
                     // FIXME 重试
+                    scheduleMessageStore.getScheduleLogManager().getScheduleLogMemoryIndexTable().remove(ScheduleConfigHelper.getDelayPartitionDirectory(triggerTime));
+                    System.out.println("时间轮触发，但 msgExt投递失败，重新放入时间轮中 " + msgExt);
                     return;
                 }
             } catch (Exception e) {
@@ -161,4 +166,11 @@ public class ScheduleMemoryIndex implements TimerTask {
         this.scheduleMessageStore = scheduleMessageStore;
     }
 
+    public Integer getRePutCount() {
+        return rePutCount;
+    }
+
+    public void setRePutCount(Integer rePutCount) {
+        this.rePutCount = rePutCount;
+    }
 }

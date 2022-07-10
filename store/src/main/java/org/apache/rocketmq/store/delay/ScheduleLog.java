@@ -16,23 +16,23 @@
  */
 package org.apache.rocketmq.store.delay;
 
+import io.netty.util.HashedWheelTimer;
 import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
-import org.apache.rocketmq.common.topic.TopicValidator;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.*;
-import org.apache.rocketmq.store.config.BrokerRole;
-import org.apache.rocketmq.store.config.StorePathConfigHelper;
+import org.apache.rocketmq.store.delay.wheel.ScheduleThreadFactory;
 
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 必要性说明：
@@ -56,13 +56,10 @@ import java.util.Map;
  */
 public class ScheduleLog {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-    private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
-
     // Message's MAGIC CODE daa320a7
     public final static int MESSAGE_MAGIC_CODE = -626843481;
     // End of file empty MAGIC CODE cbd43194
     protected final static int BLANK_MAGIC_CODE = -875286124;
-
 
     /**
      * ConsumeQueue 条目 存储在 MappedFile 的内容必须大小是 20 字节
@@ -98,12 +95,10 @@ public class ScheduleLog {
      * @see ScheduleLog#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
      */
     private long maxPhysicOffset = -1;
-    /**
-     * 当前 ConsumeQueue 最小物理偏移量
-     */
-    private volatile long minLogicOffset = 0;
 
     private ConsumeQueueExt consumeQueueExt = null;
+
+    private HashedWheelTimer hashedWheelTimer;
 
     /**
      * 创建并初始化消息队列
@@ -121,20 +116,52 @@ public class ScheduleLog {
         this.storePath = storePath;
         this.mappedFileSize = mappedFileSize;
         this.defaultMessageStore = defaultMessageStore;
-
         /**
          * 创建 MappedFile 的队列
          */
         this.mappedFileQueue = new MappedFileQueue(this.storePath + File.separator + dirMills, mappedFileSize, null);
 
-        // 格式：/Users/huanglibao/store/schedulelog/1657276200000
+        // 格式：.../store/schedulelog/1657276200000
         this.scheduleDir = this.storePath + File.separator + dirMills;
+
+        // FIXME 这个版本没有统计 HashedWheelTimer 个数，如果有的话可以在达到阈值，剩下的使用共享时间轮
+        this.hashedWheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
     }
 
-    public static void main(String[] args) {
-        String path = "/Users/huanglibao/store/schedulelog/1657276200000";
-        String[] substring = path.split(File.separator);
-        System.out.println(substring[substring.length - 1]);
+    /**
+     * 每个 ScheduleLog 绑定一个时间轮
+     */
+    enum ScheduleTimeWheel {
+        INSTANCE;
+        private HashedWheelTimer wheelTimer;
+
+        ScheduleTimeWheel() {
+            wheelTimer = new HashedWheelTimer(
+                    new ScheduleThreadFactory(),
+                    1000,
+                    TimeUnit.MILLISECONDS, 128);
+        }
+
+        public HashedWheelTimer getWheelTimer() {
+            return wheelTimer;
+        }
+    }
+
+    /**
+     * 销毁 ScheduleLog
+     */
+    public void destroyScheduleLog() {
+        // 时间轮是一个非常耗费资源的结构，所以一个 jvm 中的实例数目不能太高
+        this.hashedWheelTimer.stop();
+        this.hashedWheelTimer = null; // help GC
+        try {
+            File file = new File(this.getScheduleDir());
+            if (file.delete()) {
+                System.out.println(this.getScheduleDir() + " 文件夹被清理！ ");
+            }
+        } catch (Exception ex) {
+            log.warn("delete file dir failed，dir = {}", this.getScheduleDir());
+        }
 
     }
 
@@ -489,7 +516,7 @@ public class ScheduleLog {
             final long intervalForcibly,
             final boolean forceCleanAll,
             final boolean cleanImmediately) {
-        return this.mappedFileQueue.deleteExpiredFileByTime(deleteFilesInterval, intervalForcibly,forceCleanAll, cleanImmediately);
+        return this.mappedFileQueue.deleteExpiredFileByTime(deleteFilesInterval, intervalForcibly, forceCleanAll, cleanImmediately);
     }
 
 
@@ -501,10 +528,14 @@ public class ScheduleLog {
         this.maxPhysicOffset = maxPhysicOffset;
     }
 
+    /**
+     * 销毁 ScheduleLog
+     */
     public void destroy() {
         this.maxPhysicOffset = -1;
-        this.minLogicOffset = 0;
         this.mappedFileQueue.destroy();
+        // 销毁其它资源
+        this.destroyScheduleLog();
         if (isExtReadEnable()) {
             this.consumeQueueExt.destroy();
         }
@@ -539,5 +570,13 @@ public class ScheduleLog {
 
     public String getScheduleDir() {
         return scheduleDir;
+    }
+
+    public HashedWheelTimer getHashedWheelTimer() {
+        return hashedWheelTimer;
+    }
+
+    public void setHashedWheelTimer(HashedWheelTimer hashedWheelTimer) {
+        this.hashedWheelTimer = hashedWheelTimer;
     }
 }

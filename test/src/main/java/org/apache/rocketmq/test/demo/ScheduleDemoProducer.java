@@ -33,23 +33,25 @@ public class ScheduleDemoProducer {
 
         //Create a message instance, specifying topic, tag and message body.
 
-        for (int i = 1; i < 10000; i++) {
-            Message msg = new Message("hlb_topic" /* Topic */,
-                    "TagB" /* Tag */,
-                    ("Hello RocketMQ " +
-                            i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
-            );
-            //  msg.setDelayTimeLevel(3);
+        while (true) {
+            for (int i = 1; i < 120; i++) {
+                Message msg = new Message("hlb_topic" /* Topic */,
+                        "TagB" /* Tag */,
+                        ("Hello RocketMQ " +
+                                i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+                );
+                //  msg.setDelayTimeLevel(3);
 
-            //Call send message to deliver message to one of brokers.
+                //Call send message to deliver message to one of brokers.
 
-            long delayTimeMills = random.nextInt(1000 * 60 * 60 * 12);
+                long delayTimeMills = random.nextInt(1000 * 60 * 60 * 12);
 
-            SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
+                // SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
 
-            //SendResult sendResult = producer.send(msg, 50000, 1657431310000L);
-            //  SendResult sendResult = producer.send(msg, 5000, 9, TimeUnit.SECONDS);
-            System.out.printf("%s%n", sendResult);
+                //SendResult sendResult = producer.send(msg, 50000, 1657431310000L);
+                SendResult sendResult = producer.send(msg, 5000, i, TimeUnit.MINUTES);
+                System.out.printf("%s%n", sendResult);
+            }
         }
 
 
@@ -57,18 +59,7 @@ public class ScheduleDemoProducer {
         //  producer.shutdown();
         /*
           投递消息如下：
-          1.  2022-07-10 13:29:10   - 1657430950000L
-          2.  2022-07-10 13:35:10   - 1657431310000
-          3. 2022-07-10 13:30:10
 
-
-          3.  2022-07-10 07:30:30   - 1657409430000L
-          4.  2022-07-10 07:31:00   - 1657409460000L
-          5.  2022-07-10 08:01:00   - 1657411260000L
-          6.  2022-07-10 08:31:00   - 1657413060000L
-          7.  2022-07-09 22:55:00   - 1657378500000L
-          8.  2022-07-10 00:00:00   - 1657382400000L
-          9.  2022-07-09 23:17:10   - 1657379830000L
          */
 
 
@@ -76,7 +67,7 @@ public class ScheduleDemoProducer {
            延时消息待优化：
            1 增加个消息类型，使用 systemFlag 区分更优雅；
            2 消息进一步的可靠性保证，如果投递到 CommitLog 失败怎么处理（pageCache 繁忙等）；
-             - 重试
+             - 重试，允许通过扫描线程任务重新加入时间轮
            3 消息删除问题，要考虑到强制删除的情况，磁盘空间和消息的有效性要考虑到
            4 延时消息不能在从节点进行工作，因为一旦工作就会把消息写入到从节点的 CommitLog 中，而主从同步架构，从节点的消息要依据主节点；
            5 顺序消息的情况能否保证

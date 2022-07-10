@@ -53,7 +53,7 @@ public class DefaultScheduleMQProducer extends DefaultMQProducer implements Sche
      * @return
      */
     private boolean isCanSchedule(long delayTimeMillis) {
-        return ScheduleMessageConst.MIN_DELAY_GRANULARITY > (System.currentTimeMillis() - delayTimeMillis);
+        return (delayTimeMillis - System.currentTimeMillis()) >= ScheduleMessageConst.MIN_DELAY_GRANULARITY;
     }
 
     /**

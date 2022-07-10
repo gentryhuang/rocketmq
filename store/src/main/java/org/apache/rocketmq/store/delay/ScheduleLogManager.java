@@ -92,7 +92,7 @@ public class ScheduleLogManager {
      * <p>
      * FIXME 每个 ScheduleLog 对应一个 时间轮，随着 ScheduleLog 释放，时间轮也释放
      */
-    protected final HashMap<Long, ScheduleLog> scheduleLogTable = new HashMap<>(1024);
+    protected final ConcurrentMap<Long, ScheduleLog> scheduleLogTable;
 
     /**
      * 分区延时消息对应的已经投递到 CommitLog 的最新的延时时间 - 持久化
@@ -113,8 +113,9 @@ public class ScheduleLogManager {
         // 追加消息的回调函数
         this.appendMessageCallback = new DefaultAppendMessageCallback(defaultMessageStore.getMessageStoreConfig().getMaxMessageSize());
         this.putMessageLock = defaultMessageStore.getMessageStoreConfig().isUseReentrantLockWhenPutMessage() ? new PutMessageReentrantLock() : new PutMessageSpinLock();
-        scheduleDelayTimeTable = new ConcurrentHashMap<>(1024);
-        scheduleLogMemoryIndexTable = new ConcurrentHashMap<>(1024);
+        this.scheduleDelayTimeTable = new ConcurrentHashMap<>(1024);
+        this.scheduleLogMemoryIndexTable = new ConcurrentHashMap<>(1024);
+        this.scheduleLogTable = new ConcurrentHashMap<>(1024);
     }
 
 
@@ -236,7 +237,7 @@ public class ScheduleLogManager {
 
         // todo 根据延时时间获取 ScheduleLog 对应映射文件
         Long dirNameByMills = ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(msg.getProperty(ScheduleMessageConst.PROPERTY_DELAY_TIME)));
-        ScheduleLog scheduleLog = scheduleLogTable.get(dirNameByMills);
+        ScheduleLog scheduleLog = this.scheduleLogTable.get(dirNameByMills);
 
         // 没有则创建对应时间分区的 ScheduleLog
         if (scheduleLog == null) {
@@ -357,7 +358,7 @@ public class ScheduleLogManager {
                 defaultMessageStore // 存储
         );
 
-        scheduleLogTable.put(dirNameByMills, scheduleLog);
+        this.scheduleLogTable.put(dirNameByMills, scheduleLog);
         return scheduleLog;
     }
 
@@ -771,7 +772,7 @@ public class ScheduleLogManager {
         return defaultMessageStore;
     }
 
-    public HashMap<Long, ScheduleLog> getScheduleLogTable() {
+    public ConcurrentMap<Long, ScheduleLog> getScheduleLogTable() {
         return scheduleLogTable;
     }
 

@@ -78,8 +78,6 @@ public class ScheduleMessageStore {
 
     private final ScheduledExecutorService scheduledExecutorService =
             Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("StoreScheduledThread"));
-
-
     private volatile boolean shutdown = true;
 
     /**
@@ -87,11 +85,8 @@ public class ScheduleMessageStore {
      */
     private StoreCheckpoint storeCheckpoint;
     private AtomicLong printTimes = new AtomicLong(0);
-
     private RandomAccessFile lockFile;
     private final SystemClock systemClock = new SystemClock();
-
-
     private final ScheduledExecutorService diskCheckScheduledExecutorService =
             Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("DiskCheckScheduledThread"));
 
@@ -108,14 +103,10 @@ public class ScheduleMessageStore {
      * 周期性扫描时间分区文件（基于当前时间）
      */
     private final ScanReachScheduleLog scanReachScheduleLog;
-
     /**
      * 补偿扫描时间分区文件
      */
     private final ScanUnprocessedScheduleLog scanUnprocessedScheduleLog;
-
-
-    private final HashedWheelTimer hashedWheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
 
 
     /**
@@ -145,18 +136,7 @@ public class ScheduleMessageStore {
     }
 
     /**
-     * 在 RocketMQ 启动过程中，是如何根据 commitlog 重构 consumequeue ，index 的，因为毕竟 commitlog 文件中的消息与 consumequeue 中的文件内容并不能确保是一致的。
-     * <p>
-     * 过程如下：
-     * 1 加载相关文件到内存（内存映射文件）
-     * - 包含 CommitLog 文件、
-     * - ConsumeQueue 文件、
-     * - 存储检测点（CheckPoint）文件、
-     * - 索引 IndexFile 文件
-     * 2 执行文件恢复
-     * 3 恢复顺序：
-     * - 先恢复 ConsumeQueue 文件，把不符合的 ConsumeQueue 文件删除，一个 ConsumeQueue 条目正确的标准（commitlog偏移量 >0 size > 0）[从倒数第三个文件开始恢复]。
-     * - 如果 abort 文件存在，此时找到第一个正常的 commitlog 文件，然后对该文件重新进行转发，依次更新 consumeque,index文件 （非正常逻辑）；正常逻辑和恢复 consumeque 文件恢复过程类似。
+     * 加载磁盘文件到内存
      *
      * @throws IOException
      */
@@ -189,11 +169,6 @@ public class ScheduleMessageStore {
 
         return result;
     }
-
-    public long now() {
-        return this.systemClock.now();
-    }
-
 
     /**
      * todo 非常重要
@@ -266,11 +241,16 @@ public class ScheduleMessageStore {
     }
 
 
-    /*---------- 定时扫描 ScheduleLog 中的快要到期消息  ----------*/
+    /**
+     * 定时扫描 ScheduleLog 中的快要到期消息
+     */
     class ScanReachScheduleLog extends ServiceThread {
 
         @Override
         public void run() {
+            // 等待 5s
+            waitForRunning(5000);
+
             // Broker 不关闭
             while (!this.isStopped()) {
 
@@ -353,9 +333,9 @@ public class ScheduleMessageStore {
                                                 continue;
                                             }
 
-                                            ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
-                                            hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
+                                            ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
+                                            scheduleLog.getHashedWheelTimer().newTimeout(memoryIndexObj, diff, TimeUnit.MILLISECONDS);
 
                                             //   System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
                                             System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，msgID: " + dispatchRequest.getUniqKey());
@@ -409,12 +389,17 @@ public class ScheduleMessageStore {
     }
 
 
-    /*---------- 定时补偿 ScheduleLog 中的过期的消息  ----------*/
+    /**
+     * 定时补偿 ScheduleLog 中的过期的消息
+     */
     class ScanUnprocessedScheduleLog extends ServiceThread {
         Random random = new Random();
 
         @Override
         public void run() {
+            // 等待 5s
+            waitForRunning(5000);
+
             // Broker 不关闭
             while (!this.isStopped()) {
                 // 当前时间属于哪个分区文件
@@ -500,7 +485,7 @@ public class ScheduleMessageStore {
 
                                             ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
-                                            hashedWheelTimer.newTimeout(memoryIndexObj, 0, TimeUnit.MILLISECONDS);
+                                            scheduleLog.getHashedWheelTimer().newTimeout(memoryIndexObj, 0, TimeUnit.MILLISECONDS);
 
                                             System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 补偿定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
 
@@ -552,26 +537,6 @@ public class ScheduleMessageStore {
         }
     }
 
-
-    /**
-     * 是否可以继续拉取 ScheduleLog
-     *
-     * @return
-     */
-    private boolean isScheduleLogAvailable(long offset, ScheduleLog scheduleLog) {
-        return offset < scheduleLog.getMaxOffset();
-    }
-
-    /**
-     * 补偿指定时间粒度的扫描时间
-     * <p>
-     * todo FIXME
-     *
-     * @return
-     */
-    private long compensateDelayTime(Random random) {
-        return systemClock.now() - random.nextInt((int) ScheduleConfigHelper.TRIGGER_TIME);
-    }
 
 
     /*-------------------------------- 异步刷盘 -----------------------------*/
@@ -723,6 +688,30 @@ public class ScheduleMessageStore {
         this.deleteFile(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
     }
 
+    /**
+     * 是否可以继续拉取 ScheduleLog
+     *
+     * @return
+     */
+    private boolean isScheduleLogAvailable(long offset, ScheduleLog scheduleLog) {
+        return offset < scheduleLog.getMaxOffset();
+    }
+
+    /**
+     * 补偿指定时间粒度的扫描时间
+     * <p>
+     * todo FIXME
+     *
+     * @return
+     */
+    private long compensateDelayTime(Random random) {
+        return systemClock.now() - random.nextInt((int) ScheduleConfigHelper.TRIGGER_TIME);
+    }
+
+
+    public long now() {
+        return this.systemClock.now();
+    }
 
     /**
      * 检查消息
@@ -742,20 +731,6 @@ public class ScheduleMessageStore {
             log.warn("putMessage message properties length too long " + msg.getPropertiesString().length());
             return PutMessageStatus.MESSAGE_ILLEGAL;
         }
-        return PutMessageStatus.PUT_OK;
-    }
-
-    private PutMessageStatus checkMessages(MessageExtBatch messageExtBatch) {
-        if (messageExtBatch.getTopic().length() > Byte.MAX_VALUE) {
-            log.warn("putMessage message topic length too long " + messageExtBatch.getTopic().length());
-            return PutMessageStatus.MESSAGE_ILLEGAL;
-        }
-
-        if (messageExtBatch.getBody().length > messageStoreConfig.getMaxMessageSize()) {
-            log.warn("PutMessages body length too long " + messageExtBatch.getBody().length);
-            return PutMessageStatus.MESSAGE_ILLEGAL;
-        }
-
         return PutMessageStatus.PUT_OK;
     }
 
@@ -841,6 +816,11 @@ public class ScheduleMessageStore {
         return putResultFuture;
     }
 
+    /**
+     * 对于快触发的消息，构建内存索引并加入时间轮
+     *
+     * @param msg 延时消息
+     */
     private void putMessageToMemoryIndex(MessageExtBrokerInner msg) {
         try {
             // 刷盘成功，判断是否要加载到时间轮
@@ -869,15 +849,14 @@ public class ScheduleMessageStore {
 
                         // 消息投递失败
                     } else {
-                        // FIXME 重试
+                        // FIXME 重试，移除记录的 ScheduleLog 物理偏移量，重新加载到时间轮
+                        scheduleLogManager.getScheduleLogMemoryIndexTable().remove(ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(delayTime)));
                         return;
                     }
                 };
 
                 // 记录 scheduleLog 的物理偏移量的消息进入时间轮
                 scheduleLogManager.getScheduleLogMemoryIndexTable().put(ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(delayTime)), msg.getCommitLogOffset());
-
-                System.out.println("添加延时消息触发时间轮，还有 " + diff + "毫秒任务会被触发！");
                 ScheduleTimeWheel.INSTANCE.getWheelTimer().newTimeout(timerTask, diff, TimeUnit.MILLISECONDS);
             }
         } catch (Exception ex) {
@@ -906,11 +885,6 @@ public class ScheduleMessageStore {
 //                && diff > this.messageStoreConfig.getOsPageCacheBusyTimeOutMills();
 
         return false;
-    }
-
-
-    public SystemClock getSystemClock() {
-        return systemClock;
     }
 
 
@@ -1085,6 +1059,10 @@ public class ScheduleMessageStore {
         return file.exists();
     }
 
+    public SystemClock getSystemClock() {
+        return systemClock;
+    }
+
     /**
      * 加载消息消费队列
      *
@@ -1113,7 +1091,7 @@ public class ScheduleMessageStore {
 
                 );
 
-                scheduleLogManager.getScheduleLogTable().put(Long.parseLong(dirMills), scheduleLog);
+                this.scheduleLogManager.getScheduleLogTable().put(Long.parseLong(dirMills), scheduleLog);
                 if (!scheduleLog.load()) {
                     return false;
                 }
@@ -1210,7 +1188,7 @@ public class ScheduleMessageStore {
 
                                     // 构建内存索引
                                     ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
-                                    hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
+                                    scheduleLog.getHashedWheelTimer().newTimeout(memoryIndexObj, diff, TimeUnit.MILLISECONDS);
                                     System.out.println(ScheduleConfigHelper.getCurrentDateTime() + "  初始化加载延时任务文件到时间轮，还有 " + (diff) + " 毫秒触发");
                                     System.out.println();
 
@@ -1239,7 +1217,7 @@ public class ScheduleMessageStore {
                         result.release();
                     }
 
-                    // 没有找到数据，结束 doReput 方法，等待下次继续执行
+                    // 没有找到数据，等待下次继续执行
                 } else {
                     doNext = false;
                 }
@@ -1336,9 +1314,6 @@ public class ScheduleMessageStore {
             // 3 手动可删除次数 > 0
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
-            // 是否立即删除
-            boolean forceCleanAll = false;
-
             // 达到以上条件任何一个
             if (timeup || spacefull || manualDelete) {
 
@@ -1351,9 +1326,13 @@ public class ScheduleMessageStore {
                 Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now() + ScheduleConfigHelper.COMPENSATE_TIME);
 
                 // 顺序遍历，即从最早的文件夹遍历
-                HashMap<Long, ScheduleLog> scheduleLogTable = scheduleLogManager.getScheduleLogTable();
+                ConcurrentMap<Long, ScheduleLog> scheduleLogTable = scheduleLogManager.getScheduleLogTable();
                 List<Long> fileTimes = scheduleLogManager.getScheduleLogTable().keySet().stream().sorted().collect(Collectors.toList());
                 for (Long fileTime : fileTimes) {
+                    // 是否立即删除
+                    boolean forceCleanAll = false;
+
+                    // 获取对应的 ScheduleLog
                     ScheduleLog scheduleLog = scheduleLogTable.get(fileTime);
                     if (scheduleLog == null) {
                         continue;
@@ -1377,17 +1356,11 @@ public class ScheduleMessageStore {
                     if (deleteCount > 0) {
                         // 如果是清除整个文件夹，那么删除空的文件夹子
                         if (forceCleanAll && scheduleLog.getMappedFileQueue().getMappedFiles().isEmpty()) {
-                            try {
-                                File file = new File(scheduleLog.getScheduleDir());
-                                if (file.delete()) {
-                                    System.out.println(scheduleLog.getScheduleDir() + " 文件夹被清理！ ");
-                                }
-                            } catch (Exception ex) {
-                                log.warn("delete file dir failed，dir = {}", scheduleLog.getScheduleDir());
-                            }
-
-                            // todo 清理缓存和进度
+                            // todo 先清理缓存和进度，防止其它业务逻辑拿到 ScheduleLog 是无用的
                             cleaScheduleCache(scheduleLogManager, fileTime);
+
+                            // 销毁 ScheduleLog
+                            scheduleLog.destroy();
                         }
                     } else if (spacefull) {
                         log.warn("disk space will be full soon, but delete file failed.");

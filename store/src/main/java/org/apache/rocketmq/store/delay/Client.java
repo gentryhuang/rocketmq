@@ -1,5 +1,8 @@
 package org.apache.rocketmq.test;
 
+import io.netty.util.HashedWheelTimer;
+import org.apache.rocketmq.store.delay.wheel.ScheduleTimeWheel;
+
 import java.io.File;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -34,6 +37,12 @@ public class Client {
 
         String delayMessageStorePath = getDelayMessageStorePath(" $user.home/store/schedulelog", granularityTimeMillis);
         System.out.println(delayMessageStorePath);
+
+
+        HashedWheelTimer hashedWheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
+        HashedWheelTimer hashedWheelTimer1 = ScheduleTimeWheel.INSTANCE.getWheelTimer();
+
+        System.out.println(hashedWheelTimer == hashedWheelTimer1);
 
 
     }
