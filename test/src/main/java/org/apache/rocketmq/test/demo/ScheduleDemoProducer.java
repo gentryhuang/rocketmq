@@ -34,7 +34,7 @@ public class ScheduleDemoProducer {
 
         //Create a message instance, specifying topic, tag and message body.
 
-        for (int i = 1; i < 1000000; i++) {
+        for (int i = 1; i < 100; i++) {
             Message msg = new Message("hlb_topic" /* Topic */,
                     "TagB" /* Tag */,
                     ("Hello RocketMQ " +
@@ -47,7 +47,7 @@ public class ScheduleDemoProducer {
             long delayTimeMills = random.nextInt(1000 *60 *60*12);
 
 
-            SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
+            SendResult sendResult = producer.send(msg, 50000, 1657427410000L);
             System.out.printf("%s%n", sendResult);
         }
 

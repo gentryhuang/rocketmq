@@ -40,6 +40,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -251,9 +252,9 @@ public class ScheduleMessageStore {
             while (!this.isStopped()) {
 
                 // 每隔 5s 扫描一次
-                // todo FIXME 这个粒度需要基于时间分区设置
-                long interval = 1000 * 5;
-                this.waitForRunning(interval);
+                // todo FIXME 这个粒度需要根据添加延时消息时，多少时间内会放入时间轮。比如 5 分钟会放入，那么每隔 4-5分钟即可
+                // todo 而补偿扫描的，可以是这个 5 分钟 - 0～5 时间内的时间
+
 
                 // 当前时间属于哪个分区文件
                 Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
@@ -261,7 +262,7 @@ public class ScheduleMessageStore {
                 // 获取最近分区文件
                 ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
                 if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
-                    this.waitForRunning(interval);
+                    this.waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
 
                 } else {
 
@@ -324,15 +325,18 @@ public class ScheduleMessageStore {
 
                                             // 还有多久触发
                                             long diff = triggerTime - systemClock.now();
-
-                                            // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
-
+                                            // todo 延时补偿粒度，太久的消息不处理，交给补偿线程任务。
+                                            if (diff < 0) {
+                                                continue;
+                                            }
 
                                             ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
                                             hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
 
-                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
+                                            //   System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
+                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，msgID: " + dispatchRequest.getUniqKey());
+
 
                                             // 更新加入到时间轮的最大偏移量
                                             scheduleLogMemoryIndexTable.put(delayPartitionDirectory, dispatchRequest.getCommitLogOffset());
@@ -358,13 +362,15 @@ public class ScheduleMessageStore {
                                 result.release();
                             }
 
-                            // 没有找到数据，结束 doReput 方法，等待下次继续执行
+                            // 没有找到数据，等待下次继续执行
                         } else {
                             doNext = false;
                         }
                     }
-
                 }
+
+                // 扫描一次修改执行的时间
+                this.waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
             }
         }
 
@@ -372,22 +378,24 @@ public class ScheduleMessageStore {
         public String getServiceName() {
             return ScanReachScheduleLog.class.getSimpleName();
         }
+
+        @Override
+        protected void onWaitEnd() {
+            // do noting
+        }
     }
 
 
     /*---------- 定时补偿 ScheduleLog 中的过期的消息  ----------*/
     class ScanUnprocessedScheduleLog extends ServiceThread {
-
-        // 每隔 5s 扫描一次
-        // todo FIXME 这个粒度需要基于时间分区设置，一个时间分区扫描两次即可（启动就扫描 + 再扫描一次）
-        long interval = 1000 * 60 * 25;
+        Random random = new Random();
 
         @Override
         public void run() {
             // Broker 不关闭
             while (!this.isStopped()) {
                 // 当前时间属于哪个分区文件
-                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(compensateDelayTime());
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(compensateDelayTime(random));
 
                 // 获取对应的分区文件
                 ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
@@ -455,15 +463,17 @@ public class ScheduleMessageStore {
 
                                             // 还有多久触发
                                             long diff = triggerTime - systemClock.now();
-
-                                            // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
-
+                                            if (ScheduleConfigHelper.COMPENSATE_TIME > diff) {
+                                                log.warn("this message is overdue {} mills seconds , maybe is can not commit message，message = {}", -diff, dispatchRequest);
+                                                System.out.println("this message is overdue {} mills seconds , maybe is can not commit message，message = {}");
+                                                continue;
+                                            }
 
                                             ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
                                             hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
 
-                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
+                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 补偿定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
 
                                             // 更新加入到时间轮的最大偏移量
                                             scheduleLogMemoryIndexTable.put(delayPartitionDirectory, dispatchRequest.getCommitLogOffset());
@@ -498,7 +508,7 @@ public class ScheduleMessageStore {
                 }
 
                 // 扫描一次后进入等待
-                waitForRunning(interval);
+                waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
             }
         }
 
@@ -530,13 +540,9 @@ public class ScheduleMessageStore {
      *
      * @return
      */
-    private long compensateDelayTime() {
-        return systemClock.now() - 1000 * 10;
+    private long compensateDelayTime(Random random) {
+        return systemClock.now() - random.nextInt((int) ScheduleConfigHelper.TRIGGER_TIME);
     }
-
-
-
-
 
 
     /*-------------------------------- 异步刷盘 -----------------------------*/
@@ -812,7 +818,7 @@ public class ScheduleMessageStore {
             String delayTime = msg.getProperty(ScheduleMessageConst.PROPERTY_DELAY_TIME);
             long diff = Long.parseLong(delayTime) - this.getSystemClock().now();
             // 小于指定时间粒度的延时消息加入时间轮
-            if (diff < ScheduleConfigHelper.TRIGGER_TIME) {
+            if (diff <= ScheduleConfigHelper.TRIGGER_TIME) {
                 TimerTask timerTask = timeout -> {
                     // 记录触发的延时时间
                     String commitMills = msg.getProperties().get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
@@ -1167,8 +1173,11 @@ public class ScheduleMessageStore {
 
                                     // 还有多久触发
                                     long diff = triggerTime - systemClock.now();
-
-                                    // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
+                                    // todo  FIXME 延时补偿粒度，补偿消息交给补偿线程任务
+                                    // todo 删除消息文件，依据当前时间和最后修改时间，最后修改时间 < 当前时间，一定是过期的文件
+                                    if (0 > diff) {
+                                        continue;
+                                    }
 
                                     // 构建内存索引
                                     ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);

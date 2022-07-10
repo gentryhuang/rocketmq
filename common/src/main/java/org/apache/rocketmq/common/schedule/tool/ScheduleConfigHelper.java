@@ -17,9 +17,13 @@ public class ScheduleConfigHelper {
      */
     public static final long TIME_GRANULARITY = 1000 * 60 * 30L;
     /**
-     * 小于等于 30 分钟的消息加载到时间轮
+     * 小于等于 5 分钟的消息加载到时间轮
      */
-    public static final long TRIGGER_TIME = 1000 * 60;
+    public static final long TRIGGER_TIME = 1000 * 60 * 5;
+    /**
+     * 补偿粒度时间，过期的消息超过 5 分钟不再投递，打印可能是没有投递的消息日志
+     */
+    public static final long COMPENSATE_TIME = -1000 * 60 *5;
 
 
     /**

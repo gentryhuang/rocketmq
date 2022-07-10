@@ -60,17 +60,11 @@ public class ScheduleMemoryIndex implements TimerTask {
 
         if (msgExt != null) {
             try {
-                // 获取消息中存储的延时执行时间
-                Long triggerTime;
-                try {
-                    triggerTime = Long.parseLong(msgExt.getProperties().get(ScheduleMessageConst.PROPERTY_DELAY_TIME));
-                } catch (Exception ex) {
-                    triggerTime = this.triggerTime;
-                }
 
-                // 判断消息是否投递过
+                // 判断消息是否投递过，注意这里不能加 =
+                // todo 但是可能会有重复投递的情况，比如在初始化加载消息文件时，会把文件消息加载到时间轮，但是 == triggerTime 的消息不能过滤，尽管这里消息之前已经投递过
                 if (scheduleMessageStore.getScheduleLogManager().getScheduleDelayTimeTable().getOrDefault(delayPartitionDirectory, 0L) > triggerTime) {
-                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮触发，但 msgExt 已经被投递过 " + msgExt);
+                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮触发，但 msgExt 已经被投递过 " + msgExt.getMsgId());
                     return;
                 }
 
@@ -82,7 +76,7 @@ public class ScheduleMemoryIndex implements TimerTask {
 
                 // 如果发送成功，则继续下一个消息索引的获取与判断是否到期
                 if (putMessageResult != null && putMessageResult.getPutMessageStatus() == PutMessageStatus.PUT_OK) {
-                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt);
+                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt.getMsgId());
                     System.out.println();
 
                     // todo 记录投递成功的物理偏移量，需要持久化

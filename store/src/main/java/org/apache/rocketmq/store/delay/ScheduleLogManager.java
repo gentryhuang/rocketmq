@@ -89,8 +89,11 @@ public class ScheduleLogManager {
     protected final PutMessageLock putMessageLock;
     /**
      * 延时时间分区对应的延时消息文件
+     * <p>
+     * FIXME 每个 ScheduleLog 对应一个 时间轮，随着 ScheduleLog 释放，时间轮也释放
      */
     protected final HashMap<Long, ScheduleLog> scheduleLogTable = new HashMap<>(1024);
+
     /**
      * 分区延时消息对应的已经投递到 CommitLog 的最新的延时时间 - 持久化
      * <p>

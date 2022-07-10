@@ -38,9 +38,9 @@ public class Client {
         System.out.println(str);
 
 
-        Random random = new Random(1000 * 60 * 60 * 12);
+        Random random = new Random();
         for (int i = 0;i <1000;i++) {
-            long delayTimeMills = random.nextInt(1000 *60 *60*6);
+            long delayTimeMills = random.nextInt(1000 * 60*5);
             System.out.println(delayTimeMills);
         }
 
