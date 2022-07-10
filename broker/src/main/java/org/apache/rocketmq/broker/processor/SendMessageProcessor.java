@@ -46,6 +46,7 @@ import org.apache.rocketmq.common.protocol.header.ConsumerSendMsgBackRequestHead
 import org.apache.rocketmq.common.protocol.header.SendMessageRequestHeader;
 import org.apache.rocketmq.common.protocol.header.SendMessageResponseHeader;
 import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
+import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
 import org.apache.rocketmq.common.subscription.SubscriptionGroupConfig;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 import org.apache.rocketmq.common.sysflag.TopicSysFlag;
@@ -56,7 +57,6 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.store.MessageExtBrokerInner;
 import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
-import org.apache.rocketmq.store.delay.tool.DirConfigHelper;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
 /**
@@ -402,7 +402,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             queueIdInt = randomQueueId(topicConfig.getWriteQueueNums());
         }
 
-        // 创建MessageExtBrokerInner
+        // 创建 MessageExtBrokerInner
         MessageExtBrokerInner msgInner = new MessageExtBrokerInner();
         msgInner.setTopic(requestHeader.getTopic());
         msgInner.setQueueId(queueIdInt);
@@ -452,10 +452,10 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             // 存储普通消息
         } else {
 
-            // todo 如果是任意延时消息
+            // todo 任意延时消息属于普通消息，如果是任意延时消息，那么就不要走 CommitLog 消息存储，而是走 ScheduleLog 消息存储。
             String delayTime = origProps.get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
-            if (delayTime != null && delayTime != "") {
-                System.out.println(DirConfigHelper.getCurrentDateTime() + " 投递任意时间粒度延时消息 - org.apache.rocketmq.store.delay.ScheduleMessageStore.asyncPutMessage!" );
+            if (delayTime != null && !"".equals(delayTime)) {
+                System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 投递任意时间粒度延时消息 - org.apache.rocketmq.store.delay.ScheduleMessageStore.asyncPutMessage!");
                 putMessageResult = this.brokerController.getScheduleMessageStore().asyncPutMessage(msgInner);
 
                 // 非延迟消息

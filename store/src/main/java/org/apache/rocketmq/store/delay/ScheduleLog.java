@@ -173,7 +173,7 @@ public class ScheduleLog {
             while (true) {
 
                 // 使用 byteBuffer 逐条消息构建请求转发对象，直到出现异常或者当前文件读取完（换下一个文件）
-                // todo 使用能否构建消息转发对象作为有效性的标准，因为后续消息要重放到 ConsumeQueue 和 IndexFile ，任何一个异常都是不允许的
+                // 即使用能否构建消息转发对象作为有效性的标准
                 DispatchRequest dispatchRequest = this.checkMessageAndReturnSize(byteBuffer, checkCRCOnRecover);
                 // 消息大小
                 int size = dispatchRequest.getMsgSize();
@@ -215,11 +215,11 @@ public class ScheduleLog {
             this.mappedFileQueue.setCommittedWhere(processOffset);
 
             // 删除有效偏移量后的文件 ，保留文件中有效数据（本质上：更新 MappedFile 的写指针、提交指针、刷盘指针）
-            // 即 截断无效的 CommitLog 文件，只保留到 processOffset 位置的有效文件
+            // 即 截断无效的 ScheduleLog 文件，只保留到 processOffset 位置的有效文件
             this.mappedFileQueue.truncateDirtyFiles(processOffset);
 
         } else {
-            // Commitlog case files are deleted
+            // ScheduleLog case files are deleted
             log.warn("The commitlog files are deleted, and delete the consume queue files");
             this.mappedFileQueue.setFlushedWhere(0);
             this.mappedFileQueue.setCommittedWhere(0);

@@ -43,6 +43,6 @@ public interface ScheduleMQProducer extends MQProducer {
      * @throws MQBrokerException
      * @throws InterruptedException
      */
-    SendResult send(final Message msg, final long timeout, int delayTime, TimeUnit timeUnit) throws MQClientException,
+    SendResult send(final Message msg, final long timeout, long delayTime, TimeUnit timeUnit) throws MQClientException,
             RemotingException, MQBrokerException, InterruptedException;
 }

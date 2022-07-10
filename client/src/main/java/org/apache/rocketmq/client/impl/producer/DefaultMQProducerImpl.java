@@ -1089,9 +1089,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 消息标记（RocketMQ 对消息中的标记不做任何处理，供应用程序使用）
                 requestHeader.setFlag(msg.getFlag());
 
-
                 // 消息扩展属性
                 // todo 包含很多重要的附加功能，如 Topic、queueId 替换套路、tag 存储
+                // 任意延时消息改造，也使用属性作为标记
                 requestHeader.setProperties(MessageDecoder.messageProperties2String(msg.getProperties()));
 
                 // todo 消息重试次数，如果是第一次发送的时候为 0

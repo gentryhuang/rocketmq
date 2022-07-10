@@ -616,6 +616,7 @@ public class MappedFile extends ReferenceResource {
         }
 
         // flushLeastPages = 0 && 有新写入部分，则允许刷盘
+        // todo 即使刷盘页设置为 0 ，但是如果没有新写入的则忽略刷盘动作
         return write > flush;
     }
 

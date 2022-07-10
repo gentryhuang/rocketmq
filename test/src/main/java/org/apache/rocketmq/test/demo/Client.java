@@ -1,6 +1,7 @@
 package org.apache.rocketmq.test.demo;
 
 import java.util.ArrayList;
+import java.util.Random;
 import java.util.concurrent.CyclicBarrier;
 
 /**
@@ -35,6 +36,17 @@ public class Client {
         test(str);
 
         System.out.println(str);
+
+
+        Random random = new Random(1000 * 60 * 60 * 12);
+        for (int i = 0;i <1000;i++) {
+            long delayTimeMills = random.nextInt(1000 *60 *60*6);
+            System.out.println(delayTimeMills);
+        }
+
+
+
+
     }
 
     public static void test(String a){

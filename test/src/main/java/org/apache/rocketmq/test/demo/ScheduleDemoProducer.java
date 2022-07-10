@@ -6,6 +6,8 @@ import org.apache.rocketmq.client.schedule.DefaultScheduleMQProducer;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
+import java.util.Random;
+
 /**
  * DemoProducer
  *
@@ -26,9 +28,13 @@ public class ScheduleDemoProducer {
         //Launch the instance.
         producer.start();
 
+
+
+        Random random = new Random(1000 * 60 * 60 * 12);
+
         //Create a message instance, specifying topic, tag and message body.
 
-        for (int i = 1; i < 2; i++) {
+        for (int i = 1; i < 1000000; i++) {
             Message msg = new Message("hlb_topic" /* Topic */,
                     "TagB" /* Tag */,
                     ("Hello RocketMQ " +
@@ -37,7 +43,11 @@ public class ScheduleDemoProducer {
             //  msg.setDelayTimeLevel(3);
 
             //Call send message to deliver message to one of brokers.
-            SendResult sendResult = producer.send(msg, 50000, 1657379830000L);
+
+            long delayTimeMills = random.nextInt(1000 *60 *60*12);
+
+
+            SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
             System.out.printf("%s%n", sendResult);
         }
 
@@ -69,6 +79,8 @@ public class ScheduleDemoProducer {
            6 主从同步，需要同步延时消息吗？
              - 需要，但是只做备份
            7 精确度，是否考虑补偿机制，如过期5分钟内进行补偿
+           8 消息卡点丢失问题 - 拉取消息补偿几分钟，基于当前时间 - 5 分钟
+           9 同步异步刷盘的支持问题
          */
 
 

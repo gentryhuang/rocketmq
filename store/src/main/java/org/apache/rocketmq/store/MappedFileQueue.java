@@ -283,7 +283,6 @@ public class MappedFileQueue {
      * @param files
      */
     void deleteExpiredFile(List<MappedFile> files) {
-
         if (!files.isEmpty()) {
             Iterator<MappedFile> iterator = files.iterator();
             while (iterator.hasNext()) {

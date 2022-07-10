@@ -23,9 +23,6 @@ public class ScheduleMessageConst {
     public static final String PROPERTY_TAGS = "TAGS";
     public static final String PROPERTY_WAIT_STORE_MSG_OK = "WAIT";
     public static final String PROPERTY_DELAY_TIME_LEVEL = "DELAY";
-
-    public static final String PROPERTY_DELAY_TIME = "DELAY_TIME";
-
     public static final String PROPERTY_RETRY_TOPIC = "RETRY_TOPIC";
     public static final String PROPERTY_REAL_TOPIC = "REAL_TOPIC";
     public static final String PROPERTY_REAL_QUEUE_ID = "REAL_QID";
@@ -55,8 +52,13 @@ public class ScheduleMessageConst {
     public static final String PROPERTY_PUSH_REPLY_TIME = "PUSH_REPLY_TIME";
     public static final String PROPERTY_CLUSTER = "CLUSTER";
     public static final String PROPERTY_MESSAGE_TYPE = "MSG_TYPE";
-
     public static final String KEY_SEPARATOR = " ";
+
+    /*------任意时间延时消息常量 ---------*/
+    // 存放延时时间的属性 key
+    public static final String PROPERTY_DELAY_TIME = "DELAY_TIME";
+    // 小于该延时时间的延时消息不接
+    public static final long MIN_DELAY_GRANULARITY = 1000 * 5;
 
     public static final HashSet<String> STRING_HASH_SET = new HashSet<String>();
 

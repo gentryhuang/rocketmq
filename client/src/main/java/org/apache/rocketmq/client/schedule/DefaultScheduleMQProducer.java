@@ -17,13 +17,15 @@ import java.util.concurrent.TimeUnit;
  * desc：
  */
 public class DefaultScheduleMQProducer extends DefaultMQProducer implements ScheduleMQProducer {
-
     public DefaultScheduleMQProducer(final String producerGroup) {
         super(producerGroup);
     }
 
     @Override
     public SendResult send(Message msg, long timeout, long delayTimeMillis) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        if (!isCanSchedule(delayTimeMillis)) {
+            throw new MQClientException("the delay time is too close to the current", null);
+        }
         msg.setTopic(withNamespace(msg.getTopic()));
         // 设置延时时间
         Map<String, String> properties = msg.getProperties();
@@ -32,7 +34,40 @@ public class DefaultScheduleMQProducer extends DefaultMQProducer implements Sche
     }
 
     @Override
-    public SendResult send(Message msg, long timeout, int delayTime, TimeUnit timeUnit) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
-        return null;
+    public SendResult send(Message msg, long timeout, long delayTime, TimeUnit timeUnit) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        long delayTimeMills = getTriggerTimeMillis(delayTime, timeUnit);
+        if (!isCanSchedule(delayTimeMills)) {
+            throw new MQClientException("the delay time is too close to the current", null);
+        }
+        msg.setTopic(withNamespace(msg.getTopic()));
+        // 设置延时时间
+        Map<String, String> properties = msg.getProperties();
+        properties.put(ScheduleMessageConst.PROPERTY_DELAY_TIME, String.valueOf(delayTimeMills));
+        return this.defaultMQProducerImpl.send(msg, timeout);
     }
+
+    /**
+     * 是否调度延时消息
+     *
+     * @param delayTimeMillis 延时时间
+     * @return
+     */
+    private boolean isCanSchedule(long delayTimeMillis) {
+        return ScheduleMessageConst.MIN_DELAY_GRANULARITY > (System.currentTimeMillis() - delayTimeMillis);
+    }
+
+    /**
+     * 计算任务触发时间戳
+     *
+     * @param delayTime
+     * @param timeUnit
+     * @return
+     */
+    private Long getTriggerTimeMillis(Long delayTime, TimeUnit timeUnit) {
+        if (delayTime == null || delayTime < 0) {
+            return 0L;
+        }
+        return timeUnit.toMillis(delayTime) + System.currentTimeMillis();
+    }
+
 }

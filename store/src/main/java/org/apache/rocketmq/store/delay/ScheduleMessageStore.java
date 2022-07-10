@@ -17,44 +17,29 @@
 package org.apache.rocketmq.store.delay;
 
 import io.netty.util.HashedWheelTimer;
-import io.netty.util.Timeout;
 import io.netty.util.TimerTask;
 import org.apache.rocketmq.common.*;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageExtBatch;
-import org.apache.rocketmq.common.running.RunningStats;
 import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
-import org.apache.rocketmq.common.sysflag.MessageSysFlag;
-import org.apache.rocketmq.common.topic.TopicValidator;
+import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.*;
 import org.apache.rocketmq.store.config.BrokerRole;
-import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 import org.apache.rocketmq.store.delay.config.ScheduleMessageStoreConfig;
 import org.apache.rocketmq.store.delay.config.ScheduleStorePathConfigHelper;
-import org.apache.rocketmq.store.delay.tool.DirConfigHelper;
-import org.apache.rocketmq.store.delay.wheel.MemoryIndex;
+import org.apache.rocketmq.store.delay.wheel.ScheduleMemoryIndex;
 import org.apache.rocketmq.store.delay.wheel.ScheduleTimeWheel;
-import org.apache.rocketmq.store.dledger.DLedgerCommitLog;
-import org.apache.rocketmq.store.ha.HAService;
-import org.apache.rocketmq.store.index.QueryOffsetResult;
-import org.apache.rocketmq.store.schedule.ScheduleMessageService;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.net.Inet6Address;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileLock;
-import java.util.*;
-import java.util.Map.Entry;
+import java.util.Arrays;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -89,14 +74,7 @@ public class ScheduleMessageStore {
 
     private final ScheduledExecutorService scheduledExecutorService =
             Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("StoreScheduledThread"));
-    /**
-     * Broker 统计服务
-     */
-    private final BrokerStatsManager brokerStatsManager;
-    /**
-     * Broker 配置属性
-     */
-    private final BrokerConfig brokerConfig;
+
 
     private volatile boolean shutdown = true;
 
@@ -107,7 +85,6 @@ public class ScheduleMessageStore {
     private AtomicLong printTimes = new AtomicLong(0);
 
     private RandomAccessFile lockFile;
-    private FileLock lock;
     private final SystemClock systemClock = new SystemClock();
 
 
@@ -119,8 +96,20 @@ public class ScheduleMessageStore {
      */
     private final MessageStore messageStore;
 
+    /**
+     * 异步刷盘线程任务
+     */
     private final FlushRealTimeService flushRealTimeService;
+    /**
+     * 周期性扫描时间分区文件（基于当前时间）
+     */
     private final ScanReachScheduleLog scanReachScheduleLog;
+
+    /**
+     * 补偿扫描时间分区文件
+     */
+    private final ScanUnprocessedScheduleLog scanUnprocessedScheduleLog;
+
 
     private final HashedWheelTimer hashedWheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
 
@@ -132,10 +121,7 @@ public class ScheduleMessageStore {
      * @throws IOException
      */
     public ScheduleMessageStore(BrokerStatsManager brokerStatsManager, BrokerConfig brokerConfig, MessageStore messageStore) throws IOException {
-        this.brokerConfig = brokerConfig;
         this.messageStoreConfig = new ScheduleMessageStoreConfig();
-        this.brokerStatsManager = brokerStatsManager;
-
         // 初始化一个 ScheduleLog
         this.scheduleLogManager = new ScheduleLogManager(this);
         this.cleanCommitLogService = new CleanCommitLogService();
@@ -143,9 +129,9 @@ public class ScheduleMessageStore {
 
         // ScheduleLog 异步刷盘任务
         flushRealTimeService = new FlushRealTimeService();
-        // 定时扫描 ScheduleLog 加载到内存时间轮任务
+        // 定时扫描 ScheduleLog 消息加载到内存时间轮任务
         scanReachScheduleLog = new ScanReachScheduleLog();
-
+        scanUnprocessedScheduleLog = new ScanUnprocessedScheduleLog();
         // 原始的存储服务
         this.messageStore = messageStore;
 
@@ -215,6 +201,7 @@ public class ScheduleMessageStore {
         // todo 启动
         this.flushRealTimeService.start();
         this.scanReachScheduleLog.start();
+        this.scanUnprocessedScheduleLog.start();
 
         this.storeStatsService.start();
         this.createTempFile();
@@ -257,97 +244,98 @@ public class ScheduleMessageStore {
 
     /*---------- 定时扫描 ScheduleLog 中的快要到期消息  ----------*/
     class ScanReachScheduleLog extends ServiceThread {
+
         @Override
         public void run() {
             // Broker 不关闭
             while (!this.isStopped()) {
 
                 // 每隔 5s 扫描一次
+                // todo FIXME 这个粒度需要基于时间分区设置
                 long interval = 1000 * 5;
                 this.waitForRunning(interval);
 
                 // 当前时间属于哪个分区文件
-                Long dirNameByMills = DirConfigHelper.getDirNameByMills(System.currentTimeMillis());
-                ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(dirNameByMills);
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
+
+                // 获取最近分区文件
+                ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
                 if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
                     this.waitForRunning(interval);
 
                 } else {
 
-                    // 当前分区已经加载到内存时间轮的 ScheduleLog 的偏移量
+                    // 当前时间分区文件消息已经加载到内存时间轮的 ScheduleLog 的物理偏移量
                     ConcurrentMap<Long, Long> scheduleLogMemoryIndexTable = scheduleLogManager.getScheduleLogMemoryIndexTable();
-                    Long offset = scheduleLogMemoryIndexTable.get(dirNameByMills);
-                    if (offset == null) {
-                        offset = 0L;
-                    }
-                    long memoryIndex = offset;
-                    // 当前分区最大的物理偏移量
-                    long maxOffset = scheduleLog.getMaxOffset();
+                    Long offset = scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L);
+
+                    // 当前时间分区文件消息已经投递到 CommitLog 中的消息的最大延时时间
+                    ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleLogManager.getScheduleDelayTimeTable();
+
 
                     // todo 读取当前 ScheduleLog 下的所有文件，并加载到内存时间轮
-                    for (boolean doNext = true; offset <= maxOffset && doNext; ) {
+                    for (boolean doNext = true; isScheduleLogAvailable(offset, scheduleLog) && doNext; ) {
                         // 1 根据指定的物理偏移量，从对应的内存文件中读取 物理偏移量 ~ 该内存文件中有效数据的最大偏移量的数据
                         SelectMappedBufferResult result = scheduleLogManager.getData(scheduleLog.getMappedFileQueue(), offset);
                         // 找到数据
                         if (result != null) {
                             try {
 
-                                // 更新 reputFromOffset ，以实际拉取消息的起始偏移量为准，即 this.fileFromOffset + reputFromOffset % mappedFileSize
+                                // 更新拉取 ScheduleLog 的物理偏移量 ，以实际拉取消息的起始偏移量为准
                                 offset = result.getStartOffset();
 
-                                // 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条，创建 DispatchRequest 对象
+                                // 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条
                                 for (int readSize = 0; readSize < result.getSize() && doNext; ) {
 
-                                    // 2 尝试构建转发请求对象 DispatchRequest，即生成重放消息调度请求，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
-                                    // todo 主要是从Nio ByteBuffer中，根据 ScheduleLog 消息存储格式，解析出消息的核心属性，其中延迟消息的时间计算也在该逻辑中
-                                    // todo 注意：生成重放消息调度请求 (DispatchRequest) ，从 SelectMappedBufferResult 中读取一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。
+                                    // 2 尝试构建转发请求对象 DispatchRequest 来保证 ScheduleLog 消息的正确性，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
                                     //  怎么做到只有一条的呢？result.getByteBuffer() 的读取方法指针 & readSize 更新控制
                                     DispatchRequest dispatchRequest =
                                             scheduleLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
 
-                                    // 消息长度
+                                    // 消息大小
                                     int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
 
-                                    // 读取成功，进行该条消息的派发
+                                    // 读取成功
                                     if (dispatchRequest.isSuccess()) {
-                                        // 解析得到的消息程度大于 0
                                         if (size > 0) {
-                                            // todo 更新下次重放消息的偏移量
+                                            // 更新拉取 ScheduleLog 的物理偏移量
                                             offset += size;
-                                            // todo 累加读取大小，判断是否读取完毕以及控制每次读取一条消息
+                                            // 累加读取大小，用于判断是否读取完毕以及控制每次读取一条消息
                                             readSize += size;
+                                            // 获取当前 ScheduleLog 消息所在的物理偏移量
                                             long pyOffset = dispatchRequest.getCommitLogOffset();
-                                            String triggerTimeString = dispatchRequest.getPropertiesMap().get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
-                                            Long triggerTime = Long.parseLong(triggerTimeString);
 
-                                            // 判断当前 ScheduleLog 是否已经加入到时间轮中
-                                            if (!scheduleLogMemoryIndexTable.isEmpty() && memoryIndex > dispatchRequest.getCommitLogOffset()) {
+                                            // 获取消息中存储的延时执行时间
+                                            Long triggerTime;
+                                            try {
+                                                triggerTime = Long.parseLong(dispatchRequest.getPropertiesMap().get(ScheduleMessageConst.PROPERTY_DELAY_TIME));
+                                            } catch (Exception ex) {
                                                 continue;
                                             }
-                                            // 已经投递过了，无需重复投递
-                                            // 这里使用 > ，可能相同时间多个消息
-                                            // 当前分区已经投递到 CommitLog 中的消息的最大延时时间
-                                            ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleLogManager.getScheduleDelayTimeTable();
-                                            Long delayTimeMills = scheduleDelayTimeTable.get(dirNameByMills);
-                                            if (delayTimeMills == null) {
-                                                delayTimeMills = 0L;
-                                            }
 
-                                            if (!scheduleDelayTimeTable.isEmpty() && delayTimeMills > triggerTime) {
+                                            // 判断当前消息是否已经加入过时间轮中，物理偏移量肯定是唯一的
+                                            if (!scheduleLogMemoryIndexTable.isEmpty() && scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L) >= dispatchRequest.getCommitLogOffset()) {
                                                 continue;
                                             }
-                                            // 构建内存索引
-                                            long diff = triggerTime - System.currentTimeMillis();
-                                            MemoryIndex memoryIndexObj = new MemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
+                                            // 已经投递过了，无需重复投递；这里使用 > ，可能相同时间多个消息
+                                            if (!scheduleDelayTimeTable.isEmpty() && scheduleDelayTimeTable.getOrDefault(delayPartitionDirectory, 0L) > triggerTime) {
+                                                continue;
+                                            }
+
+                                            // 还有多久触发
+                                            long diff = triggerTime - systemClock.now();
+
+                                            // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
+
+
+                                            ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
                                             hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
 
-                                            System.out.println(DirConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
+                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
 
-
-                                            // 加入时间轮成功后，更新加入到时间轮的最大偏移量，便于过滤后续的延时消息
-                                            memoryIndex = dispatchRequest.getCommitLogOffset();
-                                            scheduleLogMemoryIndexTable.put(dirNameByMills, memoryIndex);
+                                            // 更新加入到时间轮的最大偏移量
+                                            scheduleLogMemoryIndexTable.put(delayPartitionDirectory, dispatchRequest.getCommitLogOffset());
 
                                             // 对应的是 Blank ，即读取到 MappedFile 文件尾，跳转指向下一个 MappedFile
                                         } else if (size == 0) {
@@ -376,8 +364,6 @@ public class ScheduleMessageStore {
                         }
                     }
 
-                    // 更新加载到内存时间轮的消息物理偏移量
-                    scheduleLogMemoryIndexTable.put(dirNameByMills, offset);
                 }
             }
         }
@@ -387,6 +373,168 @@ public class ScheduleMessageStore {
             return ScanReachScheduleLog.class.getSimpleName();
         }
     }
+
+
+    /*---------- 定时补偿 ScheduleLog 中的过期的消息  ----------*/
+    class ScanUnprocessedScheduleLog extends ServiceThread {
+
+        // 每隔 5s 扫描一次
+        // todo FIXME 这个粒度需要基于时间分区设置，一个时间分区扫描两次即可（启动就扫描 + 再扫描一次）
+        long interval = 1000 * 60 * 25;
+
+        @Override
+        public void run() {
+            // Broker 不关闭
+            while (!this.isStopped()) {
+                // 当前时间属于哪个分区文件
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(compensateDelayTime());
+
+                // 获取对应的分区文件
+                ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
+                if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
+                    Thread.yield();
+                } else {
+
+                    // 当前时间分区文件消息已经加载到内存时间轮的 ScheduleLog 的物理偏移量
+                    ConcurrentMap<Long, Long> scheduleLogMemoryIndexTable = scheduleLogManager.getScheduleLogMemoryIndexTable();
+                    Long offset = scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L);
+
+                    // 当前时间分区文件消息已经投递到 CommitLog 中的消息的最大延时时间
+                    ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleLogManager.getScheduleDelayTimeTable();
+
+
+                    // todo 读取当前 ScheduleLog 下的所有文件，并加载到内存时间轮
+                    for (boolean doNext = true; isScheduleLogAvailable(offset, scheduleLog) && doNext; ) {
+                        // 1 根据指定的物理偏移量，从对应的内存文件中读取 物理偏移量 ~ 该内存文件中有效数据的最大偏移量的数据
+                        SelectMappedBufferResult result = scheduleLogManager.getData(scheduleLog.getMappedFileQueue(), offset);
+                        // 找到数据
+                        if (result != null) {
+                            try {
+
+                                // 更新拉取 ScheduleLog 的物理偏移量 ，以实际拉取消息的起始偏移量为准
+                                offset = result.getStartOffset();
+
+                                // 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条
+                                for (int readSize = 0; readSize < result.getSize() && doNext; ) {
+
+                                    // 2 尝试构建转发请求对象 DispatchRequest 来保证 ScheduleLog 消息的正确性，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
+                                    //  怎么做到只有一条的呢？result.getByteBuffer() 的读取方法指针 & readSize 更新控制
+                                    DispatchRequest dispatchRequest =
+                                            scheduleLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
+
+                                    // 消息大小
+                                    int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
+
+                                    // 读取成功
+                                    if (dispatchRequest.isSuccess()) {
+                                        if (size > 0) {
+                                            // 更新拉取 ScheduleLog 的物理偏移量
+                                            offset += size;
+                                            // 累加读取大小，用于判断是否读取完毕以及控制每次读取一条消息
+                                            readSize += size;
+                                            // 获取当前 ScheduleLog 消息所在的物理偏移量
+                                            long pyOffset = dispatchRequest.getCommitLogOffset();
+
+                                            // 获取消息中存储的延时执行时间
+                                            Long triggerTime;
+                                            try {
+                                                triggerTime = Long.parseLong(dispatchRequest.getPropertiesMap().get(ScheduleMessageConst.PROPERTY_DELAY_TIME));
+                                            } catch (Exception ex) {
+                                                continue;
+                                            }
+
+                                            // 判断当前消息是否已经加入过时间轮中
+                                            if (!scheduleLogMemoryIndexTable.isEmpty() && scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L) >= dispatchRequest.getCommitLogOffset()) {
+                                                continue;
+                                            }
+                                            // 已经投递过了，无需重复投递
+                                            // 这里使用 > ，可能相同时间多个消息
+                                            if (!scheduleDelayTimeTable.isEmpty() && scheduleDelayTimeTable.getOrDefault(delayPartitionDirectory, 0L) > triggerTime) {
+                                                continue;
+                                            }
+
+                                            // 还有多久触发
+                                            long diff = triggerTime - systemClock.now();
+
+                                            // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
+
+
+                                            ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
+                                            // 过期的立即触发
+                                            hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
+
+                                            System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
+
+                                            // 更新加入到时间轮的最大偏移量
+                                            scheduleLogMemoryIndexTable.put(delayPartitionDirectory, dispatchRequest.getCommitLogOffset());
+
+                                            // 对应的是 Blank ，即读取到 MappedFile 文件尾，跳转指向下一个 MappedFile
+                                        } else if (size == 0) {
+                                            // 获取下次读取偏移量
+                                            offset = scheduleLog.rollNextFile(offset);
+                                            readSize = result.getSize();
+                                        }
+
+                                        // 读取失败。这种场景基本是一个 Bug
+                                    } else if (!dispatchRequest.isSuccess()) {
+                                        if (size > 0) {
+                                            log.error("[BUG]read total count not equals msg total size. reputFromOffset={}", offset);
+                                            offset += size;
+                                        } else {
+                                            doNext = false;
+                                        }
+                                    }
+                                }
+                            } finally {
+                                result.release();
+                            }
+
+                            // 没有找到数据，等待下次继续执行
+                        } else {
+                            doNext = false;
+                        }
+                    }
+
+                }
+
+                // 扫描一次后进入等待
+                waitForRunning(interval);
+            }
+        }
+
+        @Override
+        public String getServiceName() {
+            return ScanReachScheduleLog.class.getSimpleName();
+        }
+
+        @Override
+        protected void onWaitEnd() {
+            // do nothing
+        }
+    }
+
+
+    /**
+     * 是否可以继续拉取 ScheduleLog
+     *
+     * @return
+     */
+    private boolean isScheduleLogAvailable(long offset, ScheduleLog scheduleLog) {
+        return offset < scheduleLog.getMaxOffset();
+    }
+
+    /**
+     * 补偿指定时间粒度的扫描时间
+     * <p>
+     * todo FIXME
+     *
+     * @return
+     */
+    private long compensateDelayTime() {
+        return systemClock.now() - 1000 * 10;
+    }
+
+
 
 
 
@@ -527,9 +675,8 @@ public class ScheduleMessageStore {
         }
 
 
-        if (lockFile != null && lock != null) {
+        if (lockFile != null) {
             try {
-                lock.release();
                 lockFile.close();
             } catch (IOException e) {
             }
@@ -640,16 +787,33 @@ public class ScheduleMessageStore {
         // 存储任意延时消息
         CompletableFuture<PutMessageResult> putResultFuture = this.scheduleLogManager.asyncPutMessage(msg);
 
-        // todo 投递延时消息
-        putResultFuture.whenComplete((a, b) -> {
+        // putResultFuture 执行完会回调该方法，但是执行线程不会等待，它会直接返回
+        putResultFuture.thenAccept((result) -> {
+            // 统计消耗时间
+            long elapsedTime = this.getSystemClock().now() - beginTime;
+            if (elapsedTime > 500) {
+                log.warn("putMessage not in lock elapsed time(ms)={}, bodyLength={}", elapsedTime, msg.getBody().length);
+            }
+            this.storeStatsService.setPutMessageEntireTimeMax(elapsedTime);
+            if (null == result || !result.isOk()) {
+                this.storeStatsService.getPutMessageFailedTimes().incrementAndGet();
+            }
+
+            // 判断是否将延时消息加载到时间轮中
+            putMessageToMemoryIndex(msg);
+        });
+
+        return putResultFuture;
+    }
+
+    private void putMessageToMemoryIndex(MessageExtBrokerInner msg) {
+        try {
             // 刷盘成功，判断是否要加载到时间轮
             String delayTime = msg.getProperty(ScheduleMessageConst.PROPERTY_DELAY_TIME);
-
-            // todo 判断是否可以加载到时间轮，小于 30 分钟的加入时间轮
-            long diff = Long.parseLong(delayTime) - System.currentTimeMillis();
-            if (diff < DirConfigHelper.TRIGGER_TIME) {
+            long diff = Long.parseLong(delayTime) - this.getSystemClock().now();
+            // 小于指定时间粒度的延时消息加入时间轮
+            if (diff < ScheduleConfigHelper.TRIGGER_TIME) {
                 TimerTask timerTask = timeout -> {
-
                     // 记录触发的延时时间
                     String commitMills = msg.getProperties().get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
 
@@ -665,7 +829,7 @@ public class ScheduleMessageStore {
                         System.out.println("添加消息场景触发了时间调度。msg: " + msg);
 
                         // todo 记录投递成功的物理偏移量，需要持久化
-                        scheduleLogManager.getScheduleDelayTimeTable().put(DirConfigHelper.getDirNameByMills(Long.parseLong(delayTime)), Long.parseLong(commitMills));
+                        scheduleLogManager.getScheduleDelayTimeTable().put(ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(delayTime)), Long.parseLong(commitMills));
                         return;
 
                         // 消息投递失败
@@ -676,29 +840,14 @@ public class ScheduleMessageStore {
                 };
 
                 // 记录 scheduleLog 的物理偏移量的消息进入时间轮
-                scheduleLogManager.getScheduleLogMemoryIndexTable().put(DirConfigHelper.getDirNameByMills(Long.parseLong(delayTime)), msg.getCommitLogOffset());
+                scheduleLogManager.getScheduleLogMemoryIndexTable().put(ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(delayTime)), msg.getCommitLogOffset());
 
                 System.out.println("添加延时消息触发时间轮，还有 " + diff + "毫秒任务会被触发！");
                 ScheduleTimeWheel.INSTANCE.getWheelTimer().newTimeout(timerTask, diff, TimeUnit.MILLISECONDS);
             }
-
-        });
-
-        // todo putResultFuture 执行完会回调该方法，但是执行线程不会等待，它会直接返回
-        putResultFuture.thenAccept((result) -> {
-            // 统计消耗时间
-            long elapsedTime = this.getSystemClock().now() - beginTime;
-            if (elapsedTime > 500) {
-                log.warn("putMessage not in lock elapsed time(ms)={}, bodyLength={}", elapsedTime, msg.getBody().length);
-            }
-            this.storeStatsService.setPutMessageEntireTimeMax(elapsedTime);
-
-            if (null == result || !result.isOk()) {
-                this.storeStatsService.getPutMessageFailedTimes().incrementAndGet();
-            }
-        });
-
-        return putResultFuture;
+        } catch (Exception ex) {
+            log.error("put schedule message to memory index error， ex={}", ex);
+        }
     }
 
 
@@ -946,91 +1095,90 @@ public class ScheduleMessageStore {
      * @param lastExitOK Broker 是否正常关闭
      */
     private void recover(final boolean lastExitOK) {
-        // 恢复 ScheduleLog
-        // 即移除非法的 offset
+        // 恢复 ScheduleLog，即移除非法的 offset
         scheduleLogManager.getScheduleLogTable().values().forEach(ScheduleLog::recoverNormally);
+        Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
 
-        // todo 恢复完尝试将最近时间粒度内的消息加载到时间轮中
-        // 当前时间属于哪个分区文件
-        Long dirNameByMills = DirConfigHelper.getDirNameByMills(System.currentTimeMillis());
-        ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(dirNameByMills);
+        // 恢复完尝试将最近时间分区文件中的消息加载到内存时间轮中以进行调度
+        ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
         if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
             return;
-        } else {
+        }
 
-            // 当前分区已经投递到 CommitLog 中的消息的最大延时时间
+        try {
+
+            // 当前时间分区文件消息已经投递到 CommitLog 中的消息的最大延时时间
             ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleLogManager.getScheduleDelayTimeTable();
-            Long delayTimeMills = scheduleDelayTimeTable.get(dirNameByMills);
-            if (delayTimeMills == null) {
-                delayTimeMills = 0L;
-            }
 
-            // 当前分区已经加载到内存时间轮的 ScheduleLog 的偏移量
+            // 当前时间分区文件消息已经加载到内存时间轮的 ScheduleLog 的物理偏移量
             ConcurrentMap<Long, Long> scheduleLogMemoryIndexTable = scheduleLogManager.getScheduleLogMemoryIndexTable();
-            Long offset = scheduleLogMemoryIndexTable.get(dirNameByMills);
-            if (offset == null) {
-                offset = 0L;
-            }
-            long memoryIndex = offset;
-            // 当前分区最大的物理偏移量
-            long maxOffset = scheduleLog.getMaxOffset();
+            Long offset = scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L);
 
-            // todo 读取当前 ScheduleLog 下的所有文件，并加载到内存时间轮
-            for (boolean doNext = true; offset <= maxOffset && doNext; ) {
+            // 读取当前 ScheduleLog 下的所有文件，并加载到内存时间轮
+            for (boolean doNext = true; isScheduleLogAvailable(offset, scheduleLog) && doNext; ) {
+
                 // 1 根据指定的物理偏移量，从对应的内存文件中读取 物理偏移量 ~ 该内存文件中有效数据的最大偏移量的数据
                 SelectMappedBufferResult result = scheduleLogManager.getData(scheduleLog.getMappedFileQueue(), offset);
                 // 找到数据
                 if (result != null) {
                     try {
-
-                        // 更新 reputFromOffset ，以实际拉取消息的起始偏移量为准，即 this.fileFromOffset + reputFromOffset % mappedFileSize
+                        // 更新拉取 ScheduleLog 的物理偏移量 ，以实际拉取消息的起始偏移量为准
                         offset = result.getStartOffset();
 
-                        // 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条，创建 DispatchRequest 对象
+                        // 从 result 返回的 ByteBuffer 中循环读取消息，一次读取一条
                         for (int readSize = 0; readSize < result.getSize() && doNext; ) {
 
-                            // 2 尝试构建转发请求对象 DispatchRequest，即生成重放消息调度请求，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
-                            // todo 主要是从Nio ByteBuffer中，根据 ScheduleLog 消息存储格式，解析出消息的核心属性，其中延迟消息的时间计算也在该逻辑中
-                            // todo 注意：生成重放消息调度请求 (DispatchRequest) ，从 SelectMappedBufferResult 中读取一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息。
+                            // 2 尝试构建转发请求对象 DispatchRequest 来保证 ScheduleLog 消息的正确性，请求里主要包含一条消息 (Message) 或者 文件尾 (BLANK) 的基本信息
                             //  怎么做到只有一条的呢？result.getByteBuffer() 的读取方法指针 & readSize 更新控制
                             DispatchRequest dispatchRequest =
                                     scheduleLog.checkMessageAndReturnSize(result.getByteBuffer(), false, false);
 
-                            // 消息长度
+                            // 消息大小
                             int size = dispatchRequest.getBufferSize() == -1 ? dispatchRequest.getMsgSize() : dispatchRequest.getBufferSize();
 
-                            // 读取成功，进行该条消息的派发
+                            // 读取成功
                             if (dispatchRequest.isSuccess()) {
-                                // 解析得到的消息程度大于 0
                                 if (size > 0) {
-                                    // todo 更新下次重放消息的偏移量
+                                    // 更新拉取 ScheduleLog 的物理偏移量
                                     offset += size;
-                                    // todo 累加读取大小，判断是否读取完毕以及控制每次读取一条消息
+                                    // 累加读取大小，用于判断是否读取完毕以及控制每次读取一条消息
                                     readSize += size;
-                                    long pyOffset = dispatchRequest.getCommitLogOffset();
-                                    String triggerTimeString = dispatchRequest.getPropertiesMap().get(ScheduleMessageConst.PROPERTY_DELAY_TIME);
-                                    Long triggerTime = Long.parseLong(triggerTimeString);
 
-                                    // 判断是否已经加入到时间轮中
-                                    if (!scheduleLogMemoryIndexTable.isEmpty() && memoryIndex >= dispatchRequest.getCommitLogOffset()) {
+                                    // 获取当前 ScheduleLog 消息所在的物理偏移量
+                                    long pyOffset = dispatchRequest.getCommitLogOffset();
+
+                                    // 获取消息中存储的延时执行时间
+                                    Long triggerTime;
+                                    try {
+                                        triggerTime = Long.parseLong(dispatchRequest.getPropertiesMap().get(ScheduleMessageConst.PROPERTY_DELAY_TIME));
+                                    } catch (Exception ex) {
+                                        continue;
+                                    }
+
+                                    // 判断当前消息是否已经加入过时间轮中
+                                    if (!scheduleLogMemoryIndexTable.isEmpty() && scheduleLogMemoryIndexTable.getOrDefault(delayPartitionDirectory, 0L) >= dispatchRequest.getCommitLogOffset()) {
                                         continue;
                                     }
                                     // 已经投递过了，无需重复投递
                                     // 这里使用 > ，可能相同时间多个消息
-                                    if (!scheduleDelayTimeTable.isEmpty() && delayTimeMills > triggerTime) {
+                                    if (!scheduleDelayTimeTable.isEmpty() && scheduleDelayTimeTable.getOrDefault(delayPartitionDirectory, 0L) > triggerTime) {
                                         continue;
                                     }
 
                                     // 还有多久触发
-                                    long diff = triggerTime - System.currentTimeMillis();
+                                    long diff = triggerTime - systemClock.now();
+
+                                    // todo  FIXME 延时补偿粒度，太久的消息不处理，目前先跑通，后续优化
+
                                     // 构建内存索引
-                                    MemoryIndex memoryIndexObj = new MemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
+                                    ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                     hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
-                                    System.out.println(DirConfigHelper.getCurrentDateTime() + "  初始化加载延时任务文件到时间轮，还有 " + (diff) + " 毫秒触发");
+                                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + "  初始化加载延时任务文件到时间轮，还有 " + (diff) + " 毫秒触发");
                                     System.out.println();
+
+
                                     // 更新加入到时间轮的最大偏移量
-                                    memoryIndex = dispatchRequest.getCommitLogOffset();
-                                    scheduleLogMemoryIndexTable.put(dirNameByMills, memoryIndex);
+                                    scheduleLogMemoryIndexTable.put(delayPartitionDirectory, dispatchRequest.getCommitLogOffset());
 
                                     // 对应的是 Blank ，即读取到 MappedFile 文件尾，跳转指向下一个 MappedFile
                                 } else if (size == 0) {
@@ -1042,7 +1190,7 @@ public class ScheduleMessageStore {
                                 // 读取失败。这种场景基本是一个 Bug
                             } else if (!dispatchRequest.isSuccess()) {
                                 if (size > 0) {
-                                    log.error("[BUG]read total count not equals msg total size. reputFromOffset={}", offset);
+                                    log.error("[BUG]read total count not equals msg total size. offset={}", offset);
                                     offset += size;
                                 } else {
                                     doNext = false;
@@ -1059,8 +1207,8 @@ public class ScheduleMessageStore {
                 }
             }
 
-            // 更新加载到内存时间轮的消息物理偏移量
-            scheduleLogMemoryIndexTable.put(dirNameByMills, offset);
+        } catch (Exception ex) {
+            log.error("[BUG]org.apache.rocketmq.store.delay.ScheduleMessageStore.recover error!");
         }
 
     }
@@ -1372,17 +1520,4 @@ public class ScheduleMessageStore {
         return scheduleLogManager;
     }
 
-
-    public static void main(String[] args) throws IOException {
-        HashedWheelTimer wheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
-
-        wheelTimer.newTimeout(new TimerTask() {
-            @Override
-            public void run(Timeout timeout) throws Exception {
-                System.out.println("xxxxx");
-            }
-        }, 10000, TimeUnit.MILLISECONDS);
-
-        System.in.read();
-    }
 }

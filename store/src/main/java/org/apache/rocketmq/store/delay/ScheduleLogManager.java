@@ -20,12 +20,13 @@ import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExtBatch;
+import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
+import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.*;
 import org.apache.rocketmq.store.delay.config.ScheduleMessageStoreConfig;
-import org.apache.rocketmq.store.delay.tool.DirConfigHelper;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -78,17 +79,14 @@ public class ScheduleLogManager {
      * 提交偏移量
      */
     protected volatile long confirmOffset = -1L;
-
     /**
      * 上锁的开始时间
      */
     private volatile long beginTimeInLock = 0;
-
     /**
      * 写入消息需要申请的锁
      */
     protected final PutMessageLock putMessageLock;
-
     /**
      * 延时时间分区对应的延时消息文件
      */
@@ -116,21 +114,6 @@ public class ScheduleLogManager {
         scheduleLogMemoryIndexTable = new ConcurrentHashMap<>(1024);
     }
 
-    public ScheduleMessageStore getScheduleMessageStore() {
-        return defaultMessageStore;
-    }
-
-    public HashMap<Long, ScheduleLog> getScheduleLogTable() {
-        return scheduleLogTable;
-    }
-
-    public ConcurrentMap<Long, Long> getScheduleDelayTimeTable() {
-        return scheduleDelayTimeTable;
-    }
-
-    public ConcurrentMap<Long, Long> getScheduleLogMemoryIndexTable() {
-        return scheduleLogMemoryIndexTable;
-    }
 
     /**
      * 删除过期文件
@@ -151,7 +134,7 @@ public class ScheduleLogManager {
     }
 
     /**
-     * Read CommitLog data, use data replication
+     * Read ScheduleLog data, use data replication
      */
     public SelectMappedBufferResult getData(MappedFileQueue mappedFileQueue, final long offset) {
         // 如果 offset == 0 ，没有找到就返回第一个就可以
@@ -183,13 +166,6 @@ public class ScheduleLogManager {
         }
 
         return null;
-    }
-
-
-    private void doNothingForDeadCode(final Object obj) {
-        if (obj != null) {
-            log.debug(String.valueOf(obj.hashCode()));
-        }
     }
 
 
@@ -256,8 +232,7 @@ public class ScheduleLogManager {
         MappedFile unlockMappedFile = null;
 
         // todo 根据延时时间获取 ScheduleLog 对应映射文件
-        String property = msg.getProperty(DirConfigHelper.DELAY_TIME);
-        Long dirNameByMills = DirConfigHelper.getDirNameByMills(Long.parseLong(property));
+        Long dirNameByMills = ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(msg.getProperty(ScheduleMessageConst.PROPERTY_DELAY_TIME)));
         ScheduleLog scheduleLog = scheduleLogTable.get(dirNameByMills);
 
         // 没有则创建对应时间分区的 ScheduleLog
@@ -371,8 +346,7 @@ public class ScheduleLogManager {
      */
     private ScheduleLog createScheduleLog(Long dirNameByMills) {
         ScheduleMessageStoreConfig messageStoreConfig = new ScheduleMessageStoreConfig();
-
-        // 创建类似 ConsumeQueue
+        // 创建类似 ConsumeQueue 的逻辑对象
         ScheduleLog scheduleLog = new ScheduleLog(
                 dirNameByMills,
                 messageStoreConfig.getStorePathScheduleLog(), // 文件路径
@@ -386,12 +360,12 @@ public class ScheduleLogManager {
 
 
     /**
-     * 获取当前 CommitLog 的最小偏移量（非某个 CommitLog 文件）
+     * 获取当前 ScheduleLog 的最小偏移量（非某个 ScheduleLog 文件）
      *
      * @return
      */
     public long getMinOffset(MappedFileQueue mappedFileQueue) {
-        // 获取 commitlog 目录下的第一个文件
+        // 获取 ScheduleLog 目录下的第一个文件
         MappedFile mappedFile = mappedFileQueue.getFirstMappedFile();
 
         // 如果第一个文件可用，则返回该文件的起始偏移量，否则返回下一个文件的起始偏移量
@@ -407,9 +381,9 @@ public class ScheduleLogManager {
     }
 
     /**
-     * todo 读取从物理偏移量到 size 大小的数据，如：size = 4，读取的就是消息的长度（因为 CommitLog 和 ConsumeQueue 存储不一样，前者是不定长的，后者是定长的 20字节）
+     * todo 读取从物理偏移量到 size 大小的数据，如：size = 4，读取的就是消息的长度
      * 说明：
-     * 主要根据物理偏移量，找到所在的commitlog文件，commitlog文件封装成MappedFile(内存映射文件)，然后直接从偏移量开始，读取指定的字节（消息的长度），
+     * 主要根据物理偏移量，找到所在的 ScheduleLog 文件，ScheduleLog 文件封装成 MappedFile(内存映射文件)，然后直接从偏移量开始，读取指定的字节（消息的长度），
      * 要是事先不知道消息的长度，只知道offset呢？其实也简单，先找到MapFile,然后从offset处先读取4个字节，就能获取该消息的总长度。
      *
      * @param offset 物理偏移量
@@ -436,7 +410,7 @@ public class ScheduleLogManager {
     }
 
     /**
-     * 根据 offset ，返回 offset 所在 CommitLog 文件的下一个 CommitLog 文件的起始偏移量
+     * 根据 offset ，返回 offset 所在 ScheduleLog 文件的下一个 ScheduleLog 文件的起始偏移量
      *
      * @param offset 物理偏移量
      * @return
@@ -452,7 +426,7 @@ public class ScheduleLogManager {
 
 
     /**
-     * 追加消息回调
+     * ScheduleLog 追加消息回调
      */
     class DefaultAppendMessageCallback implements AppendMessageCallback {
         // File at the end of the minimum fixed length empty
@@ -787,5 +761,22 @@ public class ScheduleLogManager {
             byteBuffer.flip();
             byteBuffer.limit(limit);
         }
+    }
+
+
+    public ScheduleMessageStore getScheduleMessageStore() {
+        return defaultMessageStore;
+    }
+
+    public HashMap<Long, ScheduleLog> getScheduleLogTable() {
+        return scheduleLogTable;
+    }
+
+    public ConcurrentMap<Long, Long> getScheduleDelayTimeTable() {
+        return scheduleDelayTimeTable;
+    }
+
+    public ConcurrentMap<Long, Long> getScheduleLogMemoryIndexTable() {
+        return scheduleLogMemoryIndexTable;
     }
 }

@@ -4,23 +4,22 @@ import io.netty.util.Timeout;
 import io.netty.util.TimerTask;
 import org.apache.rocketmq.common.TopicFilterType;
 import org.apache.rocketmq.common.message.MessageAccessor;
-import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
+import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
 import org.apache.rocketmq.store.MessageExtBrokerInner;
 import org.apache.rocketmq.store.PutMessageResult;
 import org.apache.rocketmq.store.PutMessageStatus;
 import org.apache.rocketmq.store.delay.ScheduleLog;
 import org.apache.rocketmq.store.delay.ScheduleMessageStore;
-import org.apache.rocketmq.store.delay.tool.DirConfigHelper;
 
 import java.util.concurrent.ConcurrentMap;
 
 /**
  * MemoryIndex
  */
-public class MemoryIndex implements TimerTask {
+public class ScheduleMemoryIndex implements TimerTask {
     /**
      * 延时时间（触发时间）
      */
@@ -39,7 +38,7 @@ public class MemoryIndex implements TimerTask {
     private ScheduleMessageStore scheduleMessageStore;
 
 
-    public MemoryIndex(ScheduleMessageStore scheduleMessageStore, Long triggerTime, Long offset, Integer size) {
+    public ScheduleMemoryIndex(ScheduleMessageStore scheduleMessageStore, Long triggerTime, Long offset, Integer size) {
         this.scheduleMessageStore = scheduleMessageStore;
         this.triggerTime = triggerTime;
         this.offset = offset;
@@ -49,8 +48,8 @@ public class MemoryIndex implements TimerTask {
     @Override
     public void run(Timeout timeout) throws Exception {
         // 查找属于哪个 ScheduleLog
-        Long dirNameByMills = DirConfigHelper.getDirNameByMills(triggerTime);
-        ScheduleLog scheduleLog = scheduleMessageStore.getScheduleLogManager().getScheduleLogTable().get(dirNameByMills);
+        Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(triggerTime);
+        ScheduleLog scheduleLog = scheduleMessageStore.getScheduleLogManager().getScheduleLogTable().get(delayPartitionDirectory);
         if (scheduleLog == null) {
             return;
         }
@@ -61,11 +60,17 @@ public class MemoryIndex implements TimerTask {
 
         if (msgExt != null) {
             try {
-                ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleMessageStore.getScheduleLogManager().getScheduleDelayTimeTable();
+                // 获取消息中存储的延时执行时间
+                Long triggerTime;
+                try {
+                    triggerTime = Long.parseLong(msgExt.getProperties().get(ScheduleMessageConst.PROPERTY_DELAY_TIME));
+                } catch (Exception ex) {
+                    triggerTime = this.triggerTime;
+                }
+
                 // 判断消息是否投递过
-                Long commitTimeMills = scheduleDelayTimeTable.get(dirNameByMills);
-                if (commitTimeMills != null && commitTimeMills > triggerTime) {
-                    System.out.println(DirConfigHelper.getCurrentDateTime() + " 时间轮触发，但 msgExt 已经被投递过 " + msgExt);
+                if (scheduleMessageStore.getScheduleLogManager().getScheduleDelayTimeTable().getOrDefault(delayPartitionDirectory, 0L) > triggerTime) {
+                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮触发，但 msgExt 已经被投递过 " + msgExt);
                     return;
                 }
 
@@ -77,13 +82,11 @@ public class MemoryIndex implements TimerTask {
 
                 // 如果发送成功，则继续下一个消息索引的获取与判断是否到期
                 if (putMessageResult != null && putMessageResult.getPutMessageStatus() == PutMessageStatus.PUT_OK) {
-
-                    System.out.println(DirConfigHelper.getCurrentDateTime() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt);
+                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt);
                     System.out.println();
 
                     // todo 记录投递成功的物理偏移量，需要持久化
-                    scheduleDelayTimeTable.put(dirNameByMills, triggerTime);
-                    return;
+                    scheduleMessageStore.getScheduleLogManager().getScheduleDelayTimeTable().put(delayPartitionDirectory, triggerTime);
 
                     // 消息投递失败
                 } else {
