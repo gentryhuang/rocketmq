@@ -131,6 +131,13 @@ public class ScheduleLog {
         this.scheduleDir = this.storePath + File.separator + dirMills;
     }
 
+    public static void main(String[] args) {
+        String path = "/Users/huanglibao/store/schedulelog/1657276200000";
+        String[] substring = path.split(File.separator);
+        System.out.println(substring[substring.length - 1]);
+
+    }
+
     /**
      * 加载磁盘文件到内存映射文件
      *
@@ -469,12 +476,20 @@ public class ScheduleLog {
         return null;
     }
 
+    /**
+     * 删除过期的 ScheduleLog
+     *
+     * @param deleteFilesInterval
+     * @param intervalForcibly
+     * @param cleanImmediately
+     * @return
+     */
     public int deleteExpiredFile(
-            final long expiredTime,
             final int deleteFilesInterval,
             final long intervalForcibly,
+            final boolean forceCleanAll,
             final boolean cleanImmediately) {
-        return this.mappedFileQueue.deleteExpiredFileByTime(expiredTime, deleteFilesInterval, intervalForcibly, cleanImmediately);
+        return this.mappedFileQueue.deleteExpiredFileByTime(deleteFilesInterval, intervalForcibly,forceCleanAll, cleanImmediately);
     }
 
 

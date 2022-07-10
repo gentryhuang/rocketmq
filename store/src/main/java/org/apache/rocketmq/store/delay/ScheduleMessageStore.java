@@ -40,9 +40,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * RocketMQ 存储核心类，Broker 持有。包含了很多对存储文件进行操作的 API，其他模块对消息实体的操作都是通过该类进行的。
@@ -197,6 +200,7 @@ public class ScheduleMessageStore {
      * 存储服务启动会启动多个后台线程
      *
      * @throws Exception
+     * @link org.apache.rocketmq.broker.BrokerController#start()
      */
     public void start() throws Exception {
         // todo 启动
@@ -208,7 +212,26 @@ public class ScheduleMessageStore {
         this.createTempFile();
 
         // todo  开启系列定时任务，其中包含用来清理过期文件
+        this.addScheduleTask();
+
+        // todo  开启系列定时任务，其中包含用来清理过期文件
         this.shutdown = false;
+    }
+
+    /**
+     * 添加定时任务
+     */
+    private void addScheduleTask() {
+        /**
+         * todo 周期性清理 ScheduleLog 文件。默认每 10s 检查一次过期文件
+         */
+        this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                // 定期执行过期文件清理工作，默认 10s 执行一次。有三种情况会执行清理，具体看流程。
+                ScheduleMessageStore.this.cleanCommitLogService.run();
+            }
+        }, 1000 * 60, this.messageStoreConfig.getCleanResourceInterval(), TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -463,6 +486,12 @@ public class ScheduleMessageStore {
 
                                             // 还有多久触发
                                             long diff = triggerTime - systemClock.now();
+                                            // 补偿消息，一般来说是超时没有投递的，正常的消息交给定时扫描线程任务
+                                            if (diff >= 0) {
+                                                continue;
+                                            }
+
+                                            // 只补偿 [-1s ~ -5min] 的任务，否则打印消息可能丢失日志，交给业务方处理
                                             if (ScheduleConfigHelper.COMPENSATE_TIME > diff) {
                                                 log.warn("this message is overdue {} mills seconds , maybe is can not commit message，message = {}", -diff, dispatchRequest);
                                                 System.out.println("this message is overdue {} mills seconds , maybe is can not commit message，message = {}");
@@ -471,7 +500,7 @@ public class ScheduleMessageStore {
 
                                             ScheduleMemoryIndex memoryIndexObj = new ScheduleMemoryIndex(scheduleLogManager.getScheduleMessageStore(), triggerTime, pyOffset, size);
                                             // 过期的立即触发
-                                            hashedWheelTimer.newTimeout(memoryIndexObj, diff < 0 ? 0 : diff, TimeUnit.MILLISECONDS);
+                                            hashedWheelTimer.newTimeout(memoryIndexObj, 0, TimeUnit.MILLISECONDS);
 
                                             System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 补偿定时任务扫描延时消息文件，加载延时任务到时间轮，还有 " + (triggerTime - System.currentTimeMillis()) + " 毫秒触发延时任务！");
 
@@ -1223,48 +1252,14 @@ public class ScheduleMessageStore {
     }
 
 
-    public ScheduleMessageStoreConfig getMessageStoreConfig() {
-        return messageStoreConfig;
-    }
-
-    public StoreStatsService getStoreStatsService() {
-        return storeStatsService;
-    }
-
-    public RunningFlags getAccessRights() {
-        return runningFlags;
-    }
-
-
-    public StoreCheckpoint getStoreCheckpoint() {
-        return storeCheckpoint;
-    }
-
-
-    public RunningFlags getRunningFlags() {
-        return runningFlags;
-    }
-
-
-    public void unlockMappedFile(final MappedFile mappedFile) {
-        this.scheduledExecutorService.schedule(new Runnable() {
-            @Override
-            public void run() {
-                mappedFile.munlock();
-            }
-        }, 6, TimeUnit.SECONDS);
-    }
-
-
     /**
-     * commitLog 过期文件删除任务
+     * ScheduleLog  过期文件删除任务
      */
     class CleanCommitLogService {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
 
         /*-------------------------------- RocketMQ 提供了两个与磁盘空间使用率相关的系统级参数，如下：-------------------*/
-
         /**
          * 通过系统参数设置，默认值为 0.90。如果磁盘分区使用率超过该阈值，将设置磁盘为不可写，此时会拒绝写入新消息，并且立即启动文件删除操作。
          */
@@ -1278,9 +1273,6 @@ public class ScheduleMessageStore {
                 Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceCleanForciblyRatio", "0.85"));
 
         /*-------------------------------- RocketMQ 提供了两个与磁盘空间使用率相关的系统级参数，如下：-------------------*/
-
-
-        private long lastRedeleteTimestamp = 0;
 
         private volatile int manualDeleteFileSeveralTimes = 0;
 
@@ -1297,17 +1289,16 @@ public class ScheduleMessageStore {
             ScheduleMessageStore.log.info("executeDeleteFilesManually was invoked");
         }
 
+
         /**
-         * 清理 CommitLog 过期文件。整个执行过程分为两个大的步骤：
-         * 1 尝试删除过期文件
+         * 清理 ScheduleLog 过期文件。整个执行过程分为两个大的步骤：
+         * 1 尝试删除过期文件 - 文件夹名 < 当前时间对应分区时间，就说明之前的文件夹下的所有消息已经到期了，可以删除了。
          * 2 重试删除被 hang 住的文件（由于被其它线程引用，在第一步中未删除的文件），再重试一次
          */
         public void run() {
             try {
-
                 // 清理过期文件
                 this.deleteExpiredFiles();
-
             } catch (Throwable e) {
                 ScheduleMessageStore.log.warn(this.getServiceName() + " service has exception. ", e);
             }
@@ -1324,9 +1315,6 @@ public class ScheduleMessageStore {
         private void deleteExpiredFiles() {
             int deleteCount = 0;
 
-            // 文件保存的时长（从最后一次更新时间到现在），默认 72 小时。如果超过了该时间，则认为是过期文件。
-            long fileReservedTime = ScheduleMessageStore.this.getMessageStoreConfig().getFileReservedTime();
-
             // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定了删除一个文件后，休息多久再删除第二个
             int deletePhysicFilesInterval = ScheduleMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
 
@@ -1335,18 +1323,21 @@ public class ScheduleMessageStore {
             int destroyMapedFileIntervalForcibly = ScheduleMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
             /*------------- RocketMQ 在如下三种情况任意满足之一的情况下将执行删除文件操作 ------------*/
-            /*1. 到了删除文件的时间点，RocketMQ 通过 deleteWhen 设置一天的固定时间执行一次删除过期文件操作，默认为凌晨 4 点  */
-            /*2. 判断磁盘空间是否充足，如果不充足，则返回 ture，表示应该触发过期文件删除操作                               */
+            /*1. 到了删除文件的时间点，RocketMQ 通过 deleteWhen 设置一天的固定时间尝试执行一次删除过期文件操作，默认为凌晨 4 点  */
+            /*2. 判断磁盘空间是否充足，如果不充足，则返回 ture，表示应该触发过期文件删除操作                                  */
             /*3. 预留，手工触发；可以通过调用 excuteDeleteFilesManualy 方法手工触发过期文件删除                            */
 
             // 1 清理时间达到，默认为每天凌晨 4 点
             boolean timeup = this.isTimeToDelete();
 
-            // 2 todo 磁盘空间是否要满了， 占用率默认为 75%
+            // 2 磁盘空间是否要满了， 占用率默认为 75%
             boolean spacefull = this.isSpaceToDelete();
 
             // 3 手动可删除次数 > 0
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
+
+            // 是否立即删除
+            boolean forceCleanAll = false;
 
             // 达到以上条件任何一个
             if (timeup || spacefull || manualDelete) {
@@ -1355,28 +1346,51 @@ public class ScheduleMessageStore {
                 if (manualDelete)
                     this.manualDeleteFileSeveralTimes--;
 
-                // 是否立即删除
-                boolean cleanAtOnce = ScheduleMessageStore.this.getMessageStoreConfig().isCleanFileForciblyEnable() && this.cleanImmediately;
+                // 当前时间对应时间分区
+                // FIXME 加一个补偿机制 5 分钟，供补偿扫描线程执行。待优化
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now() + ScheduleConfigHelper.COMPENSATE_TIME);
 
-                log.info("begin to delete before {} hours file. timeup: {} spacefull: {} manualDeleteFileSeveralTimes: {} cleanAtOnce: {}",
-                        fileReservedTime,
-                        timeup,
-                        spacefull,
-                        manualDeleteFileSeveralTimes,
-                        cleanAtOnce);
+                // 顺序遍历，即从最早的文件夹遍历
+                HashMap<Long, ScheduleLog> scheduleLogTable = scheduleLogManager.getScheduleLogTable();
+                List<Long> fileTimes = scheduleLogManager.getScheduleLogTable().keySet().stream().sorted().collect(Collectors.toList());
+                for (Long fileTime : fileTimes) {
+                    ScheduleLog scheduleLog = scheduleLogTable.get(fileTime);
+                    if (scheduleLog == null) {
+                        continue;
+                    }
 
-                // 按天为单位
-                fileReservedTime *= 60 * 60 * 1000;
+                    // 磁盘空间是否要满了
+                    spacefull = this.isSpaceToDelete();
 
-                // todo 清理 CommitLog 文件，从开始到倒数第二个文件的范围内清理
-                for (ScheduleLog scheduleLog : scheduleLogManager.getScheduleLogTable().values()) {
+                    // 旧的文件夹可以删除了
+                    if (delayPartitionDirectory > fileTime) {
+                        forceCleanAll = true;
+                    }
+
+                    // 执行清理 ScheduleLog
                     deleteCount = scheduleLog.deleteExpiredFile(
-                            fileReservedTime,
                             deletePhysicFilesInterval,
                             destroyMapedFileIntervalForcibly,
-                            cleanAtOnce);
+                            forceCleanAll,
+                            cleanImmediately);
 
                     if (deleteCount > 0) {
+                        // 如果是清除整个文件夹，那么删除空的文件夹子
+                        if (forceCleanAll && scheduleLog.getMappedFileQueue().getMappedFiles().isEmpty()) {
+                            try {
+                                File file = new File(scheduleLog.getScheduleDir());
+                                if (file.delete()) {
+                                    System.out.println(scheduleLog.getScheduleDir() + " 文件夹被清理！ ");
+                                }
+                            } catch (Exception ex) {
+                                log.warn("delete file dir failed，dir = {}", scheduleLog.getScheduleDir());
+                            }
+
+                            // 清理 ScheduleLog 缓存
+                            scheduleLogTable.remove(fileTime);
+                        }
+
+                        System.out.println(scheduleLog.getScheduleDir() + " 文件下删除了 " + deleteCount + " 个文件！");
                     } else if (spacefull) {
                         log.warn("disk space will be full soon, but delete file failed.");
                     }
@@ -1433,11 +1447,12 @@ public class ScheduleMessageStore {
                     }
 
                     // 设置立即启动文件删除
-                    cleanImmediately = true;
+                    // cleanImmediately = true;
+
 
                     // 如果当前磁盘分区使用率大于 diskSpaceCleanForciblyRatio 0.85，建议立即启动文件删除操作。
                 } else if (physicRatio > diskSpaceCleanForciblyRatio) {
-                    cleanImmediately = true;
+                    // cleanImmediately = true;
 
                     // 如果当前磁盘使用率低于 diskSpaceCleanForciblyRatio ，将恢复磁盘可写
                 } else {
@@ -1452,36 +1467,6 @@ public class ScheduleMessageStore {
                     return true;
                 }
             }
-
-            /*------------------------- todo 处理消息队列文件，逻辑同上 --------------------------*/
-            {
-                String storePathLogics = StorePathConfigHelper
-                        .getStorePathConsumeQueue(ScheduleMessageStore.this.getMessageStoreConfig().getStorePathRootDir());
-
-
-                double logicsRatio = UtilAll.getDiskPartitionSpaceUsedPercent(storePathLogics);
-                if (logicsRatio > diskSpaceWarningLevelRatio) {
-                    boolean diskok = ScheduleMessageStore.this.runningFlags.getAndMakeDiskFull();
-                    if (diskok) {
-                        ScheduleMessageStore.log.error("logics disk maybe full soon " + logicsRatio + ", so mark disk full");
-                    }
-
-                    cleanImmediately = true;
-                } else if (logicsRatio > diskSpaceCleanForciblyRatio) {
-                    cleanImmediately = true;
-                } else {
-                    boolean diskok = ScheduleMessageStore.this.runningFlags.getAndMakeDiskOK();
-                    if (!diskok) {
-                        ScheduleMessageStore.log.info("logics disk space OK " + logicsRatio + ", so mark disk ok");
-                    }
-                }
-
-                if (logicsRatio < 0 || logicsRatio > ratio) {
-                    ScheduleMessageStore.log.info("logics disk maybe full soon, so reclaim space, " + logicsRatio);
-                    return true;
-                }
-            }
-
 
             // 默认没有满
             return false;
@@ -1528,5 +1513,39 @@ public class ScheduleMessageStore {
     public ScheduleLogManager getScheduleLogManager() {
         return scheduleLogManager;
     }
+
+
+    public ScheduleMessageStoreConfig getMessageStoreConfig() {
+        return messageStoreConfig;
+    }
+
+    public StoreStatsService getStoreStatsService() {
+        return storeStatsService;
+    }
+
+    public RunningFlags getAccessRights() {
+        return runningFlags;
+    }
+
+
+    public StoreCheckpoint getStoreCheckpoint() {
+        return storeCheckpoint;
+    }
+
+
+    public RunningFlags getRunningFlags() {
+        return runningFlags;
+    }
+
+
+    public void unlockMappedFile(final MappedFile mappedFile) {
+        this.scheduledExecutorService.schedule(new Runnable() {
+            @Override
+            public void run() {
+                mappedFile.munlock();
+            }
+        }, 6, TimeUnit.SECONDS);
+    }
+
 
 }

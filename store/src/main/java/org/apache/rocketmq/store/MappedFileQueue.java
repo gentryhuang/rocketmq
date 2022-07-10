@@ -630,6 +630,77 @@ public class MappedFileQueue {
     }
 
     /**
+     * 执行文件销毁和删除
+     * 说明：该方法是重写的，主要为 ScheduleLog 服务
+     *
+     * @param deleteFilesInterval 删除文件间的间隔时间
+     * @param intervalForcibly    第一次拒绝删除之后能保留文件的最大时间
+     * @param forceCleanAll       清理整个文件
+     * @param cleanImmediately    是否立即删除
+     * @return
+     */
+    public int deleteExpiredFileByTime(
+            final int deleteFilesInterval,
+            final long intervalForcibly,
+            final boolean forceCleanAll,
+            final boolean cleanImmediately) {
+        Object[] mfs = this.copyMappedFiles(0);
+        if (null == mfs) {
+            return 0;
+        }
+        // 1 到倒数第二个文件。最后一个文件是活跃文件，其它的都不会被更新了。
+        int mfsLength = mfs.length - 1;
+        if (forceCleanAll) {
+            // 如果整个文件无效，则删除整个文件
+            mfsLength = mfs.length;
+        }
+
+        int deleteCount = 0;
+        List<MappedFile> files = new ArrayList<MappedFile>();
+
+        // 2 从前往后遍历到倒数第 2 个文件，也就先删除最久的
+        for (int i = 0; i < mfsLength; i++) {
+            MappedFile mappedFile = (MappedFile) mfs[i];
+            if (cleanImmediately || forceCleanAll) {
+
+                // 关闭内部封装的文件通道、删除物理文件
+                if (mappedFile.destroy(intervalForcibly)) {
+
+                    // 将内存文件加入待删除文件列表中，最后统一清除内存文件
+                    files.add(mappedFile);
+
+                    // 统计成功删除文件个数
+                    deleteCount++;
+
+                    // 一次删除文件的数量不能超过批量删除阈值 ，默认是 10 。
+                    if (files.size() >= DELETE_FILES_BATCH_MAX) {
+                        break;
+                    }
+
+                    // 删除一个 文件后休眠  deleteFilesInterval
+                    if (deleteFilesInterval > 0 && (i + 1) < mfsLength) {
+                        try {
+                            Thread.sleep(deleteFilesInterval);
+                        } catch (InterruptedException e) {
+                            //...
+                        }
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                //avoid deleting files in the middle
+                break;
+            }
+        }
+
+        // 删除 MappedFile 缓存
+        deleteExpiredFile(files);
+
+        return deleteCount;
+    }
+
+    /**
      * 删除 ConsumeQueue 中无效的文件
      *
      * @param offset   CommitLog 最小物理偏移量

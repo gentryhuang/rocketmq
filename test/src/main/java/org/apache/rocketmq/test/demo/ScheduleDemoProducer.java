@@ -1,12 +1,12 @@
 package org.apache.rocketmq.test.demo;
 
-import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.client.schedule.DefaultScheduleMQProducer;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 /**
  * DemoProducer
@@ -29,12 +29,11 @@ public class ScheduleDemoProducer {
         producer.start();
 
 
-
         Random random = new Random(1000 * 60 * 60 * 12);
 
         //Create a message instance, specifying topic, tag and message body.
 
-        for (int i = 1; i < 100; i++) {
+        for (int i = 1; i < 10000; i++) {
             Message msg = new Message("hlb_topic" /* Topic */,
                     "TagB" /* Tag */,
                     ("Hello RocketMQ " +
@@ -44,10 +43,12 @@ public class ScheduleDemoProducer {
 
             //Call send message to deliver message to one of brokers.
 
-            long delayTimeMills = random.nextInt(1000 *60 *60*12);
+            long delayTimeMills = random.nextInt(1000 * 60 * 60 * 12);
 
+            SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
 
-            SendResult sendResult = producer.send(msg, 50000, 1657427410000L);
+            //SendResult sendResult = producer.send(msg, 50000, 1657431310000L);
+            //  SendResult sendResult = producer.send(msg, 5000, 9, TimeUnit.SECONDS);
             System.out.printf("%s%n", sendResult);
         }
 
@@ -56,8 +57,11 @@ public class ScheduleDemoProducer {
         //  producer.shutdown();
         /*
           投递消息如下：
-          1.  2022-07-10 07:00:30   - 1657407630000L
-          2.  2022-07-10 07:29:30   - 1657409370000L
+          1.  2022-07-10 13:29:10   - 1657430950000L
+          2.  2022-07-10 13:35:10   - 1657431310000
+          3. 2022-07-10 13:30:10
+
+
           3.  2022-07-10 07:30:30   - 1657409430000L
           4.  2022-07-10 07:31:00   - 1657409460000L
           5.  2022-07-10 08:01:00   - 1657411260000L
