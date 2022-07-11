@@ -23,7 +23,15 @@ public class ScheduleConfigHelper {
     /**
      * 补偿粒度时间，过期的消息超过 5 分钟不再投递，打印可能是没有投递的消息日志
      */
-    public static final long COMPENSATE_TIME = -1000 * 60 *5;
+    public static final long COMPENSATE_TIME = -1000 * 60 * 5;
+    /**
+     * 拉取消息要增加一个时间点，以及时拉取下一个延时分区文件到内存时间轮
+     */
+    public static final long ADD_DELAY_GRANULARITY = 1000 * 60;
+    /**
+     * 扫描分区时间文件的补偿粒度，为了精准控制和添加消息时的时间差，这里精确到 3s
+     */
+    public static final long DIFF_DELAY_GRANULARITY = 1000 * 3;
 
 
     /**

@@ -67,8 +67,8 @@ public class ScheduleMessageStoreConfig {
 
     /**
      * 提交消息到 CommitLog 对应的文件通道的间隔时间，原理与上面类似。将消息写入到文件通道（调用 FileChannel.write 方法）得到最新的写指针，默认为 200 毫秒。
-     *
-     *  执行间隔时间，默认 200ms
+     * <p>
+     * 执行间隔时间，默认 200ms
      */
     // Only used if TransientStorePool enabled 在开启 TransientStorePool 的情况下，将消息写入到 FileChannel
     // flush data to FileChannel
@@ -142,7 +142,7 @@ public class ScheduleMessageStoreConfig {
 
 
     /**
-     * 一个文件的大小，默认 4M
+     * ScheduleLog 的 一个 MappedFile 文件的大小，默认 4M
      */
     private int maxMessageSize = 1024 * 1024 * 4;
 

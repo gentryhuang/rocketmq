@@ -38,7 +38,7 @@ public class MessageStoreConfig {
     private String storePathCommitLog = System.getProperty("user.home") + File.separator + "store" + File.separator + "commitlog";
 
     /**
-     * 如：每个 Commitlog 文件的大小，默认为 1G
+     * 如：每个 Commitlog MappedFile 文件的大小，默认为 1G
      */
     private int mappedFileSizeCommitLog = 1024 * 1024 * 1024;
 

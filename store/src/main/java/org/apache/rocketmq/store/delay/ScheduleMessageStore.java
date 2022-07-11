@@ -139,7 +139,7 @@ public class ScheduleMessageStore {
             boolean lastExitOK = !this.isTempFileExist();
             log.info("last shutdown {}", lastExitOK ? "normally" : "abnormally");
 
-            // 4 加载 ConsumeQueue 文件
+            // 4 加载磁盘 ScheduleLog 文件，创建对应的 ScheduleLog 对象，此时已经初始化了 ScheduleLog 中的文件的映射文件
             result = result && this.loadScheduleLog();
 
             // 以上的文件都加载成功后，加载并存储 checkpoint 文件
@@ -149,7 +149,7 @@ public class ScheduleMessageStore {
                         new StoreCheckpoint(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
 
                 // 7 根据 Broker 是否正常停止，选择不同策略进行文件恢复
-                // todo 对前面加载的 ScheduleLog 进行恢复
+                // todo 对前面加载的 ScheduleLog 进行恢复，即修正每个 MappedFile 的指针以及加载当前时间分片下的 ScheduleLog 到内存时间轮
                 this.recover(lastExitOK);
             }
         } catch (Exception e) {
@@ -229,7 +229,7 @@ public class ScheduleMessageStore {
 
         @Override
         public void run() {
-            // 等待 5s ，因为在初始化加载时也会完成一次加载任务
+            // 等待 5min ，因为在初始化加载时也会完成一次加载任务
             waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
 
             // Broker 不关闭
@@ -241,7 +241,8 @@ public class ScheduleMessageStore {
 
 
                 // 当前时间属于哪个分区文件
-                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
+                // todo 这里拉取要有个前置动作，基于当前时间加上一个时间点，如一分钟，用于提前将下一个文件及时加入到内存时间轮中，提高精度；
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now() + ScheduleConfigHelper.ADD_DELAY_GRANULARITY);
 
                 // 获取最近分区文件
                 ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
@@ -262,6 +263,7 @@ public class ScheduleMessageStore {
                     for (boolean doNext = true; isScheduleLogAvailable(offset, scheduleLog) && doNext; ) {
                         // 1 根据指定的物理偏移量，从对应的内存文件中读取 物理偏移量 ~ 该内存文件中有效数据的最大偏移量的数据
                         SelectMappedBufferResult result = scheduleLogManager.getData(scheduleLog.getMappedFileQueue(), offset);
+
                         // 找到数据
                         if (result != null) {
                             try {
@@ -353,8 +355,9 @@ public class ScheduleMessageStore {
                     }
                 }
 
-                // 扫描一次的间隔时间
-                this.waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
+                // FIXME 扫描一次的间隔时间，为了及时扫描出这个文件在添加消息时没有加入到时间轮的消息，这个间隔必须参考添加消息时添加到时间的时间粒度
+                // 这里在其基础上进行补偿 3s
+                this.waitForRunning(ScheduleConfigHelper.TRIGGER_TIME - ScheduleConfigHelper.DIFF_DELAY_GRANULARITY);
             }
         }
 
@@ -499,7 +502,7 @@ public class ScheduleMessageStore {
 
                 }
 
-                // FIXME 扫描一次后进入等待一个时间分区的时间，为了扫描当前时间的上个分区文件，这也是补偿的说法
+                // FIXME 扫描一次后进入等待一个时间分区的时间（默认 30min)，为了扫描当前时间的上个分区文件，这也是补偿的说法
                 waitForRunning(ScheduleConfigHelper.TIME_GRANULARITY);
             }
         }
@@ -925,14 +928,15 @@ public class ScheduleMessageStore {
     }
 
     /**
-     * 加载消息消费队列
+     * 从磁盘加载 ScheduleLog 到内存，即构建每个 ScheduleLog 对应的内存文件组 MappedFileQueue
      *
      * @return
      */
     private boolean loadScheduleLog() {
         // 封装 $user.home/store/schedulelog 文件夹
         File dirLogic = new File(ScheduleStorePathConfigHelper.getStorePathScheduleLog(this.messageStoreConfig.getStorePathRootDir()));
-        // 获取 Store schedulelog 目录下所有子目录，加载进来
+
+        // 获取 Store/schedulelog 目录下所有子目录，加载进来
         File[] fileTimeList = dirLogic.listFiles();
 
         if (fileTimeList != null) {
@@ -952,7 +956,10 @@ public class ScheduleMessageStore {
 
                 );
 
+                // 缓存 ScheduleLog 对象
                 this.scheduleLogManager.getScheduleLogTable().put(Long.parseLong(dirMills), scheduleLog);
+
+                // 初始化 ScheduleLog 中的内存映射文件相关信息，就是遍历当前 ScheduleLog 对应目录下的所有子文件，然后映射到 MappedFile
                 if (!scheduleLog.load()) {
                     return false;
                 }
@@ -969,11 +976,11 @@ public class ScheduleMessageStore {
      * @param lastExitOK Broker 是否正常关闭
      */
     private void recover(final boolean lastExitOK) {
-        // 恢复所有的 ScheduleLog，即移除非法的 offset
+        // todo 恢复所有的 ScheduleLog 中的内存映射文件呢，即移除非法的 offset
         scheduleLogManager.getScheduleLogTable().values().forEach(ScheduleLog::recoverNormally);
-        Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
 
         // FIXME 恢复完尝试将最近时间分区文件中的消息加载到内存时间轮中以进行调度
+        Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
         ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
         if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
             return;

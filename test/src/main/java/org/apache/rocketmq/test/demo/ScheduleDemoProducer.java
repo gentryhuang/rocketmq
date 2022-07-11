@@ -34,25 +34,24 @@ public class ScheduleDemoProducer {
         //Create a message instance, specifying topic, tag and message body.
 
 
-            for (int i = 1; i < 12; i++) {
-                Message msg = new Message("hlb_topic" /* Topic */,
-                        "TagB" /* Tag */,
-                        ("Hello RocketMQ " +
-                                i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
-                );
-                //  msg.setDelayTimeLevel(3);
+        for (int i = 1; i < 2; i++) {
+            Message msg = new Message("hlb_topic" /* Topic */,
+                    "TagB" /* Tag */,
+                    ("Hello RocketMQ " +
+                            i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+            );
+            //  msg.setDelayTimeLevel(3);
 
-                //Call send message to deliver message to one of brokers.
+            //Call send message to deliver message to one of brokers.
 
-                long delayTimeMills = random.nextInt(1000 * 60 * 60 * 12);
+            long delayTimeMills = random.nextInt(1000 * 60 * 60 * 12);
 
-                // SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
+            // SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
 
-               // SendResult sendResult = producer.send(msg, 50000, 1657495870000L);
-               SendResult sendResult = producer.send(msg, 5000, 120, TimeUnit.MINUTES);
-                System.out.printf("%s%n", sendResult);
-            }
-
+            // SendResult sendResult = producer.send(msg, 50000, 1657495870000L);
+            SendResult sendResult = producer.send(msg, 5000, 120, TimeUnit.MINUTES);
+            System.out.printf("%s%n", sendResult);
+        }
 
 
         //Shut down once the producer instance is not longer in use.
@@ -85,6 +84,23 @@ public class ScheduleDemoProducer {
            7 精确度，是否考虑补偿机制，如过期5分钟内进行补偿
            8 消息卡点丢失问题 - 拉取消息补偿几分钟，基于当前时间 - 5 分钟
            9 同步异步刷盘的支持问题
+           10 原则：
+              - 消息不能丢，但允许重复；
+           11 存在的 bug：
+              - 消息可能会重复投递，比如在初始化加载消息文件时，会把文件消息加载到时间轮，但是 == triggerTime 的消息不能过滤，尽管这里消息之前已经投递过；
+              - 时间轮调度时，会出现消息已经投递过的情况；
+
+           12 目前存在的问题：
+              - 时间分区怎么确定？太大可能造成消息多，太小文件夹创建过于频繁；
+              - 时间轮调度时，会出现消息已经投递过的情况；
+              - 消息重复投递问题；
+              - 刷盘机制，先是做在了 ScheduleMessageStore 中，后来做到了 ScheduleLog 中，更精确实现 同步或异步刷盘；
+              - 时间轮，为每个 ScheduleLog 绑定一个，超出时间轮（ 64）个就使用共享的；或者对延时消息的延时时间做限制，指定一定的范围，这样 ScheduleLog 数量也就能控制住了；
+              - 精度：拉取要有个前置动作，基于当前时间加上一个时间点，如一分钟，用于提前将下一个文件及时加入到内存时间轮中，提高精度；
+
+           13 局限性考虑：
+              - 如果执行任意时间（绝对时间和相对时间），就必须一次性扫描所有消息到内存时间轮中，不能像 RocketMQ 目前 18 个等级一样，先添加的消息一定先到期。
+              -
          */
 
 

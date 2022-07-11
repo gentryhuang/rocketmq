@@ -60,6 +60,7 @@ public class ScheduleMessageConst {
     // 小于该延时时间的延时消息不接
     public static final long MIN_DELAY_GRANULARITY = 1000 * 5;
 
+
     public static final HashSet<String> STRING_HASH_SET = new HashSet<String>();
 
     static {
