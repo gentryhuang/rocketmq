@@ -6,6 +6,7 @@ import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
+import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageExt;
 
 import java.util.List;
@@ -42,9 +43,7 @@ public class DemoPushConsumer {
                                                             ConsumeConcurrentlyContext context) {
 
                 msgs.forEach(messageExt -> {
-                    System.out.println("具体消息 msgID：" + messageExt.getMsgId());
-
-
+                    System.out.println("具体消息 msgID：" + messageExt.getMsgId() + "msgId: " + messageExt.getProperties().get(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX));
                 });
 
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;

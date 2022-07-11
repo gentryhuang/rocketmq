@@ -19,6 +19,7 @@ package org.apache.rocketmq.store.delay;
 import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageDecoder;
+import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageExtBatch;
 import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
 import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
@@ -26,39 +27,15 @@ import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.*;
+import org.apache.rocketmq.store.config.FlushDiskType;
 import org.apache.rocketmq.store.delay.config.ScheduleMessageStoreConfig;
 
 import java.nio.ByteBuffer;
-import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * 消息主体以及元数据的存储主体，存储Producer端写入的消息主体内容,消息内容不是定长的。
- * <p>
- * 前置说明：
- * 1 CommitLog : MappedFileQueue : MappedFile = 1 : 1 : N
- * 2 为什么 CommitLog 文件要设计成固定大小的长度呢？为了使用 内存映射机制
- * <p>
- * 说明：
- * 1 单个 commitlog 文件默认大小为 1G，由多个 commitlog 文件来存储所有的消息。commitlog 文件的命令使用存储在该文件中的第一条消息在整个 commitlog 文件组中的偏移量来命名，
- * 即该文件在整个 commitlog 文件组中的偏移量来命名的，举例：
- * 例如一个 commitlog 文件，1024 个字节
- * 第一个文件： 00000000000000000000 ，起始偏移量为 0
- * 第二个文件： 00000000001073741824 ，起始偏移量为 1073741824
- * 2 MappedFile 封装了一个个的 CommitLog 文件，而 MappedFileQueue 就是封装了一个逻辑的 commitlog 文件，这个 MappedFile 队列中的元素从小到大排列
- * 3 MappedFile 又封装了 JDK 中的 MappedByteBuffer
- * 4 同步刷盘每次发送消息，消息都直接存储在 MappedFile 的 MappdByteBuffer，然后直接调用 force() 方法刷写到磁盘，
- * 等到 force 刷盘成功后，再返回给调用方（GroupCommitRequest#waitForFlush）就是其同步调用的实现。
- * 5 异步刷盘：
- * 分为两种情况，是否开启堆外内存缓存池，具体配置参数：MessageStoreConfig#transientStorePoolEnable。
- * 5.1 transientStorePoolEnable = true
- * 消息在追加时，先放入到 writeBuffer 中，然后定时 commit 到 FileChannel,然后定时flush。
- * 5.2 transientStorePoolEnable=false（默认）
- * 消息追加时，直接存入 MappedByteBuffer(pageCache) 中，然后定时 flush
- *
- * <p>
  * Store all metadata downtime for recovery, data protection reliability
  */
 public class ScheduleLogManager {
@@ -316,8 +293,8 @@ public class ScheduleLogManager {
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).incrementAndGet();
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).addAndGet(result.getWroteBytes());
 
-        // todo 提交刷盘请求 - 异步
-        CompletableFuture<PutMessageStatus> flushResultFuture = CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
+        // todo 提交刷盘请求，可能同步，也可能异步
+        CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(scheduleLog, result, msg);
 
         // todo 提交复制请求 - 参考 CommitLog
         CompletableFuture<PutMessageStatus> replicaResultFuture = CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
@@ -341,6 +318,53 @@ public class ScheduleLogManager {
             return putMessageResult;
         });
     }
+
+    /**
+     * 提交刷盘请求
+     *
+     * @param result
+     * @param messageExt
+     * @return
+     */
+    public CompletableFuture<PutMessageStatus> submitFlushRequest(ScheduleLog scheduleLog, AppendMessageResult result, MessageExt messageExt) {
+
+        // Synchronization flush 同步刷盘
+        if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
+            final ScheduleLog.GroupCommitService service = (ScheduleLog.GroupCommitService) scheduleLog.getFlushCommitLogService();
+
+            // 是否等待存储消息成功
+            if (messageExt.isWaitStoreMsgOK()) {
+
+                // 创建刷盘请求对象
+                // 提交的刷盘点(就是预计刷到哪里)：result.getWroteOffset() + result.getWroteBytes()
+                // 刷盘超时时间
+                ScheduleLog.GroupCommitRequest request = new ScheduleLog.GroupCommitRequest(
+                        result.getWroteOffset() + result.getWroteBytes(),
+                        this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
+
+                // 加入到刷盘任务队列
+                service.putRequest(request);
+
+                // 返回刷盘结果 CompletableFuture
+                return request.future();
+
+
+                // 无需等待存储消息结果
+            } else {
+                service.wakeup();
+                return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
+            }
+        }
+
+        // Asynchronous flush 异步刷盘
+        else {
+
+            ScheduleLog.FlushRealTimeService flushCommitLogService = (ScheduleLog.FlushRealTimeService) scheduleLog.getFlushCommitLogService();
+            flushCommitLogService.wakeup();
+            return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
+        }
+    }
+
 
     /**
      * 创建当前延时时间对应的分区 ScheduleLog

@@ -857,7 +857,7 @@ public class CommitLog {
 
         // todo 提交刷盘请求
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, msg);
-        // todo 提交复制请求
+        // todo 提交复制请求，进行同步等待
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, msg);
 
 

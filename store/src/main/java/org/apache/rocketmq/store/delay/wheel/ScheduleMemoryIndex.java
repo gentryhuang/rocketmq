@@ -80,7 +80,7 @@ public class ScheduleMemoryIndex implements TimerTask {
 
                 // 如果发送成功，则继续下一个消息索引的获取与判断是否到期
                 if (putMessageResult != null && putMessageResult.getPutMessageStatus() == PutMessageStatus.PUT_OK) {
-                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt.getMsgId());
+                    System.out.println(ScheduleConfigHelper.getCurrentDateTime() + " " + Thread.currentThread().getName() + " 时间轮调度延时任务 - 消息投递，msg: " + msgExt.getMsgId());
                     System.out.println();
 
                     // todo 记录投递成功的物理偏移量，需要持久化

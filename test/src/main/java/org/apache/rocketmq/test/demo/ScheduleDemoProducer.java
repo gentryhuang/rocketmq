@@ -33,8 +33,8 @@ public class ScheduleDemoProducer {
 
         //Create a message instance, specifying topic, tag and message body.
 
-        while (true) {
-            for (int i = 1; i < 120; i++) {
+
+            for (int i = 1; i < 12; i++) {
                 Message msg = new Message("hlb_topic" /* Topic */,
                         "TagB" /* Tag */,
                         ("Hello RocketMQ " +
@@ -48,11 +48,11 @@ public class ScheduleDemoProducer {
 
                 // SendResult sendResult = producer.send(msg, 50000, System.currentTimeMillis() + delayTimeMills);
 
-                //SendResult sendResult = producer.send(msg, 50000, 1657431310000L);
-                SendResult sendResult = producer.send(msg, 5000, i, TimeUnit.MINUTES);
+               // SendResult sendResult = producer.send(msg, 50000, 1657495870000L);
+               SendResult sendResult = producer.send(msg, 5000, 120, TimeUnit.MINUTES);
                 System.out.printf("%s%n", sendResult);
             }
-        }
+
 
 
         //Shut down once the producer instance is not longer in use.
@@ -60,6 +60,15 @@ public class ScheduleDemoProducer {
         /*
           投递消息如下：
 
+          2022-07-10 23:10:10  1657465810000
+          2022-07-10 23:30:10  1657467010000
+          2022-07-10 23:50:10  1657468210000
+          2022-07-11 00:00:10  1657468810000
+          2022-07-11 03:00:10  1657479610000
+          2022-07-11 06:00:10  1657490410000
+          2022-07-11 08:00:10  1657497610000
+          2022-07-11 07:00:10  1657494010000
+          2022-07-11 07:31:10  1657495870000
          */
 
 

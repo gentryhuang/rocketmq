@@ -16,13 +16,11 @@
  */
 package org.apache.rocketmq.store.delay;
 
-import io.netty.util.HashedWheelTimer;
 import io.netty.util.TimerTask;
 import org.apache.rocketmq.common.*;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExt;
-import org.apache.rocketmq.common.message.MessageExtBatch;
 import org.apache.rocketmq.common.schedule.ScheduleMessageConst;
 import org.apache.rocketmq.common.schedule.tool.ScheduleConfigHelper;
 import org.apache.rocketmq.logging.InternalLogger;
@@ -40,7 +38,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.*;
@@ -94,11 +91,6 @@ public class ScheduleMessageStore {
      * 默认的消息存储
      */
     private final MessageStore messageStore;
-
-    /**
-     * 异步刷盘线程任务
-     */
-    private final FlushRealTimeService flushRealTimeService;
     /**
      * 周期性扫描时间分区文件（基于当前时间）
      */
@@ -122,8 +114,6 @@ public class ScheduleMessageStore {
         this.cleanCommitLogService = new CleanCommitLogService();
         this.storeStatsService = new StoreStatsService();
 
-        // ScheduleLog 异步刷盘任务
-        flushRealTimeService = new FlushRealTimeService();
         // 定时扫描 ScheduleLog 消息加载到内存时间轮任务
         scanReachScheduleLog = new ScanReachScheduleLog();
         scanUnprocessedScheduleLog = new ScanUnprocessedScheduleLog();
@@ -179,7 +169,6 @@ public class ScheduleMessageStore {
      */
     public void start() throws Exception {
         // todo 启动
-        this.flushRealTimeService.start();
         this.scanReachScheduleLog.start();
         this.scanUnprocessedScheduleLog.start();
 
@@ -228,16 +217,6 @@ public class ScheduleMessageStore {
         }
 
         return null;
-    }
-
-    /**
-     * 刷盘任务
-     * 说明：MappedFile 落盘方式：
-     * 1 开启使用堆外内存：数据先追加到堆外内存 -> 提交堆外内存数据到与物理文件的内存映射中 -> 物理文件的内存映射 flush 到磁盘
-     * 2 没有开启使用堆外内存：数据直接追加到与物理文件直接映射的内存中 -> 物理文件的内存映射 flush 到磁盘
-     */
-    abstract class FlushCommitLogService extends ServiceThread {
-        protected static final int RETRY_TIMES_OVER = 10;
     }
 
 
@@ -397,8 +376,8 @@ public class ScheduleMessageStore {
 
         @Override
         public void run() {
-            // 等待 5s
-            waitForRunning(5000);
+            // 等待 1s
+            waitForRunning(1000);
 
             // Broker 不关闭
             while (!this.isStopped()) {
@@ -538,120 +517,6 @@ public class ScheduleMessageStore {
     }
 
 
-
-    /*-------------------------------- 异步刷盘 -----------------------------*/
-
-    /**
-     * 异步刷盘 && 关闭内存字节缓冲区
-     * 说明：实时 flush 线程服务，调用 MappedFile#flush 相关逻辑
-     */
-    class FlushRealTimeService extends FlushCommitLogService {
-        // 最后 flush 的时间戳
-        private long lastFlushTimestamp = 0;
-        private long printTimes = 0;
-
-        /**
-         * 休眠等待 或 超时等待唤醒 进行刷盘
-         */
-        @Override
-        public void run() {
-            ScheduleLogManager.log.info(this.getServiceName() + " service started");
-
-            // Broker 不关闭
-            while (!this.isStopped()) {
-                // 每次循环是固定周期还是等待唤醒
-                boolean flushCommitLogTimed = messageStoreConfig.isFlushCommitLogTimed();
-
-                // 任务执行的时间间隔，默认 500ms
-                int interval = messageStoreConfig.getFlushIntervalCommitLog();
-
-                // 一次刷盘任务至少包含页数，如果待刷盘数据不足，小于该参数配置的值，将忽略本次刷盘任务，默认 4 页
-                // todo 调成 0 ，立即刷盘
-                int flushPhysicQueueLeastPages = messageStoreConfig.getFlushCommitLogLeastPages();
-
-                // 两次真实刷盘的最大间隔时间，默认 10s
-                int flushPhysicQueueThoroughInterval =
-                        messageStoreConfig.getFlushCommitLogThoroughInterval();
-
-                boolean printFlushProgress = false;
-
-                // Print flush progress
-
-                // 如果距上次刷盘时间超过 flushPhysicQueueThoroughInterval ，则本次刷盘忽略 flushPhysicQueueLeastPages 参数，也就是即使写入的数量不足 flushPhysicQueueLeastPages，也执行刷盘操作。
-                // 即：每 flushPhysicQueueThoroughInterval 周期执行一次 flush ，但不是每次循环到都能满足 flushCommitLogLeastPages 大小，
-                // 因此，需要一定周期进行一次强制 flush 。当然，不能每次循环都去执行强制 flush，这样性能较差。
-                long currentTimeMillis = System.currentTimeMillis();
-                if (currentTimeMillis >= (this.lastFlushTimestamp + flushPhysicQueueThoroughInterval)) {
-                    this.lastFlushTimestamp = currentTimeMillis;
-                    flushPhysicQueueLeastPages = 0;
-                    printFlushProgress = (printTimes++ % 10) == 0;
-                }
-
-                try {
-
-                    // 根据 flushCommitLogTimed 参数，可以选择每次循环是固定周期还是等待唤醒。
-                    // 默认配置是后者，所以，每次写入消息完成，会去调用 commitLogService.wakeup()
-                    if (flushCommitLogTimed) {
-                        Thread.sleep(interval);
-                    } else {
-                        this.waitForRunning(interval);
-                    }
-
-                    if (printFlushProgress) {
-                        this.printFlushProgress();
-                    }
-
-
-                    // todo 调用 MappedFile 进行 flush
-                    long begin = System.currentTimeMillis();
-
-                    for (ScheduleLog scheduleLog : scheduleLogManager.getScheduleLogTable().values()) {
-                        scheduleLog.flush(flushPhysicQueueLeastPages);
-                    }
-
-                    long past = System.currentTimeMillis() - begin;
-                    if (past > 500) {
-                        log.info("Flush data to disk costs {} ms", past);
-                    }
-
-                } catch (Throwable e) {
-                    ScheduleLogManager.log.warn(this.getServiceName() + " service has exception. ", e);
-                    this.printFlushProgress();
-                }
-            }
-
-            // 执行到这里说明 Broker 关闭，强制 flush，避免有未刷盘的数据。
-            // Normal shutdown, to ensure that all the flush before exit
-            boolean result = false;
-            for (int i = 0; i < RETRY_TIMES_OVER && !result; i++) {
-                for (ScheduleLog scheduleLog : scheduleLogManager.getScheduleLogTable().values()) {
-                    result = scheduleLog.flush(0);
-                }
-                ScheduleLogManager.log.info(this.getServiceName() + " service shutdown, retry " + (i + 1) + " times " + (result ? "OK" : "Not OK"));
-            }
-
-            this.printFlushProgress();
-
-            ScheduleLogManager.log.info(this.getServiceName() + " service end");
-        }
-
-        @Override
-        public String getServiceName() {
-            return FlushRealTimeService.class.getSimpleName();
-        }
-
-        private void printFlushProgress() {
-            // CommitLog.log.info("how much disk fall behind memory, "
-            // + CommitLog.this.mappedFileQueue.howMuchFallBehind());
-        }
-
-        @Override
-        public long getJointime() {
-            return 1000 * 60 * 5;
-        }
-    }
-
-
     public void shutdown() {
         if (!this.shutdown) {
             this.shutdown = true;
@@ -667,9 +532,6 @@ public class ScheduleMessageStore {
 
 
             this.storeStatsService.shutdown();
-
-            this.flushRealTimeService.shutdown();
-
             this.storeCheckpoint.flush();
             this.storeCheckpoint.shutdown();
         }
@@ -1181,7 +1043,7 @@ public class ScheduleMessageStore {
                                     // 还有多久触发
                                     long diff = triggerTime - systemClock.now();
                                     // todo  FIXME 延时补偿粒度，补偿消息交给补偿线程任务
-                                    // todo 删除消息文件，依据当前时间和最后修改时间，最后修改时间 < 当前时间，一定是过期的文件
+                                    // todo 删除消息文件，依据当前时间和文件夹名称，文件夹名 < 当前时间对应的时间分区，一定是过期的文件（过期扫描会往前补偿一个文件）
                                     if (0 > diff) {
                                         continue;
                                     }
@@ -1356,10 +1218,11 @@ public class ScheduleMessageStore {
                     if (deleteCount > 0) {
                         // 如果是清除整个文件夹，那么删除空的文件夹子
                         if (forceCleanAll && scheduleLog.getMappedFileQueue().getMappedFiles().isEmpty()) {
+
                             // todo 先清理缓存和进度，防止其它业务逻辑拿到 ScheduleLog 是无用的
                             cleaScheduleCache(scheduleLogManager, fileTime);
 
-                            // 销毁 ScheduleLog
+                            // 销毁 ScheduleLog 所有资源
                             scheduleLog.destroy();
                         }
                     } else if (spacefull) {

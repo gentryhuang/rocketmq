@@ -17,6 +17,7 @@
 package org.apache.rocketmq.store.delay;
 
 import io.netty.util.HashedWheelTimer;
+import org.apache.rocketmq.common.ServiceThread;
 import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.common.message.MessageConst;
@@ -26,33 +27,19 @@ import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.*;
+import org.apache.rocketmq.store.config.FlushDiskType;
 import org.apache.rocketmq.store.delay.wheel.ScheduleThreadFactory;
 
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 必要性说明：
- * 1 RocketMQ 是通过订阅Topic来消费消息的，但是因为 CommitLog 是不区分topic存储消息的
- * 2 消费者通过遍历commitlog去消费消息 那么效率就非常低下了，所以设计了 ConsumeQueue ，作为 CommitLog 对应的索引文件
- * <p>
- * 前置说明：
- * 1 ConsumeQueue : MappedFileQueue : MappedFile = 1 : 1 : N
- * 2 MappedFile : 00000000000000000000等文件
- * 3 MappedFileQueue:
- * - 对 MappedFile 进行封装成文件队列，对上层提供可无限使用的文件容量。
- * - 每个 MappedFile 统一文件大小
- * - 文件命名方式：fileName[n] = fileName[n - 1] + mappedFileSize
- * 4 ConsumeQueue 存储在 MappedFile 的内容必须大小是 20B( ConsumeQueue.CQ_STORE_UNIT_SIZE )
- * <p>
- * <p>
- * 消息消费队列，引入的目的主要是提高消息消费的性能，由于RocketMQ是基于主题topic的订阅模式，消息消费是针对主题进行的，如果要遍历commitlog文件中根据topic检索消息是非常低效的。
- * 特别说明：
- * 1 运行过程中，消息发送到commitlog文件后，会同步将消息转发到消息队列（ConsumeQueue）
- * 2 broker 启动时，检测 commitlog 文件与 consumequeue、index 文件中信息是否一致，如果不一致，需要根据 commitlog 文件重新恢复 consumequeue 文件和 index 文件。
+ *
  */
 public class ScheduleLog {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
@@ -92,13 +79,18 @@ public class ScheduleLog {
      * 记录当前 ConsumeQueue 中存放的消息索引对象消息的最大物理偏移量（是在 CommitLog 中）
      * todo 该属性主要作用是判断当前 ConsumeQueue 已经保存消息索引对应消息的物理偏移量，和 ConsumeQueue 物理偏移量没有关系
      *
-     * @see ScheduleLog#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
+     *  ScheduleLog#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
      */
     private long maxPhysicOffset = -1;
 
     private ConsumeQueueExt consumeQueueExt = null;
 
     private HashedWheelTimer hashedWheelTimer;
+
+    /**
+     * 刷盘任务，根据刷盘方式，可能是 同步刷盘，也可能是异步刷盘
+     */
+    private final FlushCommitLogService flushCommitLogService;
 
     /**
      * 创建并初始化消息队列
@@ -125,19 +117,31 @@ public class ScheduleLog {
         this.scheduleDir = this.storePath + File.separator + dirMills;
 
         // FIXME 这个版本没有统计 HashedWheelTimer 个数，如果有的话可以在达到阈值，剩下的使用共享时间轮
-        this.hashedWheelTimer = ScheduleTimeWheel.INSTANCE.getWheelTimer();
+        this.hashedWheelTimer = new ScheduleTimeWheel().getWheelTimer();
+
+        // 根据刷盘方式，同步刷盘使用 GroupCommitService
+        if (FlushDiskType.SYNC_FLUSH == defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
+            this.flushCommitLogService = new GroupCommitService();
+
+            // 异步刷盘使用 FlushRealTimeService
+        } else {
+            this.flushCommitLogService = new FlushRealTimeService();
+        }
+
+        // todo 启动刷盘
+        this.flushCommitLogService.start();
+
     }
 
     /**
      * 每个 ScheduleLog 绑定一个时间轮
      */
-    enum ScheduleTimeWheel {
-        INSTANCE;
-        private HashedWheelTimer wheelTimer;
+    class ScheduleTimeWheel {
+        private final HashedWheelTimer wheelTimer;
 
-        ScheduleTimeWheel() {
+        {
             wheelTimer = new HashedWheelTimer(
-                    new ScheduleThreadFactory(),
+                    new ScheduleThreadFactory(ScheduleLog.this.scheduleDir),
                     1000,
                     TimeUnit.MILLISECONDS, 128);
         }
@@ -146,6 +150,322 @@ public class ScheduleLog {
             return wheelTimer;
         }
     }
+
+
+    /**
+     * 刷盘任务
+     * 说明：MappedFile 落盘方式：
+     * 1 开启使用堆外内存：数据先追加到堆外内存 -> 提交堆外内存数据到与物理文件的内存映射中 -> 物理文件的内存映射 flush 到磁盘
+     * 2 没有开启使用堆外内存：数据直接追加到与物理文件直接映射的内存中 -> 物理文件的内存映射 flush 到磁盘
+     */
+    abstract static class FlushCommitLogService extends ServiceThread {
+        protected static final int RETRY_TIMES_OVER = 10;
+    }
+
+
+    /*-------------------------------- 异步刷盘 -----------------------------*/
+
+    /**
+     * 异步刷盘 && 关闭内存字节缓冲区
+     * 说明：实时 flush 线程服务，调用 MappedFile#flush 相关逻辑
+     */
+    public class FlushRealTimeService extends FlushCommitLogService {
+        // 最后 flush 的时间戳
+        private long lastFlushTimestamp = 0;
+        private long printTimes = 0;
+
+        /**
+         * 休眠等待 或 超时等待唤醒 进行刷盘
+         */
+        @Override
+        public void run() {
+            ScheduleLogManager.log.info(this.getServiceName() + " service started");
+
+            // Broker 不关闭
+            while (!this.isStopped()) {
+
+                // 任务执行的时间间隔，默认 500ms
+                int interval = 500;
+
+                // 一次刷盘任务至少包含页数，如果待刷盘数据不足，小于该参数配置的值，将忽略本次刷盘任务，默认 4 页
+                // todo 调成 0 ，立即刷盘
+                int flushPhysicQueueLeastPages = 4;
+
+                // 两次真实刷盘的最大间隔时间，默认 10s
+                int flushPhysicQueueThoroughInterval = 10;
+
+                boolean printFlushProgress = false;
+
+                // Print flush progress
+
+                // 如果距上次刷盘时间超过 flushPhysicQueueThoroughInterval ，则本次刷盘忽略 flushPhysicQueueLeastPages 参数，也就是即使写入的数量不足 flushPhysicQueueLeastPages，也执行刷盘操作。
+                // 即：每 flushPhysicQueueThoroughInterval 周期执行一次 flush ，但不是每次循环到都能满足 flushCommitLogLeastPages 大小，
+                // 因此，需要一定周期进行一次强制 flush 。当然，不能每次循环都去执行强制 flush，这样性能较差。
+                long currentTimeMillis = System.currentTimeMillis();
+                if (currentTimeMillis >= (this.lastFlushTimestamp + flushPhysicQueueThoroughInterval)) {
+                    this.lastFlushTimestamp = currentTimeMillis;
+                    flushPhysicQueueLeastPages = 0;
+                    printFlushProgress = (printTimes++ % 10) == 0;
+                }
+
+                try {
+
+                    // 根据 flushCommitLogTimed 参数，可以选择每次循环是固定周期还是等待唤醒。
+                    // 默认配置是后者，所以，每次写入消息完成，会去调用 commitLogService.wakeup()
+                    this.waitForRunning(interval);
+
+                    if (printFlushProgress) {
+                        this.printFlushProgress();
+                    }
+
+
+                    long begin = System.currentTimeMillis();
+                    // todo 找到并调用 MappedFile 进行 flush
+                    ScheduleLog.this.mappedFileQueue.flush(flushPhysicQueueLeastPages);
+                    long past = System.currentTimeMillis() - begin;
+                    if (past > 500) {
+                        log.info("Flush data to disk costs {} ms", past);
+                    }
+
+                } catch (Throwable e) {
+                    ScheduleLogManager.log.warn(this.getServiceName() + " service has exception. ", e);
+                    this.printFlushProgress();
+                }
+            }
+
+            // 执行到这里说明 Broker 关闭，强制 flush，避免有未刷盘的数据。
+            // Normal shutdown, to ensure that all the flush before exit
+            boolean result = false;
+            for (int i = 0; i < RETRY_TIMES_OVER; i++) {
+                ScheduleLog.this.mappedFileQueue.flush(0);
+                ScheduleLogManager.log.info(this.getServiceName() + " service shutdown, retry " + (i + 1) + " times " + (result ? "OK" : "Not OK"));
+            }
+
+            this.printFlushProgress();
+
+            ScheduleLogManager.log.info(this.getServiceName() + " service end");
+        }
+
+        @Override
+        public String getServiceName() {
+            return FlushRealTimeService.class.getSimpleName();
+        }
+
+        private void printFlushProgress() {
+            // CommitLog.log.info("how much disk fall behind memory, "
+            // + CommitLog.this.mappedFileQueue.howMuchFallBehind());
+        }
+
+        @Override
+        public long getJointime() {
+            return 1000 * 60 * 5;
+        }
+    }
+
+    /*------------------ 同步刷盘 -------------------*/
+
+    /**
+     * 同步刷盘请求对象
+     */
+    public static class GroupCommitRequest {
+        /**
+         * 提交的刷盘点(就是预计刷到哪里)，和怎么刷盘没有关系。主要用来判断，一次刷盘是否能完成本次刷盘任务。
+         * todo 即：可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
+         * <p>
+         * 额外说明：同步刷盘和异步刷盘的区别：
+         * 1 同步刷盘，调用方会提交一个同步刷盘请求，请求中指定了预计的刷盘点，要求立即刷盘，然后等待；
+         * 2 异步刷盘，调用方尝试唤醒刷盘的线程就返回了，由刷盘线程根据刷盘页和刷盘周期决定什么时候真正刷盘。
+         * 两者差不多的，区别在于同步刷盘是立即刷盘，异步刷盘可能不是立即刷盘而是需求达到一定的条件。
+         */
+        private final long nextOffset;
+
+        /**
+         * 刷盘 CompletableFuture
+         */
+        private CompletableFuture<PutMessageStatus> flushOKFuture = new CompletableFuture<>();
+
+
+        private final long startTimestamp = System.currentTimeMillis();
+        private long timeoutMillis = Long.MAX_VALUE;
+
+        public GroupCommitRequest(long nextOffset, long timeoutMillis) {
+            this.nextOffset = nextOffset;
+            this.timeoutMillis = timeoutMillis;
+        }
+
+        public GroupCommitRequest(long nextOffset) {
+            this.nextOffset = nextOffset;
+        }
+
+
+        public long getNextOffset() {
+            return nextOffset;
+        }
+
+        /**
+         * 通知等待刷盘的线程任务完成（如有有等待的话）
+         *
+         * @param putMessageStatus
+         */
+        public void wakeupCustomer(final PutMessageStatus putMessageStatus) {
+            this.flushOKFuture.complete(putMessageStatus);
+        }
+
+        public CompletableFuture<PutMessageStatus> future() {
+            return flushOKFuture;
+        }
+
+    }
+
+    /**
+     * 消息追加成功时，同步刷盘时使用。
+     */
+    public class GroupCommitService extends FlushCommitLogService {
+        // 写队列，用于存放刷盘任务
+        private volatile List<GroupCommitRequest> requestsWrite = new ArrayList<>();
+
+        // 读队列，用于线程读取任务
+        private volatile List<GroupCommitRequest> requestsRead = new ArrayList<>();
+
+        /**
+         * 添加刷盘任务到写队列，然后唤醒执行任务
+         * 说明：
+         * 方法设置了 sync 的原因：this.requestsWrite 会和 this.requestsRead 不断交换，无法保证稳定的同步。
+         *
+         * @param request
+         */
+        public synchronized void putRequest(final GroupCommitRequest request) {
+            synchronized (this.requestsWrite) {
+                this.requestsWrite.add(request);
+            }
+
+            // 有任务就创造立即刷盘条件，即唤醒可能阻塞等待的 GroupCommitService
+            /*
+               public void wakeup() {
+                      if (hasNotified.compareAndSet(false, true)) {
+                           waitPoint.countDown(); // notify
+                          }
+                  }
+             */
+            this.wakeup();
+        }
+
+        /**
+         * 切换读写队列
+         * todo 这是一个亮点设计：避免任务提交与任务执行的锁冲突。每次同步刷盘线程进行刷盘前都会将写队列切到成读队列，这样写队列可以继续接收同步刷盘请求，而刷盘线程直接从读队列读取任务然后进行刷盘。
+         */
+        private void swapRequests() {
+            List<GroupCommitRequest> tmp = this.requestsWrite;
+            this.requestsWrite = this.requestsRead;
+            this.requestsRead = tmp;
+        }
+
+
+        /**
+         * 刷盘
+         */
+        private void doCommit() {
+
+            // 上锁 requestsRead
+            synchronized (this.requestsRead) {
+
+                // 循环队列，进行 flush
+                if (!this.requestsRead.isEmpty()) {
+
+                    // 遍历刷盘请求
+                    for (GroupCommitRequest req : this.requestsRead) {
+
+                        // There may be a message in the next file, so a maximum of
+                        // two times the flush
+                        // todo 是否刷盘成功，比对 刷盘点和提交的预期刷盘点，看是否需要刷盘
+                        boolean flushOK = ScheduleLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
+
+                        // todo 考虑到有可能每次循环写入的消息，可能分布在两个 MappedFile(写第N个消息时，MappedFile 已满，创建了一个新的)，所以需要有循环2次。
+                        for (int i = 0; i < 2 && !flushOK; i++) {
+                            // 1 执行刷盘操作，这里刷盘页设置为 0 ，表示立即刷盘
+                            ScheduleLog.this.mappedFileQueue.flush(0);
+
+                            // 是否满足需要 flush 条件，即请求的 offset 超过 fLush 的 offset
+                            flushOK = ScheduleLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
+                        }
+
+                        // 2 todo 通知等待同步刷盘的线程刷盘完成，避免其一直等待。即标记 flushOKFuture 完成
+                        req.wakeupCustomer(flushOK ? PutMessageStatus.PUT_OK : PutMessageStatus.FLUSH_DISK_TIMEOUT);
+                    }
+
+                    long storeTimestamp = ScheduleLog.this.mappedFileQueue.getStoreTimestamp();
+
+                    // checkpoint 更新 CommitLog 刷盘时间
+                    if (storeTimestamp > 0) {
+                        ScheduleLog.this.defaultMessageStore.getStoreCheckpoint().setPhysicMsgTimestamp(storeTimestamp);
+                    }
+
+                    // 清理读队列
+                    // 每次刷盘时，都会先将写队列切成读队列
+                    this.requestsRead.clear();
+
+                } else {
+                    // Because of individual messages is set to not sync flush, it
+                    // will come to this process
+                    // 直接刷盘。此处是由于发送的消息的 isWaitStoreMsgOK 未设置成 TRUE ，导致未走批量提交
+                    ScheduleLog.this.mappedFileQueue.flush(0);
+                }
+            }
+        }
+
+        /**
+         * 线程一直处理同步刷盘，每处理一个循环后等待 10 毫秒，一旦新任务到达，立即唤醒执行任务
+         */
+        @Override
+        public void run() {
+            ScheduleLog.log.info(this.getServiceName() + " service started");
+
+            while (!this.isStopped()) {
+                try {
+
+                    // 等待 10 毫秒
+                    this.waitForRunning(10);
+
+                    // 执行 doCommit() 方法
+                    this.doCommit();
+                } catch (Exception e) {
+                    ScheduleLog.log.warn(this.getServiceName() + " service has exception. ", e);
+                }
+            }
+
+            // Under normal circumstances shutdown, wait for the arrival of the
+            // request, and then flush
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                ScheduleLog.log.warn("GroupCommitService Exception, ", e);
+            }
+
+            synchronized (this) {
+                this.swapRequests();
+            }
+
+            this.doCommit();
+
+            ScheduleLog.log.info(this.getServiceName() + " service end");
+        }
+
+        @Override
+        protected void onWaitEnd() {
+            this.swapRequests();
+        }
+
+        @Override
+        public String getServiceName() {
+            return ScheduleLog.GroupCommitService.class.getSimpleName();
+        }
+
+        @Override
+        public long getJointime() {
+            return 1000 * 60 * 5;
+        }
+    }
+
 
     /**
      * 销毁 ScheduleLog
@@ -156,13 +476,12 @@ public class ScheduleLog {
         this.hashedWheelTimer = null; // help GC
         try {
             File file = new File(this.getScheduleDir());
-            if (file.delete()) {
+            if (file.exists() && file.delete()) {
                 System.out.println(this.getScheduleDir() + " 文件夹被清理！ ");
             }
         } catch (Exception ex) {
             log.warn("delete file dir failed，dir = {}", this.getScheduleDir());
         }
-
     }
 
     /**
@@ -533,9 +852,16 @@ public class ScheduleLog {
      */
     public void destroy() {
         this.maxPhysicOffset = -1;
+
+        // 删除文件组
         this.mappedFileQueue.destroy();
+
+        // 关闭刷盘线程任务
+        flushCommitLogService.shutdown();
+
         // 销毁其它资源
         this.destroyScheduleLog();
+
         if (isExtReadEnable()) {
             this.consumeQueueExt.destroy();
         }
@@ -578,5 +904,9 @@ public class ScheduleLog {
 
     public void setHashedWheelTimer(HashedWheelTimer hashedWheelTimer) {
         this.hashedWheelTimer = hashedWheelTimer;
+    }
+
+    public FlushCommitLogService getFlushCommitLogService() {
+        return flushCommitLogService;
     }
 }

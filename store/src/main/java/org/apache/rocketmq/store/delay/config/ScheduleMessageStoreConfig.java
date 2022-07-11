@@ -68,7 +68,7 @@ public class ScheduleMessageStoreConfig {
     /**
      * 提交消息到 CommitLog 对应的文件通道的间隔时间，原理与上面类似。将消息写入到文件通道（调用 FileChannel.write 方法）得到最新的写指针，默认为 200 毫秒。
      *
-     * @see org.apache.rocketmq.store.CommitLog.CommitRealTimeService 执行间隔时间，默认 200ms
+     *  执行间隔时间，默认 200ms
      */
     // Only used if TransientStorePool enabled 在开启 TransientStorePool 的情况下，将消息写入到 FileChannel
     // flush data to FileChannel
@@ -237,8 +237,13 @@ public class ScheduleMessageStoreConfig {
     private int haSlaveFallbehindMax = 1024 * 1024 * 256;
     @ImportantField
     private BrokerRole brokerRole = BrokerRole.ASYNC_MASTER;
+
+    /**
+     * 默认异步刷盘
+     */
     @ImportantField
-    private FlushDiskType flushDiskType = FlushDiskType.ASYNC_FLUSH;
+    private FlushDiskType flushDiskType = FlushDiskType.SYNC_FLUSH;//FlushDiskType.ASYNC_FLUSH;
+
     private int syncFlushTimeout = 1000 * 5;
 
     /**
