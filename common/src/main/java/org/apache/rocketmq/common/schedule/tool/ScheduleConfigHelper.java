@@ -32,6 +32,10 @@ public class ScheduleConfigHelper {
      * 扫描分区时间文件的补偿粒度，为了精准控制和添加消息时的时间差，这里精确到 3s
      */
     public static final long DIFF_DELAY_GRANULARITY = 1000 * 3;
+    /**
+     * 清理文件的补偿时间，10分钟
+     */
+    public static final long CLEAN_SCHEDULE_FILE_GRANULARITY = 1000 * 60 * 10;
 
 
     /**

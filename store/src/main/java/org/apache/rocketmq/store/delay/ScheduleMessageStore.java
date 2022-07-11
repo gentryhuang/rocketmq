@@ -1190,8 +1190,8 @@ public class ScheduleMessageStore {
                     this.manualDeleteFileSeveralTimes--;
 
                 // 当前时间对应时间分区
-                // FIXME 加一个补偿机制 5 分钟，供补偿扫描线程执行。待优化
-                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now() + ScheduleConfigHelper.COMPENSATE_TIME);
+                // FIXME 加一个补偿机制 10 分钟，供补偿扫描线程执行。待优化
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now() + ScheduleConfigHelper.CLEAN_SCHEDULE_FILE_GRANULARITY);
 
                 // 顺序遍历，即从最早的文件夹遍历
                 ConcurrentMap<Long, ScheduleLog> scheduleLogTable = scheduleLogManager.getScheduleLogTable();

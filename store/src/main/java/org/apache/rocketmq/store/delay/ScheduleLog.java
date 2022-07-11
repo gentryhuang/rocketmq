@@ -680,13 +680,15 @@ public class ScheduleLog {
             String keys = "";
             String uniqKey = null;
 
+
+            // todo 处理附加属性，很重要
             short propertiesLength = byteBuffer.getShort();
             Map<String, String> propertiesMap = null;
             if (propertiesLength > 0) {
                 byteBuffer.get(bytesContent, 0, propertiesLength);
                 String properties = new String(bytesContent, 0, propertiesLength, MessageDecoder.CHARSET_UTF8);
 
-                // todo 解析出附加属性
+                // 解析出附加属性
                 propertiesMap = MessageDecoder.string2messageProperties(properties);
 
                 // 取出 KEYS
