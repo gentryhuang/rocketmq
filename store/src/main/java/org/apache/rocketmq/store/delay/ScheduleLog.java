@@ -78,8 +78,8 @@ public class ScheduleLog {
     /**
      * 记录当前 ConsumeQueue 中存放的消息索引对象消息的最大物理偏移量（是在 CommitLog 中）
      * todo 该属性主要作用是判断当前 ConsumeQueue 已经保存消息索引对应消息的物理偏移量，和 ConsumeQueue 物理偏移量没有关系
-     *
-     *  ScheduleLog#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
+     * <p>
+     * ScheduleLog#recover()  通过 ConsumeQueue 计算得来的，后续随着重放消息进行更新
      */
     private long maxPhysicOffset = -1;
 
@@ -597,7 +597,8 @@ public class ScheduleLog {
      *
      * @return 0 Come the end of the file // >0 Normal messages // -1 Message checksum failure
      */
-    public DispatchRequest checkMessageAndReturnSize(java.nio.ByteBuffer byteBuffer, final boolean checkCRC,
+    public DispatchRequest checkMessageAndReturnSize(java.nio.ByteBuffer byteBuffer,
+                                                     final boolean checkCRC,
                                                      final boolean readBody) {
         try {
 
@@ -679,15 +680,13 @@ public class ScheduleLog {
             String keys = "";
             String uniqKey = null;
 
-
-            // todo 处理附加属性，很重要
             short propertiesLength = byteBuffer.getShort();
             Map<String, String> propertiesMap = null;
             if (propertiesLength > 0) {
                 byteBuffer.get(bytesContent, 0, propertiesLength);
                 String properties = new String(bytesContent, 0, propertiesLength, MessageDecoder.CHARSET_UTF8);
 
-                // 解析出附加属性
+                // todo 解析出附加属性
                 propertiesMap = MessageDecoder.string2messageProperties(properties);
 
                 // 取出 KEYS

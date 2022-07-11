@@ -222,13 +222,15 @@ public class ScheduleMessageStore {
 
     /**
      * 定时扫描 ScheduleLog 中的快要到期消息
+     * 说明：
+     * FIXME 因为活跃的文件可能不断有消息加入，因此需要频繁的扫描，而扫描的间隔就要参考添加消息时[多少时间粒度]的消息会添加的 ScheduleLog
      */
     class ScanReachScheduleLog extends ServiceThread {
 
         @Override
         public void run() {
-            // 等待 5s
-            waitForRunning(5000);
+            // 等待 5s ，因为在初始化加载时也会完成一次加载任务
+            waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
 
             // Broker 不关闭
             while (!this.isStopped()) {
@@ -351,7 +353,7 @@ public class ScheduleMessageStore {
                     }
                 }
 
-                // 扫描一次修改执行的时间
+                // 扫描一次的间隔时间
                 this.waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
             }
         }
@@ -372,17 +374,15 @@ public class ScheduleMessageStore {
      * 定时补偿 ScheduleLog 中的过期的消息
      */
     class ScanUnprocessedScheduleLog extends ServiceThread {
-        Random random = new Random();
 
         @Override
         public void run() {
-            // 等待 1s
-            waitForRunning(1000);
+            // 不等待，立即触发
 
             // Broker 不关闭
             while (!this.isStopped()) {
-                // 当前时间属于哪个分区文件
-                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(compensateDelayTime(random));
+                // 当前时间补偿后，属于哪个分区文件
+                Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(compensateDelayTime());
 
                 // 获取对应的分区文件
                 ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
@@ -396,7 +396,6 @@ public class ScheduleMessageStore {
 
                     // 当前时间分区文件消息已经投递到 CommitLog 中的消息的最大延时时间
                     ConcurrentMap<Long, Long> scheduleDelayTimeTable = scheduleLogManager.getScheduleDelayTimeTable();
-
 
                     // todo 读取当前 ScheduleLog 下的所有文件，并加载到内存时间轮
                     for (boolean doNext = true; isScheduleLogAvailable(offset, scheduleLog) && doNext; ) {
@@ -500,8 +499,8 @@ public class ScheduleMessageStore {
 
                 }
 
-                // 扫描一次后进入等待
-                waitForRunning(ScheduleConfigHelper.TRIGGER_TIME);
+                // FIXME 扫描一次后进入等待一个时间分区的时间，为了扫描当前时间的上个分区文件，这也是补偿的说法
+                waitForRunning(ScheduleConfigHelper.TIME_GRANULARITY);
             }
         }
 
@@ -566,8 +565,8 @@ public class ScheduleMessageStore {
      *
      * @return
      */
-    private long compensateDelayTime(Random random) {
-        return systemClock.now() - random.nextInt((int) ScheduleConfigHelper.TRIGGER_TIME);
+    private long compensateDelayTime() {
+        return systemClock.now() - ScheduleConfigHelper.TRIGGER_TIME;
     }
 
 
@@ -688,7 +687,7 @@ public class ScheduleMessageStore {
             // 刷盘成功，判断是否要加载到时间轮
             String delayTime = msg.getProperty(ScheduleMessageConst.PROPERTY_DELAY_TIME);
             long diff = Long.parseLong(delayTime) - this.getSystemClock().now();
-            // 小于指定时间粒度的延时消息加入时间轮
+            // FIXME 小于指定时间粒度的延时消息加入时间轮
             if (diff <= ScheduleConfigHelper.TRIGGER_TIME) {
                 TimerTask timerTask = timeout -> {
                     // 记录触发的延时时间
@@ -711,7 +710,7 @@ public class ScheduleMessageStore {
 
                         // 消息投递失败
                     } else {
-                        // FIXME 重试，移除记录的 ScheduleLog 物理偏移量，重新加载到时间轮
+                        // FIXME 重试，移除记录的 ScheduleLog 物理偏移量，重新加载到时间轮。最终靠投递时间兜底、去重
                         scheduleLogManager.getScheduleLogMemoryIndexTable().remove(ScheduleConfigHelper.getDelayPartitionDirectory(Long.parseLong(delayTime)));
                         return;
                     }
@@ -970,11 +969,11 @@ public class ScheduleMessageStore {
      * @param lastExitOK Broker 是否正常关闭
      */
     private void recover(final boolean lastExitOK) {
-        // 恢复 ScheduleLog，即移除非法的 offset
+        // 恢复所有的 ScheduleLog，即移除非法的 offset
         scheduleLogManager.getScheduleLogTable().values().forEach(ScheduleLog::recoverNormally);
         Long delayPartitionDirectory = ScheduleConfigHelper.getDelayPartitionDirectory(systemClock.now());
 
-        // 恢复完尝试将最近时间分区文件中的消息加载到内存时间轮中以进行调度
+        // FIXME 恢复完尝试将最近时间分区文件中的消息加载到内存时间轮中以进行调度
         ScheduleLog scheduleLog = scheduleLogManager.getScheduleLogTable().get(delayPartitionDirectory);
         if (scheduleLog == null || scheduleLog.getMappedFileQueue() == null) {
             return;
