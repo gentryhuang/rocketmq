@@ -1192,6 +1192,7 @@ public class CommitLog {
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
 
             // 是否等待存储消息成功
+            // todo 默认时 true
             if (messageExt.isWaitStoreMsgOK()) {
 
                 // 创建刷盘请求对象
@@ -1241,6 +1242,7 @@ public class CommitLog {
             HAService service = this.defaultMessageStore.getHaService();
 
             // 是否等待存储后返回 - 是否等待复制完成
+            // todo 等待复制完成
             if (messageExt.isWaitStoreMsgOK()) {
 
                 if (service.isSlaveOK(result.getWroteBytes() + result.getWroteOffset())) {

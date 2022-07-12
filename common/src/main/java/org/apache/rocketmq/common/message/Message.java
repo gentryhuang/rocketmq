@@ -184,6 +184,14 @@ public class Message implements Serializable {
         this.putProperty(MessageConst.PROPERTY_DELAY_TIME_LEVEL, String.valueOf(level));
     }
 
+    /**
+     * 消息发送时是否等待消息存储完成后在返回：
+     * - 开启同步落盘时，同步等待
+     * - 消息写入，主从复制，同步等待从写入
+     * 默认是 true
+     *
+     * @return
+     */
     public boolean isWaitStoreMsgOK() {
         String result = this.getProperty(MessageConst.PROPERTY_WAIT_STORE_MSG_OK);
         if (null == result)
