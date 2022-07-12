@@ -78,7 +78,7 @@ public class ScheduleMessageStore {
     private volatile boolean shutdown = true;
 
     /**
-     * 文件刷盘检测点
+     * 文件刷盘检测点，异常恢复文件时有效
      */
     private StoreCheckpoint storeCheckpoint;
     private AtomicLong printTimes = new AtomicLong(0);
