@@ -472,6 +472,7 @@ public class RouteInfoManager {
                     }
 
                     // 移除 BrokerName 所有的路由信息
+                    // todo 以 BrokerName 维度移除 主题队列
                     this.removeTopicByBrokerName(brokerName);
                 }
             } finally {
@@ -555,7 +556,7 @@ public class RouteInfoManager {
                 // 1 先从缓存中找 Topic 对应的队列信息
                 List<QueueData> queueDataList = this.topicQueueTable.get(topic);
                 if (queueDataList != null) {
-                    // 1.1  设置 队列信息
+                    // 1.1  直接设置 队列信息
                     topicRouteData.setQueueDatas(queueDataList);
                     foundQueueData = true;
 
@@ -572,7 +573,7 @@ public class RouteInfoManager {
                         // 根据 Broker 名称找到对应的 BrokerData
                         BrokerData brokerData = this.brokerAddrTable.get(brokerName);
                         if (null != brokerData) {
-                            // 封装 Broker 信息
+                            // 封装 Broker 信息，也相当于直接设置
                             BrokerData brokerDataClone = new BrokerData(
                                     brokerData.getCluster(),
                                     brokerData.getBrokerName(),

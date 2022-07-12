@@ -52,6 +52,8 @@ public class ConsumerGroupInfo {
     private final ConcurrentMap<String/* Topic */, SubscriptionData> subscriptionTable = new ConcurrentHashMap<String, SubscriptionData>();
     /**
      * 消息通信
+     * key: 消费客户端连接当前 Broker 的通道
+     * value: 消费客户端信息对象
      */
     private final ConcurrentMap<Channel, ClientChannelInfo> channelInfoTable = new ConcurrentHashMap<Channel, ClientChannelInfo>(16);
     /**

@@ -853,9 +853,9 @@ public class CommitLog {
         storeStatsService.getSinglePutMessageTopicTimesTotal(msg.getTopic()).incrementAndGet();
         storeStatsService.getSinglePutMessageTopicSizeTotal(topic).addAndGet(result.getWroteBytes());
 
-        // todo 提交刷盘请求
+        // todo 提交刷盘请求：可能同步或异步，根据配置
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, msg);
-        // todo 提交复制请求
+        // todo 提交复制请求：可能同步或异步，根据发送消息时 Message 附加属性的 WAIT 的值
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, msg);
 
 

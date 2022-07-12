@@ -51,7 +51,8 @@ public class ConsumerManager {
      * 消费分组信息，这个分组信息量很大。
      * <p>
      * todo 最要说明：
-     *    1）同一个消费组下的不同消费者如果订阅的 Topic 相同，最终会进行覆盖式（版本更新的）替换之前的 Topic 对应的订阅信息，也就是以最后一个上报的消费者的订阅信息为主，忽略 tag 不一致
+     * 1）同一个消费组下的不同消费者如果订阅的 Topic 相同，最终会进行覆盖式（版本更新的）替换之前的 Topic 对应的订阅信息，也就是以最后一个上报的消费者的订阅信息为主，忽略 tag 不一致
+     * 2) 同一个消费组下的所有消费者都会心跳上报到这里
      */
     private final ConcurrentMap<String/* Group */, ConsumerGroupInfo> consumerTable = new ConcurrentHashMap<String, ConsumerGroupInfo>(1024);
 
@@ -116,7 +117,7 @@ public class ConsumerManager {
      * 注册消费信息（消费者上报）
      *
      * @param group                            消费组
-     * @param clientChannelInfo                通信信息
+     * @param clientChannelInfo                通信信息，即消费者连接当前 Broker 的通道信息
      * @param consumeType                      消费类型
      * @param messageModel                     消费模式
      * @param consumeFromWhere                 从哪里消费
@@ -137,6 +138,7 @@ public class ConsumerManager {
         }
 
         // 2 尝试更新分组信息中的消息通信，若变动则返回 true
+        // todo 维护当前分组 group 下的消费者信息
         boolean r1 =
                 consumerGroupInfo.updateChannel(clientChannelInfo, consumeType, messageModel,
                         consumeFromWhere);
