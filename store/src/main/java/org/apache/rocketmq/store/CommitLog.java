@@ -855,7 +855,10 @@ public class CommitLog {
 
         // todo 提交刷盘请求：可能同步或异步，根据配置
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, msg);
+
         // todo 提交复制请求：可能同步或异步，根据发送消息时 Message 附加属性的 WAIT 的值
+        // 该方式对同步复制进行了优化，putMessage 中的该方法 sendMessageThread 线程只有收到从节点的同步完成结果才能处理后续消息，
+        // 而该方法减少了 sendMessageThread 线程的等待时间，即在同步复制的过程中该线程可以继续处理后续请求，在收到从节点同步结果后再向客户端返回结果，也就是异步感知同步完成
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, msg);
 
 
@@ -1303,7 +1306,7 @@ public class CommitLog {
                     PutMessageStatus replicaStatus = null;
                     try {
 
-                        // 同步等待复制结果，直到有结果返回或超时。
+                        // todo 同步等待复制结果，直到有结果返回或超时。
                         // 注意，这里等待复制结果超时时间和同步刷盘超时时间一致
                         replicaStatus = request.future().get(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout(),
                                 TimeUnit.MILLISECONDS);
@@ -2005,7 +2008,8 @@ public class CommitLog {
 
                     long storeTimestamp = CommitLog.this.mappedFileQueue.getStoreTimestamp();
 
-                    // checkpoint 更新 CommitLog 刷盘时间
+                    // todo 处理完刷盘任务后，更新 checkpoint 中的 CommitLog 刷盘时间
+                    // 注意，此时并没有执行检测点的刷盘操作，刷盘检测点的刷盘操作将在刷写消息队列文件时触发
                     if (storeTimestamp > 0) {
                         CommitLog.this.defaultMessageStore.getStoreCheckpoint().setPhysicMsgTimestamp(storeTimestamp);
                     }

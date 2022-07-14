@@ -644,6 +644,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                 // todo (广播模式-不需要分布式锁) 或者 (集群模式 && 消息处理队列锁有效)；广播模式的话直接进入消费，无需使用分布式锁锁定消费队列，因为相互直接无竞争
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                         // 2 todo 第二把锁，其实就是 Broker 分布式锁的体现
+                        // 防御性编程，再次判断是否还持有队列的分布式锁
                         || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
                     // 记录开始时间
@@ -823,7 +824,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         }
                     }
 
-                    // 没有锁定 ConsumeQueue，则只有等待获取到锁才能尝试消费
+                    // todo 没有锁定 ConsumeQueue，则只有等待获取到锁才能尝试消费
                 } else {
 
                     // 判断是否被废弃，废弃直接结束消费

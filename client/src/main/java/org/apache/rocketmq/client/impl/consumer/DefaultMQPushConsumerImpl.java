@@ -325,8 +325,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         // 并发消费
         if (!this.consumeOrderly) {
 
-            // 已经从 processQueue 对应的 MessageQueue 中拉取消息的最大消息进度和最小消息进度差值达到 并发消息消费时处理队列最大跨度（默认 2000）时，触发流控
-            // 延时 50ms 后再拉取消息
+            // 已经从 processQueue 对应的 MessageQueue 中拉取消息的最大消息进度和最小消息进度差值达到 并发消息消费时处理队列最大跨度（默认 2000）时，触发流控，延时 50ms 后再拉取消息
+            // todo 主要针对消费进度小的消息迟迟消费不了的情况
             if (processQueue.getMaxSpan() > this.defaultMQPushConsumer.getConsumeConcurrentlyMaxSpan()) {
                 this.executePullRequestLater(pullRequest, PULL_TIME_DELAY_MILLS_WHEN_FLOW_CONTROL);
                 if ((queueMaxSpanFlowControlTimes++ % 1000) == 0) {

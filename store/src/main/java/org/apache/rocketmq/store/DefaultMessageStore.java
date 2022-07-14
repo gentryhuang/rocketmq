@@ -2540,7 +2540,7 @@ public class DefaultMessageStore implements MessageStore {
      * ConsumeQueue 刷盘线程任务
      * todo 说明：
      * 1 刷盘 ConsumeQueue 类似 CommitLog ，但是 ConsumeQueue 只有异步刷盘
-     * 2 ConsumeQueue 刷盘任务基本和 CommitLog 异步刷盘一致，可参考 CommtLog 刷盘逻辑
+     * 2 ConsumeQueue 刷盘任务基本和 CommitLog 异步刷盘一致，可参考 CommitLog 刷盘逻辑
      *
      * @see CommitLog.FlushRealTimeService
      * <p>
@@ -2591,7 +2591,7 @@ public class DefaultMessageStore implements MessageStore {
                 }
             }
 
-            // todo flush 时保存 check point
+            // todo 执行 checkpoint 文件的刷盘动作
             if (0 == flushConsumeQueueLeastPages) {
                 if (logicsMsgTimestamp > 0) {
                     DefaultMessageStore.this.getStoreCheckpoint().setLogicsMsgTimestamp(logicsMsgTimestamp);

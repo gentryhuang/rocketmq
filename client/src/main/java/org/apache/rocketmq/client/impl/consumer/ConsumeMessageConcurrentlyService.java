@@ -101,7 +101,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         this.defaultMQPushConsumer = this.defaultMQPushConsumerImpl.getDefaultMQPushConsumer();
         this.consumerGroup = this.defaultMQPushConsumer.getConsumerGroup();
         /**
-         * 消费消息任务队列 - 无界队列
+         * todo 消费消息任务队列 - 无界队列
          */
         this.consumeRequestQueue = new LinkedBlockingQueue<Runnable>();
 
