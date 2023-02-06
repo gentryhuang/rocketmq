@@ -364,13 +364,15 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                                 || (opMsg != null && (opMsg.get(opMsg.size() - 1).getBornTimestamp() - startTime > transactionTimeout))
                                 || (valueOfCurrentMinusBorn <= -1);
 
+                      //  说下愚见，因为在迁移的过程中是同步完成的，即使挂了的话，也只是迁移部分 slot 的部分 key，或者迁移完了所部 key。
+
                         // 需要回查
                         if (isNeedCheck) {
 
                             /**
                              * todo 特别说明：
-                             * 1 为了保证回查成功，需要将半消息重新填入 half 队列中；
-                             * 2 发送具体的事务回查机制，这里用一个线程池来异步发送回查消息，为了回查进度保存的简化，这里只要发送了回查消息，当前回查进度会向前推动，如果回查失败，上一步骤新增的消息将可以再次发送回查消息。
+                             * todo 1 为了保证回查成功，需要将半消息重新填入 half 队列中，比如生产组下的生产者都挂了，那么肯定没法回查，这时重新投放就可以保证相对安全。（一方面，回查有时间控制、另一方面不达到 15 次就可以不断回查）
+                             * todo 2 发送具体的事务回查机制，这里用一个线程池来异步发送回查消息，为了回查进度保存的简化，[这里只要发送了回查消息，当前回查进度会向前推动]，如果回查失败，上一步骤新增的消息将可以再次发送回查消息。
                              *   那如果回查消息发送成功，那会不会下一次又重复发送回查消息呢？
                              *   答：这个可以根据OP队列中的消息来判断是否重复，如果回查消息发送成功并且消息服务器完成提交或回滚操作，这条消息会发送到OP队列中，
                              *   然后首先会通过fillOpRemoveMap根据 op 中记录的处理进度获取一批已处理的 half 消息，这样就可以过滤掉了。
@@ -381,7 +383,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
 
                             // todo 事务回查，确认状态，其中 msgExt 中的 CommitLog 偏移量和 ConsumeQueue 逻辑偏移量都是最新的，是上面 putBackHalfMsgQueue 方法执行的结果
                             // todo 因为回查的方式是 oneway 方式，可能会失败，因此上面的重写入 msgExt 是必要的，在写入消息的时候 TRANSACTION_CHECK_TIMES 回查次数也会写入；此外，
-                            // 如果这个新消息的回查成功，那么之前的 half 消息也回认为是成功的，原因在于 op 消息中记录的是这个新消息的逻辑偏移量，只要 half 消息的逻辑偏移量 < op 消息中存储的逻辑偏移量，
+                            // 如果这个新消息的回查成功，那么之前的 half 消息也会认为是成功的，原因在于 op 消息中记录的是这个新消息的逻辑偏移量，只要 half 消息的逻辑偏移量 < op 消息中存储的逻辑偏移量，
                             // 就可以认为 half 消息已经处理过了。
                             listener.resolveHalfMsg(msgExt);
 

@@ -89,7 +89,7 @@ public abstract class AbstractTransactionalMessageCheckListener {
         String groupId = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
 
         /**
-         * 根据生产者组获取任意一个生产者，通过与其连接发送事务回查消息，回查消息的请求者为【Broker服务器】，接收者为(client，具体为消息生产者)。
+         * 根据生产者组获取任意一个连接可用的生产者，通过与其连接发送事务回查消息，回查消息的请求者为【Broker服务器】，接收者为(client，具体为消息生产者)。
          * todo 生产方信息是心跳上报到 Broker 的
          *
          *  向 Producer 发送消息
@@ -98,6 +98,9 @@ public abstract class AbstractTransactionalMessageCheckListener {
         Channel channel = brokerController.getProducerManager().getAvailableChannel(groupId);
         if (channel != null) {
             brokerController.getBroker2Client().checkProducerTransactionState(groupId, channel, checkTransactionStateRequestHeader, msgExt);
+
+            // 全部宕机就没法回查了
+            // todo RocketMQ 为了保证尽可能能够查询，在回查前会先把要回查的 half 消息重复写入到 半消息队列中，这样就可以保证即使回查失败也没关系，只要不超过最大回查次数 15 ，就会一直重试
         } else {
             LOGGER.warn("Check transaction failed, channel is null. groupId={}", groupId);
         }

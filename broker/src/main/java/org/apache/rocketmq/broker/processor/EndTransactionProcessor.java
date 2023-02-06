@@ -245,6 +245,7 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
     private RemotingCommand checkPrepareMessage(MessageExt msgExt, EndTransactionRequestHeader requestHeader) {
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
         if (msgExt != null) {
+            // 半消息发送方所在的生产者组
             final String pgroupRead = msgExt.getProperty(MessageConst.PROPERTY_PRODUCER_GROUP);
             if (!pgroupRead.equals(requestHeader.getProducerGroup())) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);
@@ -252,12 +253,14 @@ public class EndTransactionProcessor extends AsyncNettyRequestProcessor implemen
                 return response;
             }
 
+            // 半消息在消息队列中的偏移量
             if (msgExt.getQueueOffset() != requestHeader.getTranStateTableOffset()) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);
                 response.setRemark("The transaction state table offset wrong");
                 return response;
             }
 
+            // 半消息在 CommitLog 中的偏移量
             if (msgExt.getCommitLogOffset() != requestHeader.getCommitLogOffset()) {
                 response.setCode(ResponseCode.SYSTEM_ERROR);
                 response.setRemark("The commit log offset wrong");
